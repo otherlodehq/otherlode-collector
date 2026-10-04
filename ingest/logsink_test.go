@@ -12,12 +12,13 @@ import (
 	"github.com/otherlodehq/otherlode-collector/ingest"
 )
 
-// TestLogSink_LogsTheTestRunFlag covers the test_run attribute on each of
-// the three payloads' log lines (agent ADR 0050).
-func TestLogSink_LogsTheTestRunFlag(t *testing.T) {
+// TestLogSink_LogsTheTestRunFlagAndAgentVersion covers the test_run
+// attribute (agent ADR 0050) and the agent_version attribute (agent ADR 0054)
+// on each of the three payloads' log lines.
+func TestLogSink_LogsTheTestRunFlagAndAgentVersion(t *testing.T) {
 	var buf bytes.Buffer
 	sink := ingest.NewLogSink(slog.New(slog.NewJSONHandler(&buf, nil)))
-	resource := &otherlodepb.ResourceAttributes{ServiceName: "svc", ServiceInstanceId: "unit-tests", RunId: "run-1", TestRun: true}
+	resource := &otherlodepb.ResourceAttributes{ServiceName: "svc", ServiceInstanceId: "unit-tests", RunId: "run-1", TestRun: true, AgentVersion: "1.2.3"}
 	ctx := context.Background()
 
 	if err := sink.AcceptDeltaBatch(ctx, &otherlodepb.DeltaBatch{Resource: resource}); err != nil {
@@ -41,6 +42,9 @@ func TestLogSink_LogsTheTestRunFlag(t *testing.T) {
 		}
 		if record["test_run"] != true {
 			t.Errorf("log line %s has test_run %v, want true", line, record["test_run"])
+		}
+		if record["agent_version"] != "1.2.3" {
+			t.Errorf("log line %s has agent_version %v, want 1.2.3", line, record["agent_version"])
 		}
 	}
 }
