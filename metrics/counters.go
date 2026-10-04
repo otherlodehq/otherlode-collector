@@ -66,4 +66,10 @@ var (
 	// replaced. Its "payload" is "manifest" or "static_baseline".
 	RedactedLiterals = NewCounter("otherlode_collector_redacted_literals_total",
 		"String literal parts replaced by the redaction processor.", "payload")
+
+	// FieldsStripped counts payloads from which the redaction processor
+	// dropped at least one unknown field and so set fields_stripped. Its
+	// "payload" is "deltas", "manifest" or "static_baseline".
+	FieldsStripped = NewCounter("otherlode_collector_fields_stripped_total",
+		"Payloads that lost an unknown field to the redaction processor and were marked fields_stripped.", "payload")
 )

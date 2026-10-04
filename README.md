@@ -333,6 +333,7 @@ wildcard), exiting 0 or 1, and never through a proxy. The image's
 | `otherlode_collector_environment_mismatch_total` | `payload` | The agent's environment differed from the collector's configured one (see [Environment](#environment)); `payload` is `deltas`, `manifest`, or `static_baseline` |
 | `otherlode_collector_namespace_mismatch_total` | `payload` | The agent's service namespace differed from the collector's configured one (see [Namespace](#namespace)); `payload` is `deltas`, `manifest`, or `static_baseline` |
 | `otherlode_collector_redacted_literals_total` | `payload` | String literal parts replaced by the redaction processor (see [Redaction](#redaction)); `payload` is `manifest` or `static_baseline` |
+| `otherlode_collector_fields_stripped_total` | `payload` | Payloads that lost an unknown field to the redaction processor and were marked `fields_stripped` (see [Redaction](#redaction)); `payload` is `deltas`, `manifest` or `static_baseline` |
 
 `payload` is `deltas`, `manifest`, or `static_baseline`. The dropped
 counter is the one to alert on: every increment is agent data that never
@@ -577,6 +578,18 @@ collector forwards a test run as an ordinary run in the `test`
 environment. If the test JVM names an environment, or the collector
 stamps its own with `upsert`, the run lands in that environment instead.
 So update the collector before an agent sets `testRun`.
+
+A payload that loses at least one field this way is marked. The collector
+sets `fields_stripped` on the payload's resource and never clears it. The
+server keeps the data but makes no never-hit or cluster claim from a run
+that carried the mark, and labels the run as sent through a collector
+older than its agent (agent ADR 0054, collector
+[ADR 0005](docs/adr/0005-a-collector-that-strips-unknown-fields-marks-the-payload.md)).
+`otherlode_collector_fields_stripped_total` counts the marked payloads. The
+collector also logs one `WARNING` per run id, naming the namespace,
+service, instance, run id and `agent_version`. The fix is to upgrade the
+collector to the agent's version. With redaction off nothing is dropped
+and nothing is marked.
 
 While redaction is on, a condition part of any kind other than code or
 placeholder is treated as a string literal. A newer agent's unknown

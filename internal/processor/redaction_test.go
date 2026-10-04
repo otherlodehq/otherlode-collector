@@ -1,9 +1,13 @@
 package processor
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"regexp"
+	"strconv"
+	"strings"
 	"testing"
 
 	otherlodepb "buf.build/gen/go/otherlode/otherlode/protocolbuffers/go/otherlode/v1"
@@ -364,5 +368,172 @@ func TestRedactionConfig_Enabled(t *testing.T) {
 	}
 	if !blocked(t, "x").Enabled() {
 		t.Fatal("config with a blocked pattern reports off, want enabled")
+	}
+}
+
+// strippedCase builds one payload type, with or without an unknown field
+// on a nested message, and reads back the resource that reached next.
+type strippedCase struct {
+	name    string
+	payload string
+	send    func(t *testing.T, r *Redaction, run string, withUnknown, flagged bool) *otherlodepb.ResourceAttributes
+}
+
+func strippedCases() []strippedCase {
+	prep := func(run string, flagged bool) *otherlodepb.ResourceAttributes {
+		res := resourceFor(run)
+		res.SetAgentVersion("1.2.3")
+		res.SetFieldsStripped(flagged)
+		return res
+	}
+	return []strippedCase{
+		{"delta batch", "deltas", func(t *testing.T, r *Redaction, run string, withUnknown, flagged bool) *otherlodepb.ResourceAttributes {
+			delta := &otherlodepb.ProbeDelta{ClassId: 7, HitsTotal: 3}
+			if withUnknown {
+				delta.ProtoReflect().SetUnknown(unknownBytes())
+			}
+			next := r.next.(*recordingSink)
+			batch := &otherlodepb.DeltaBatch{Resource: prep(run, flagged), Deltas: []*otherlodepb.ProbeDelta{delta}}
+			if err := r.AcceptDeltaBatch(context.Background(), batch); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			return next.deltaBatches[len(next.deltaBatches)-1].GetResource()
+		}},
+		{"manifest", "manifest", func(t *testing.T, r *Redaction, run string, withUnknown, flagged bool) *otherlodepb.ResourceAttributes {
+			m := manifestWith()
+			m.Resource = prep(run, flagged)
+			if withUnknown {
+				m.GetProbes()[0].ProtoReflect().SetUnknown(unknownBytes())
+			}
+			next := r.next.(*recordingSink)
+			if err := r.AcceptManifest(context.Background(), m); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			return next.manifests[len(next.manifests)-1].GetResource()
+		}},
+		{"static baseline", "static_baseline", func(t *testing.T, r *Redaction, run string, withUnknown, flagged bool) *otherlodepb.ResourceAttributes {
+			b := baselineWith()
+			b.Resource = prep(run, flagged)
+			if withUnknown {
+				b.GetDeclaredClasses()[0].GetMethods()[0].ProtoReflect().SetUnknown(unknownBytes())
+			}
+			next := r.next.(*recordingSink)
+			if err := r.AcceptStaticBaseline(context.Background(), b); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			return next.baselines[len(next.baselines)-1].GetResource()
+		}},
+	}
+}
+
+func TestRedaction_UnknownFieldStripped_SetsFieldsStripped(t *testing.T) {
+	for _, c := range strippedCases() {
+		t.Run(c.name, func(t *testing.T) {
+			r := NewRedaction(&recordingSink{}, RedactionConfig{AllLiterals: true}, nil)
+			res := c.send(t, r, "run-1", true, false)
+			if !res.GetFieldsStripped() {
+				t.Fatal("fields_stripped not set on a payload that lost a field")
+			}
+		})
+	}
+}
+
+func TestRedaction_NoUnknownField_LeavesFieldsStrippedUnset(t *testing.T) {
+	for _, c := range strippedCases() {
+		t.Run(c.name, func(t *testing.T) {
+			r := NewRedaction(&recordingSink{}, RedactionConfig{AllLiterals: true}, nil)
+			res := c.send(t, r, "run-1", false, false)
+			if res.GetFieldsStripped() {
+				t.Fatal("fields_stripped set on a payload that lost nothing")
+			}
+		})
+	}
+}
+
+func TestRedaction_AlreadyFlaggedPayload_StaysFlagged(t *testing.T) {
+	for _, c := range strippedCases() {
+		t.Run(c.name, func(t *testing.T) {
+			r := NewRedaction(&recordingSink{}, RedactionConfig{AllLiterals: true}, nil)
+			res := c.send(t, r, "run-1", false, true)
+			if !res.GetFieldsStripped() {
+				t.Fatal("fields_stripped cleared on an already flagged payload")
+			}
+		})
+	}
+}
+
+func TestRedaction_UnknownFieldAndNilResource_PassesWithoutPanic(t *testing.T) {
+	next := &recordingSink{}
+	r := NewRedaction(next, RedactionConfig{AllLiterals: true}, nil)
+	batch := &otherlodepb.DeltaBatch{}
+	batch.ProtoReflect().SetUnknown(unknownBytes())
+	if err := r.AcceptDeltaBatch(context.Background(), batch); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if batch.GetResource() != nil {
+		t.Fatal("a resource was created for a payload that had none")
+	}
+}
+
+func TestRedaction_StrippedPayloads_WarnOncePerRun(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	r := NewRedaction(&recordingSink{}, RedactionConfig{AllLiterals: true}, logger)
+	cases := strippedCases()
+
+	cases[0].send(t, r, "run-a", true, false)
+	cases[1].send(t, r, "run-a", true, false)
+	if got := strings.Count(buf.String(), "level=WARN"); got != 1 {
+		t.Fatalf("%d warnings for two stripped payloads of one run, want 1:\n%s", got, buf.String())
+	}
+	out := buf.String()
+	for _, want := range []string{"run-a", "svc", "i1", "agent_version=1.2.3"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("warning lacks %q:\n%s", want, out)
+		}
+	}
+
+	cases[2].send(t, r, "run-b", true, false)
+	if got := strings.Count(buf.String(), "level=WARN"); got != 2 {
+		t.Fatalf("%d warnings after a second run, want 2:\n%s", got, buf.String())
+	}
+
+	cases[0].send(t, r, "run-c", false, false)
+	if got := strings.Count(buf.String(), "level=WARN"); got != 2 {
+		t.Fatalf("an unstripped payload logged a warning:\n%s", buf.String())
+	}
+}
+
+func TestRedaction_WarnedRuns_BoundedAndCleared(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	r := NewRedaction(&recordingSink{}, RedactionConfig{AllLiterals: true}, logger)
+	c := strippedCases()[0]
+	for i := 0; i < maxWarnedRuns+1; i++ {
+		c.send(t, r, "run-"+strconv.Itoa(i), true, false)
+	}
+	r.mu.Lock()
+	n := len(r.warnedRuns)
+	r.mu.Unlock()
+	if n > maxWarnedRuns {
+		t.Fatalf("warned set holds %d entries, bound is %d", n, maxWarnedRuns)
+	}
+}
+
+func TestRedaction_StrippedPayloads_CounterIncrementsPerPayload(t *testing.T) {
+	before := map[string]int64{}
+	for _, c := range strippedCases() {
+		before[c.payload] = metrics.FieldsStripped.Value(c.payload)
+	}
+	r := NewRedaction(&recordingSink{}, RedactionConfig{AllLiterals: true}, nil)
+	for _, c := range strippedCases() {
+		c.send(t, r, "run-1", true, false)
+		c.send(t, r, "run-1", true, false)
+		c.send(t, r, "run-1", false, false)
+	}
+	for _, c := range strippedCases() {
+		if got := metrics.FieldsStripped.Value(c.payload) - before[c.payload]; got != 2 {
+			t.Errorf("%s counter increased by %d, want 2", c.payload, got)
+		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"regexp"
+	"sync"
 
 	otherlodepb "buf.build/gen/go/otherlode/otherlode/protocolbuffers/go/otherlode/v1"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -44,14 +45,25 @@ func (c RedactionConfig) Enabled() bool {
 //
 // It also drops unknown fields from every message of every payload. A
 // field the collector's bindings do not know could carry a literal that
-// this processor cannot see.
+// this processor cannot see. A dropped field can also carry meaning the
+// server needs, so when a payload loses at least one, the processor sets
+// fields_stripped on the payload's resource. It never clears the flag.
+// It counts each such payload in otherlode_collector_fields_stripped_total
+// and logs one WARNING per run id. A payload with no resource has nowhere
+// to carry the flag and passes unmarked. See ADR 0005.
 //
 // Like Environment, it changes the decoded message in place.
 type Redaction struct {
 	next   ingest.Sink
 	cfg    RedactionConfig
 	logger *slog.Logger
+
+	mu         sync.Mutex
+	warnedRuns map[string]struct{}
 }
+
+// maxWarnedRuns bounds the set of run ids the processor has warned about.
+const maxWarnedRuns = 10000
 
 var _ ingest.Sink = (*Redaction)(nil)
 
@@ -62,30 +74,33 @@ func NewRedaction(next ingest.Sink, cfg RedactionConfig, logger *slog.Logger) *R
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Redaction{next: next, cfg: cfg, logger: logger}
+	return &Redaction{next: next, cfg: cfg, logger: logger, warnedRuns: make(map[string]struct{})}
 }
 
-// AcceptDeltaBatch drops the batch's unknown fields, then passes the
-// batch to next. A delta batch holds no condition parts.
+// AcceptDeltaBatch drops the batch's unknown fields, marks the batch if
+// it lost any, then passes it to next. A delta batch holds no condition
+// parts.
 func (r *Redaction) AcceptDeltaBatch(ctx context.Context, batch *otherlodepb.DeltaBatch) error {
-	dropUnknown(batch.ProtoReflect())
+	r.markStripped(batch.GetResource(), "deltas", dropUnknown(batch.ProtoReflect()))
 	return r.next.AcceptDeltaBatch(ctx, batch)
 }
 
 // AcceptManifest redacts the literals in the branch sites of every probe,
-// drops unknown fields, then passes the manifest to next.
+// drops unknown fields, marks the manifest if it lost any, then passes it
+// to next.
 func (r *Redaction) AcceptManifest(ctx context.Context, manifest *otherlodepb.ProbeManifest) error {
 	n := 0
 	for _, probe := range manifest.GetProbes() {
 		n += r.redactSites(probe.GetBranchSites())
 	}
 	r.record(manifest.GetResource(), "manifest", n)
-	dropUnknown(manifest.ProtoReflect())
+	r.markStripped(manifest.GetResource(), "manifest", dropUnknown(manifest.ProtoReflect()))
 	return r.next.AcceptManifest(ctx, manifest)
 }
 
 // AcceptStaticBaseline redacts the literals in the branch sites of every
-// declared method, drops unknown fields, then passes the baseline to next.
+// declared method, drops unknown fields, marks the baseline if it lost
+// any, then passes it to next.
 func (r *Redaction) AcceptStaticBaseline(ctx context.Context, baseline *otherlodepb.StaticBaseline) error {
 	n := 0
 	for _, class := range baseline.GetDeclaredClasses() {
@@ -94,7 +109,7 @@ func (r *Redaction) AcceptStaticBaseline(ctx context.Context, baseline *otherlod
 		}
 	}
 	r.record(baseline.GetResource(), "static_baseline", n)
-	dropUnknown(baseline.ProtoReflect())
+	r.markStripped(baseline.GetResource(), "static_baseline", dropUnknown(baseline.ProtoReflect()))
 	return r.next.AcceptStaticBaseline(ctx, baseline)
 }
 
@@ -156,18 +171,60 @@ func (r *Redaction) record(res *otherlodepb.ResourceAttributes, payload string, 
 	)
 }
 
+// markStripped sets fields_stripped on res when dropped is true, counts
+// the payload and warns once per run id. It does nothing when dropped is
+// false, and it leaves a nil res alone.
+func (r *Redaction) markStripped(res *otherlodepb.ResourceAttributes, payload string, dropped bool) {
+	if !dropped || res == nil {
+		return
+	}
+	res.SetFieldsStripped(true)
+	metrics.FieldsStripped.Inc(payload)
+	if !r.firstStripForRun(res.GetRunId()) {
+		return
+	}
+	r.logger.Warn("dropped fields this collector does not know; its bindings are older than the agent's, so the server withholds findings from this run; upgrade the collector to the agent's version",
+		"namespace", res.GetServiceNamespace(),
+		"service", res.GetServiceName(),
+		"instance", res.GetServiceInstanceId(),
+		"run", res.GetRunId(),
+		"agent_version", res.GetAgentVersion(),
+		"payload", payload,
+	)
+}
+
+// firstStripForRun reports whether run has not been warned about, and
+// remembers it. The set is cleared when it reaches maxWarnedRuns.
+func (r *Redaction) firstStripForRun(run string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.warnedRuns[run]; ok {
+		return false
+	}
+	if len(r.warnedRuns) >= maxWarnedRuns {
+		clear(r.warnedRuns)
+	}
+	r.warnedRuns[run] = struct{}{}
+	return true
+}
+
 // dropUnknown clears the unknown fields of m and of every message
-// nested in it, through singular, repeated and map fields.
-func dropUnknown(m protoreflect.Message) {
+// nested in it, through singular, repeated and map fields. It reports
+// whether it cleared any.
+func dropUnknown(m protoreflect.Message) bool {
+	dropped := false
 	if len(m.GetUnknown()) > 0 {
 		m.SetUnknown(nil)
+		dropped = true
 	}
 	m.Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
 		switch {
 		case fd.IsMap():
 			if fd.MapValue().Message() != nil {
 				v.Map().Range(func(_ protoreflect.MapKey, mv protoreflect.Value) bool {
-					dropUnknown(mv.Message())
+					if dropUnknown(mv.Message()) {
+						dropped = true
+					}
 					return true
 				})
 			}
@@ -175,12 +232,17 @@ func dropUnknown(m protoreflect.Message) {
 			if fd.Message() != nil {
 				list := v.List()
 				for i := 0; i < list.Len(); i++ {
-					dropUnknown(list.Get(i).Message())
+					if dropUnknown(list.Get(i).Message()) {
+						dropped = true
+					}
 				}
 			}
 		case fd.Message() != nil:
-			dropUnknown(v.Message())
+			if dropUnknown(v.Message()) {
+				dropped = true
+			}
 		}
 		return true
 	})
+	return dropped
 }
