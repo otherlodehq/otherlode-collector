@@ -622,9 +622,6 @@ func TestHandleStaticBaseline_ValidPayload_ReachesSink(t *testing.T) {
 				Methods:   []*otherlodepb.DeclaredMethod{{MethodName: "bar", MethodDescriptor: "()V"}},
 			},
 		},
-		StaticallyUnsafeClasses: []*otherlodepb.StaticallyUnsafeClass{
-			{ClassName: "com.example.Unsafe", Reason: "annotation not legal on a type"},
-		},
 		UnreadableClasses: []*otherlodepb.UnreadableClass{
 			{ClassName: "com.example.Unreadable", Reason: "corrupt class file"},
 		},

@@ -84,7 +84,6 @@ func (s *LogSink) AcceptStaticBaseline(_ context.Context, baseline *otherlodepb.
 		"declared_classes", len(baseline.GetDeclaredClasses()),
 		"declared_call_edges", declaredCallEdgeCount(baseline.GetDeclaredClasses()),
 		"declared_referenced_classes", declaredReferencedClassCount(baseline.GetDeclaredClasses()),
-		"statically_unsafe_classes", len(baseline.GetStaticallyUnsafeClasses()),
 		"unreadable_classes", len(baseline.GetUnreadableClasses()),
 		"unprobed_classes", len(baseline.GetUnprobedClasses()),
 	)
