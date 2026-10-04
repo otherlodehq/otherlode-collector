@@ -161,7 +161,7 @@ func main() {
 
 	serveErr := make(chan error, 1)
 	go func() {
-		logger.Info("otherlode-collector listening", "addr", addr)
+		logger.Info("otherlode-collector listening", "addr", addr, "version", version)
 		serveErr <- srv.ListenAndServe()
 	}()
 
