@@ -20,3 +20,7 @@ When the redaction processor removes at least one unknown field from a payload, 
 
 - An unknown enum number is not an unknown field and is never stripped, so it does not set the flag; ADR 0001's fail-closed rule for literal kinds is unchanged.
 - With redaction off, nothing is stripped and nothing is flagged: Go protobuf forwards unknown fields as it received them.
+
+## Amended on 2026-10-05: the latest collector, not the agent's version
+
+The collector is versioned on its own (ADR 0006), so the fix a stripped run points to is upgrading to the latest collector, which serves every older agent. The WARNING and the README say that instead of naming the agent's version.
