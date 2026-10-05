@@ -183,7 +183,7 @@ func (r *Redaction) markStripped(res *otherlodepb.ResourceAttributes, payload st
 	if !r.firstStripForRun(res.GetRunId()) {
 		return
 	}
-	r.logger.Warn("dropped fields this collector does not know; its bindings are older than the agent's, so the server withholds findings from this run; upgrade the collector to the agent's version",
+	r.logger.Warn("dropped fields this collector does not know; its bindings are older than the agent's, so the server withholds findings from this run; upgrade to the latest collector",
 		"namespace", res.GetServiceNamespace(),
 		"service", res.GetServiceName(),
 		"instance", res.GetServiceInstanceId(),

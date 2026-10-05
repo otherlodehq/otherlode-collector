@@ -1,7 +1,7 @@
 package main
 
-// version is this collector's release number. The agent, its testkit and
-// the collector are released together under one number (agent ADR 0057),
-// so a collector at least as new as its agent is the one to run. A
-// release tag vX.Y.Z must match it without the -SNAPSHOT suffix.
+// version is this collector's release number. The collector is versioned
+// on its own, apart from the agent (ADR 0006), and a newer collector serves
+// every older agent. A release tag vX.Y.Z must match it without the
+// -SNAPSHOT suffix.
 const version = "0.1.0-SNAPSHOT"

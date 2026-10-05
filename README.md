@@ -229,12 +229,21 @@ OTHERLODE_COLLECTOR_INSECURE_NO_AUTH=1 go run ./cmd/otherlode-collector
 ```
 
 Or as a container. The same fail-closed rule applies, so the token (or
-the explicit opt-out) has to be passed in:
+the explicit opt-out) has to be passed in. Each release publishes an image
+for `linux/amd64` and `linux/arm64`, tagged with its version, its
+`major.minor` and `latest`:
 
 ```
-docker build -t otherlode-collector .
-docker run --rm -p 4319:4319 -e OTHERLODE_COLLECTOR_AUTH_TOKEN=s3cret otherlode-collector
+docker run --rm -p 4319:4319 -e OTHERLODE_COLLECTOR_AUTH_TOKEN=s3cret ghcr.io/otherlodehq/otherlode-collector:latest
 ```
+
+or built from this repository with `docker build -t otherlode-collector .`.
+Outside a container, `go install github.com/otherlodehq/otherlode-collector/cmd/otherlode-collector@latest`
+installs the binary.
+
+The collector is versioned on its own, apart from the agent, and a newer
+collector serves every older agent: run the latest release
+([ADR 0006](docs/adr/0006-the-collector-is-versioned-on-its-own.md)).
 
 ### TLS
 
@@ -587,8 +596,8 @@ older than its agent (agent ADR 0054, collector
 [ADR 0005](docs/adr/0005-a-collector-that-strips-unknown-fields-marks-the-payload.md)).
 `otherlode_collector_fields_stripped_total` counts the marked payloads. The
 collector also logs one `WARNING` per run id, naming the namespace,
-service, instance, run id and `agent_version`. The fix is to upgrade the
-collector to the agent's version. With redaction off nothing is dropped
+service, instance, run id and `agent_version`. The fix is to upgrade to the
+latest collector. With redaction off nothing is dropped
 and nothing is marked.
 
 While redaction is on, a condition part of any kind other than code or
