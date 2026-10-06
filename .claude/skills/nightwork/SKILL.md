@@ -124,9 +124,18 @@ Never, during a nightwork run:
 - force-push, rewrite history, or delete a branch;
 - add a dependency or change CI unless the brief says to;
 - send anything outside the repos named in the plan;
-- weaken, skip or delete a test to make a build pass.
+- weaken, skip or delete a test that fails for a reason the brief did not
+  intend.
 
 When the run needs one of these, park the chunk and ask in the report.
+
+A test that pins behaviour the brief changes on purpose is different. Update
+it to the new behaviour, or delete it when the behaviour it pins is gone.
+Name each such test, and the decision in the brief that retired it, in the
+chunk's commit message and in the run log, so the report lists it under
+"Forks and decisions". Before you change a failing test, decide which case it
+is. If you cannot tie the failure to a decision in the brief, treat it as a
+finding: fix the code, or park the chunk.
 
 ## 6. Write the report
 
