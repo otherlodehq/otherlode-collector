@@ -165,8 +165,8 @@ jobs:
 
   # Opens a pull request on otherlode.dev that copies docs/site/ into its
   # /docs (otherlode.dev ADR 0001). It does nothing until the repository
-  # secret OTHERLODE_DEV_DOCS_TOKEN exists. The token can write only to
-  # otherlode.dev, and only this job sees it.
+  # secret OTHERLODE_DEV_DOCS_TOKEN exists. Scope the token to
+  # otherlode.dev alone. Only this job reads it.
   docs:
     name: sync docs to otherlode.dev
     needs: github-release
