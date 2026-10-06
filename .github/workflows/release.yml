@@ -162,3 +162,45 @@ jobs:
           done <<< "$existing"
 
           gh release create "$TAG" --verify-tag --title "otherlode-collector $version" --notes-file release-notes.md
+
+  # Opens a pull request on otherlode.dev that copies docs/site/ into its
+  # /docs (otherlode.dev ADR 0001). It does nothing until the repository
+  # secret OTHERLODE_DEV_DOCS_TOKEN exists. The token can write only to
+  # otherlode.dev, and only this job sees it.
+  docs:
+    name: sync docs to otherlode.dev
+    needs: github-release
+    runs-on: ubuntu-latest
+    concurrency:
+      group: docs-sync
+      cancel-in-progress: false
+    steps:
+      - name: Check for the sync token
+        id: token
+        env:
+          TOKEN: ${{ secrets.OTHERLODE_DEV_DOCS_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::notice::OTHERLODE_DEV_DOCS_TOKEN is not set, so the docs are not synced."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.token.outputs.present == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: source
+          persist-credentials: false
+      - if: steps.token.outputs.present == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: otherlodehq/otherlode.dev
+          token: ${{ secrets.OTHERLODE_DEV_DOCS_TOKEN }}
+          path: site
+      - name: Open the pull request
+        if: steps.token.outputs.present == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.OTHERLODE_DEV_DOCS_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        working-directory: site
+        run: scripts/sync-docs.sh collector "$GITHUB_WORKSPACE/source/docs/site" "otherlode-collector $TAG"

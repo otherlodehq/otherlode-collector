@@ -24,3 +24,10 @@ sentences, one main clause each, plain common words over Latinate or
 jargon alternatives, no idioms. Favor the concrete verb ("this rejects
 bad input") over the abstract nominalization ("this handles rejection of
 invalid input").
+
+## Docs
+
+Customer docs for this repo live in `docs/site/`. They are published at
+otherlode.dev/docs (otherlode.dev ADR 0001). A change to what a customer
+sees or sets updates its page there, in the same pull request.
+`docs/site/README.md` has the page format.

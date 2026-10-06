@@ -1,0 +1,31 @@
+# Customer docs
+
+The pages in this folder are the "Collector" section of the docs at
+https://otherlode.dev/docs. After a `v*.*.*` tag's release, the `docs`
+job in `.github/workflows/release.yml` copies this folder into
+`otherlode.dev` at `src/content/docs/collector/` and opens a pull
+request there. otherlode.dev ADR 0001 has the reasons.
+
+A change that alters what a customer sees or sets should change its
+page here, in the same pull request. Operator and contributor material
+stays in the README.
+
+A page is a Markdown file with this frontmatter:
+
+```md
+---
+title: Page title
+description: One sentence for search results and link previews.
+order: 10
+---
+```
+
+`title` becomes the page's `h1`, so the Markdown starts at `##`. `order`
+sorts the pages in this section, lowest first. The file name gives the
+URL: `attach.md` is `/docs/collector/attach`. A file whose name starts
+with `_` is not a page, and this README is not copied.
+
+The site's CSP allows no inline script or style, so a page must not use
+raw HTML with `<script>`, `<style>` or `style=`. The site's build fails
+on them. To preview a page, copy it into a checkout of `otherlode.dev`
+and run `npm run dev` there.
