@@ -124,18 +124,34 @@ Never, during a nightwork run:
 - force-push, rewrite history, or delete a branch;
 - add a dependency or change CI unless the brief says to;
 - send anything outside the repos named in the plan;
-- weaken, skip or delete a test that fails for a reason the brief did not
-  intend.
+- weaken, skip or delete a test without first investigating it as described
+  below.
 
 When the run needs one of these, park the chunk and ask in the report.
 
-A test that pins behaviour the brief changes on purpose is different. Update
-it to the new behaviour, or delete it when the behaviour it pins is gone.
-Name each such test, and the decision in the brief that retired it, in the
-chunk's commit message and in the run log, so the report lists it under
-"Forks and decisions". Before you change a failing test, decide which case it
-is. If you cannot tie the failure to a decision in the brief, treat it as a
-finding: fix the code, or park the chunk.
+### A failing test
+
+Investigate a failing test before you change anything. Read what it asserts,
+find out why it fails, and write the determination in the run log: what the
+test pins, why it fails, the evidence, and which of these three cases it is.
+
+1. **The brief changes the behaviour on purpose.** Update the test to the new
+   behaviour, or delete it when the behaviour it pins is gone. The evidence
+   is the decision in the brief.
+2. **The test pinned the wrong behaviour all along.** Rewrite it to pin the
+   right behaviour, or delete it when there is no right behaviour to pin. The
+   evidence is a source that says what the right behaviour is: the design
+   notes, an ADR, a spec, or the library or framework source. The test's own
+   name or comment is not evidence.
+3. **The code is wrong.** Neither of the above holds, so the failure is a
+   finding. Fix the code, or park the chunk.
+
+When you cannot tell which case it is, treat it as case 3.
+
+For cases 1 and 2, name each test and its determination in the chunk's
+commit message. The report lists every one under "Forks and decisions", and
+marks each case 2 for the user to confirm, since it rests on your judgement
+rather than on the brief.
 
 ## 6. Write the report
 
