@@ -48,3 +48,26 @@ func TestLogSink_LogsTheTestRunFlagAndAgentVersion(t *testing.T) {
 		}
 	}
 }
+
+// TestLogSink_LogsTheFailedClassCount covers the failed_classes attribute
+// on a manifest's log line (agent ADR 0065).
+func TestLogSink_LogsTheFailedClassCount(t *testing.T) {
+	var buf bytes.Buffer
+	sink := ingest.NewLogSink(slog.New(slog.NewJSONHandler(&buf, nil)))
+	manifest := &otherlodepb.ProbeManifest{
+		Resource:      &otherlodepb.ResourceAttributes{ServiceName: "svc", ServiceInstanceId: "i1", RunId: "run-1"},
+		FailedClasses: []*otherlodepb.FailedClass{{ClassName: "com.example.A"}, {ClassName: "com.example.B"}},
+	}
+
+	if err := sink.AcceptManifest(context.Background(), manifest); err != nil {
+		t.Fatalf("accept manifest: %v", err)
+	}
+
+	var record map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &record); err != nil {
+		t.Fatalf("decode log line %s: %v", buf.String(), err)
+	}
+	if record["failed_classes"] != float64(2) {
+		t.Errorf("log line %s has failed_classes %v, want 2", buf.String(), record["failed_classes"])
+	}
+}

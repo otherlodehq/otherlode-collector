@@ -55,6 +55,7 @@ func (s *LogSink) AcceptManifest(_ context.Context, manifest *otherlodepb.ProbeM
 		"call_edges", callEdgeCount(manifest.GetProbes()),
 		"class_locations", len(manifest.GetClassLocations()),
 		"skipped_classes", len(manifest.GetSkippedClasses()),
+		"failed_classes", len(manifest.GetFailedClasses()),
 		"endpoints", len(manifest.GetEndpoints()),
 		"disabled_endpoint_modules", len(manifest.GetDisabledEndpointModules()),
 		"dependencies", len(manifest.GetDependencies()),

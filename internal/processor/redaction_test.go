@@ -537,3 +537,35 @@ func TestRedaction_StrippedPayloads_CounterIncrementsPerPayload(t *testing.T) {
 		}
 	}
 }
+
+// The bindings know a probe's outside caller and a manifest's failed
+// classes (agent ADRs 0064 and 0065), so redaction keeps both and does
+// not mark the payload stripped.
+func TestRedaction_On_OutsideCallerAndFailedClassesKept(t *testing.T) {
+	next := &recordingSink{}
+	r := NewRedaction(next, RedactionConfig{AllLiterals: true}, nil)
+
+	manifest := manifestWith()
+	manifest.GetProbes()[0].OutsideCaller = &otherlodepb.OutsideCaller{
+		Kind:     otherlodepb.OutsideCallerKind_CALLBACK_ANNOTATION,
+		TypeName: "org.springframework.context.event.EventListener",
+	}
+	manifest.FailedClasses = []*otherlodepb.FailedClass{{ClassName: "com.example.Broken", WithheldAt: 1700000000000}}
+
+	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := next.manifests[0]
+	if got.GetResource().GetFieldsStripped() {
+		t.Fatal("fields_stripped set on a payload whose fields the bindings know")
+	}
+	caller := got.GetProbes()[0].GetOutsideCaller()
+	if caller.GetKind() != otherlodepb.OutsideCallerKind_CALLBACK_ANNOTATION ||
+		caller.GetTypeName() != "org.springframework.context.event.EventListener" {
+		t.Fatalf("outside caller = %v, want the callback annotation", caller)
+	}
+	if failed := got.GetFailedClasses(); len(failed) != 1 || failed[0].GetClassName() != "com.example.Broken" {
+		t.Fatalf("failed classes = %v, want com.example.Broken", failed)
+	}
+}
