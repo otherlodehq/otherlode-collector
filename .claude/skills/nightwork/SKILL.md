@@ -8,10 +8,10 @@ disable-model-invocation: true
 # Nightwork
 
 Run a whole landing order while the user is away, then hand them a report
-they can act on in a few minutes. The user is not there to answer
-questions, so this skill starts only from a design that is already
-settled, and anything that needs the user waits for the report instead of
-blocking the run.
+they can act on in a few minutes. After the one question in step 2, the user
+is not there to answer questions. So this skill starts only from a design
+that is already settled, and anything that needs the user waits for the
+report instead of blocking the run.
 
 This skill points to three others. None of them can be started through the
 Skill tool, so read each file and follow it:
@@ -46,12 +46,29 @@ If the grilling happened in this session but its decisions are not written
 down yet, write them first (ADR, `CONTEXT.md`, landing order), commit, and
 treat that commit as chunk zero.
 
-## 2. Print the plan and start
+## 2. Ask how to commit, then start
 
-Print, in a few lines: the landing order, the repos it touches, and the
-guardrails in step 5. Then start at once. Do not ask the user anything,
-including the breakpoint question in `/chunked-build` step 2. A nightwork run
-has no breakpoints.
+Ask the user one question before any work starts: where should the run's
+commits go? Skip the question only when the user already answered it in this
+session or in `$ARGUMENTS`. Offer these options, and name the default branch
+of each repo the plan touches:
+
+- **Default branch.** Commit each chunk straight on the default branch and
+  push it.
+- **One feature branch.** Commit every chunk on one branch per repo, named
+  `nightwork/<topic>`, push it, and open one pull request per repo at the end.
+- **A pull request per chunk.** Commit each chunk on its own branch, stacked
+  on the previous chunk's branch, and open one pull request per chunk.
+- **Local only.** Commit on a local `nightwork/<topic>` branch and push
+  nothing.
+
+This is the only question the run asks. Wait for the answer, since the user
+is still at the keyboard when they start the run.
+
+Then print, in a few lines: the landing order, the repos it touches, the
+commit choice, and the guardrails in step 5. Start at once. Do not ask the
+breakpoint question in `/chunked-build` step 2. A nightwork run has no
+breakpoints.
 
 Remind the user in the same message that a permission prompt stalls the run
 until they answer it, so the session needs auto mode or an allowlist that
@@ -59,7 +76,8 @@ covers the build, `git` and the subagents.
 
 ## 3. Build each chunk with /chunked-build
 
-Follow `/chunked-build` steps 1 to 7 for every chunk: a Sonnet subagent
+Follow `/chunked-build` steps 1 to 7 for every chunk, but commit where the
+user chose in step 2, not where that command's step 6 says. A Sonnet subagent
 implements from a written brief, this session reviews the implementation and
 fixes what it finds, and a fresh Opus reviewer reads every non-trivial diff.
 Repeat review and fix until both this session and the reviewer are happy.
@@ -84,8 +102,9 @@ log), and in the run log with the reason and the option you rejected.
 
 Otherwise park it. Parking means:
 
-1. Commit nothing from that chunk to the main branch. Put its work on a
-   branch named `nightwork/<chunk>` and push that branch, so nothing is lost.
+1. Commit nothing from that chunk to the branch the run commits to. Put its
+   work on a branch named `nightwork/parked/<chunk>`, cut from that branch,
+   so nothing is lost. Push it unless the user chose local only.
 2. Write the question in the run log: the options, your recommendation, and
    what each option would change.
 3. Skip every later chunk that depends on it, and continue with the chunks
@@ -100,6 +119,8 @@ disagree and the code or the library source cannot settle it.
 Never, during a nightwork run:
 
 - cut a release, push a tag, or publish a package;
+- merge a pull request, including one the run opened;
+- commit or push anywhere the user did not choose in step 2;
 - force-push, rewrite history, or delete a branch;
 - add a dependency or change CI unless the brief says to;
 - send anything outside the repos named in the plan;
@@ -120,8 +141,8 @@ Use these sections, in this order, and leave out any that is empty:
    on. Each item is a parked chunk, a question only the user can answer, a
    gap you found that the brief did not cover, or something you could not do.
    Each says why it stopped, what you recommend, and where the work is.
-2. **What landed.** One line per chunk: repo, commit hash and what the chunk
-   does.
+2. **What landed.** One line per chunk: repo, branch, commit hash and what
+   the chunk does, with the pull request link when the run opened one.
 3. **Forks and decisions.** Each choice you made: the question, the option
    you picked, the reason, and the option you rejected. Mark any you would
    like the user to confirm.
