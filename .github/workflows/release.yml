@@ -203,4 +203,4 @@ jobs:
           GH_TOKEN: ${{ secrets.OTHERLODE_DEV_DOCS_TOKEN }}
           TAG: ${{ github.ref_name }}
         working-directory: site
-        run: scripts/sync-docs.sh collector "$GITHUB_WORKSPACE/source/docs/site" "otherlode-collector $TAG"
+        run: scripts/sync-docs.sh collector "$GITHUB_WORKSPACE/source/docs/site" "otherlode-collector $TAG" "$TAG"
