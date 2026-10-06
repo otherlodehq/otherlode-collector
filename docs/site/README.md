@@ -14,6 +14,11 @@ in the README. Keep a page's file name across releases. A renamed file
 reads as one page removed and another added, and the release menu cannot
 link the two.
 
+This folder is what the next release says. Each release's copy in
+otherlode.dev, at `src/content/docs/collector/<tag>/`, is edited there
+when it is wrong about that release. If the mistake is still in this
+folder, fix it here too, or the next release copies it again.
+
 A page is a Markdown file with this frontmatter:
 
 ```md
