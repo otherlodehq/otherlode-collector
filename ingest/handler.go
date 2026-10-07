@@ -148,7 +148,7 @@ func NewHandler(sink Sink, logger *slog.Logger, opts ...HandlerOption) *Handler 
 }
 
 // Register adds POST routes for DeltaBatchPath, ManifestPath and
-// StaticBaselinePath to mux. They match the paths HttpOtlpStyleExporter
+// StaticBaselinePath to mux. They match the paths HttpExporter
 // posts to.
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+DeltaBatchPath, h.handleDeltaBatch)

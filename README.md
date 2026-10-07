@@ -27,7 +27,7 @@ Otherlode agent  --POST protobuf-->  otherlode-collector  -->  Sink
  every 30-60s)                        decode only)               storage, aggregation)
 ```
 
-The agent's `HttpOtlpStyleExporter` posts three payload types, matching
+The agent's `HttpExporter` posts three payload types, matching
 the paths this collector serves. Each one carries the same resource
 attributes: service namespace (optional), service name, version,
 instance ID, environment, a run ID, and a flag that marks a test run. A service is known by its
