@@ -569,3 +569,54 @@ func TestRedaction_On_OutsideCallerAndFailedClassesKept(t *testing.T) {
 		t.Fatalf("failed classes = %v, want com.example.Broken", failed)
 	}
 }
+
+// The bindings know a disabled module's kind (agent ADR 0017) and the
+// payload sequence and pending-since stamp on a delta batch and a manifest
+// (agent ADR 0068), so redaction keeps them and does not mark either
+// payload stripped.
+func TestRedaction_On_ModuleKindAndPendingCountsFieldsKept(t *testing.T) {
+	next := &recordingSink{}
+	r := NewRedaction(next, RedactionConfig{AllLiterals: true}, nil)
+
+	manifest := manifestWith()
+	manifest.DisabledEndpointModules = []*otherlodepb.DisabledEndpointModule{
+		{Module: "spring-webmvc", Reason: "advice failed", Kind: otherlodepb.DisabledEndpointModuleKind_ADVICE_FAILED},
+	}
+	manifest.PayloadSequence = 4
+	manifest.CountsPendingSince = 1700000000000
+	batch := &otherlodepb.DeltaBatch{
+		Resource:           resourceFor("run-1"),
+		Deltas:             []*otherlodepb.ProbeDelta{{ClassId: 7, HitsTotal: 3}},
+		PayloadSequence:    5,
+		CountsPendingSince: 1700000000000,
+	}
+
+	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+		t.Fatalf("accept manifest: %v", err)
+	}
+	if err := r.AcceptDeltaBatch(context.Background(), batch); err != nil {
+		t.Fatalf("accept delta batch: %v", err)
+	}
+
+	gotManifest := next.manifests[0]
+	if gotManifest.GetResource().GetFieldsStripped() {
+		t.Error("fields_stripped set on a manifest whose fields the bindings know")
+	}
+	if modules := gotManifest.GetDisabledEndpointModules(); len(modules) != 1 ||
+		modules[0].GetKind() != otherlodepb.DisabledEndpointModuleKind_ADVICE_FAILED {
+		t.Errorf("disabled modules = %v, want one of kind ADVICE_FAILED", modules)
+	}
+	if gotManifest.GetPayloadSequence() != 4 || gotManifest.GetCountsPendingSince() != 1700000000000 {
+		t.Errorf("manifest payload_sequence %d, counts_pending_since %d, want 4 and 1700000000000",
+			gotManifest.GetPayloadSequence(), gotManifest.GetCountsPendingSince())
+	}
+
+	gotBatch := next.deltaBatches[0]
+	if gotBatch.GetResource().GetFieldsStripped() {
+		t.Error("fields_stripped set on a delta batch whose fields the bindings know")
+	}
+	if gotBatch.GetPayloadSequence() != 5 || gotBatch.GetCountsPendingSince() != 1700000000000 {
+		t.Errorf("batch payload_sequence %d, counts_pending_since %d, want 5 and 1700000000000",
+			gotBatch.GetPayloadSequence(), gotBatch.GetCountsPendingSince())
+	}
+}
