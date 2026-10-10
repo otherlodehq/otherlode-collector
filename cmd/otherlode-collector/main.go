@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -142,7 +143,6 @@ func main() {
 	}
 
 	srv := &http.Server{
-		Addr:              addr,
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
@@ -160,10 +160,14 @@ func main() {
 		go forwardFile.Watch(ctx, tokenfile.ReloadInterval, logger)
 	}
 
+	ln, err := listen(addr, logger)
+	if err != nil {
+		logger.Error(err.Error())
+		os.Exit(1)
+	}
 	serveErr := make(chan error, 1)
 	go func() {
-		logger.Info("otherlode-collector listening", "addr", addr, "version", version)
-		serveErr <- srv.ListenAndServe()
+		serveErr <- srv.Serve(ln)
 	}()
 
 	select {
@@ -187,6 +191,17 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+// listen binds addr. It logs that the collector is listening only after
+// the bind succeeds, so a port in use never logs a false start.
+func listen(addr string, logger *slog.Logger) (net.Listener, error) {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("otherlode-collector listening", "addr", addr, "version", version)
+	return ln, nil
 }
 
 // resolveLogLevel parses OTHERLODE_COLLECTOR_LOG_LEVEL (debug, info, warn,

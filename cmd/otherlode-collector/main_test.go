@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -195,6 +197,36 @@ func TestResolveAuthTokens(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestListen_PortInUse_ErrorsWithoutLoggingListening(t *testing.T) {
+	taken, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer taken.Close()
+
+	var logs bytes.Buffer
+	ln, err := listen(taken.Addr().String(), slog.New(slog.NewJSONHandler(&logs, nil)))
+	if err == nil {
+		ln.Close()
+		t.Fatal("expected an error for a port in use, got nil")
+	}
+	if strings.Contains(logs.String(), "listening") {
+		t.Fatalf("logged %q for a bind that failed", logs.String())
+	}
+}
+
+func TestListen_FreePort_LogsListening(t *testing.T) {
+	var logs bytes.Buffer
+	ln, err := listen("127.0.0.1:0", slog.New(slog.NewJSONHandler(&logs, nil)))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	if !strings.Contains(logs.String(), `"msg":"otherlode-collector listening"`) {
+		t.Fatalf("logs = %q, want the listening line", logs.String())
 	}
 }
 
