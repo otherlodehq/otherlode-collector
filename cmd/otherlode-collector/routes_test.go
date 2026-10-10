@@ -869,3 +869,22 @@ func TestRegisterRoutes_RedactionOff_ForwardsNoRedactionHeader(t *testing.T) {
 		}
 	}
 }
+
+func TestRegisterRoutes_StampingLogNamesTheAction(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	mustRegisterRoutes(t, http.NewServeMux(), routeConfig{
+		Logger:      logger,
+		Environment: processor.EnvironmentConfig{Value: "uat", Action: processor.Upsert},
+		Namespace:   processor.NamespaceConfig{Value: "team-a", Action: processor.Insert},
+	})
+
+	for _, want := range []string{
+		`"msg":"stamping environment on ingested payloads","environment":"uat","action":"upsert"`,
+		`"msg":"stamping service namespace on ingested payloads","namespace":"team-a","action":"insert"`,
+	} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("startup log does not hold %s:\n%s", want, logs.String())
+		}
+	}
+}

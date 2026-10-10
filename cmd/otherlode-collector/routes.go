@@ -95,11 +95,11 @@ func registerRoutes(mux *http.ServeMux, cfg routeConfig) (*forward.ForwardingSin
 		sink = ingest.NewLogSink(logger)
 	}
 	if cfg.Environment.Value != "" {
-		logger.Info("stamping environment on ingested payloads", "environment", cfg.Environment.Value, "action", cfg.Environment.Action)
+		logger.Info("stamping environment on ingested payloads", "environment", cfg.Environment.Value, "action", cfg.Environment.Action.String())
 		sink = processor.NewEnvironment(sink, cfg.Environment, logger)
 	}
 	if cfg.Namespace.Value != "" {
-		logger.Info("stamping service namespace on ingested payloads", "namespace", cfg.Namespace.Value, "action", cfg.Namespace.Action)
+		logger.Info("stamping service namespace on ingested payloads", "namespace", cfg.Namespace.Value, "action", cfg.Namespace.Action.String())
 		sink = processor.NewNamespace(sink, cfg.Namespace, logger)
 	}
 	if cfg.Redaction.Enabled() {
