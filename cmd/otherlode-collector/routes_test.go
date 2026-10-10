@@ -397,23 +397,42 @@ func TestRegisterRoutes_BothProcessorsSet_StampBothFields(t *testing.T) {
 // survives redaction.
 func manifestWithLiteral() *otherlodepb.ProbeManifest {
 	unknown := protowire.AppendString(protowire.AppendTag(nil, 9999, protowire.BytesType), "a newer literal")
-	site := &otherlodepb.BranchSite{Condition: []*otherlodepb.ConditionPart{
-		{Kind: otherlodepb.ConditionPartKind_CODE, Text: "System.getenv("},
-		{Kind: otherlodepb.ConditionPartKind_STRING_LITERAL, Text: "ENABLE_LEGACY_DISCOUNT"},
-		{Kind: otherlodepb.ConditionPartKind_CODE, Text: ")"},
-	}}
+	site := &otherlodepb.BranchSite{
+		SiteKey: proto.String(testSiteKey),
+		Condition: []*otherlodepb.ConditionPart{
+			{Kind: otherlodepb.ConditionPartKind_CODE, Text: "System.getenv("},
+			{Kind: otherlodepb.ConditionPartKind_STRING_LITERAL, Text: "ENABLE_LEGACY_DISCOUNT"},
+			{Kind: otherlodepb.ConditionPartKind_CODE, Text: ")"},
+		},
+	}
 	site.ProtoReflect().SetUnknown(unknown)
 	manifest := &otherlodepb.ProbeManifest{
 		Resource: &otherlodepb.ResourceAttributes{ServiceName: "demo-service", ServiceInstanceId: "instance-1", RunId: "run-1", TestRun: true},
-		Probes:   []*otherlodepb.ProbeLocation{{ClassName: "com.example.Pricing", MethodName: "price", BranchSites: []*otherlodepb.BranchSite{site}}},
+		Probes: []*otherlodepb.ProbeLocation{
+			{ClassName: "com.example.Pricing", MethodName: "price", BranchSites: []*otherlodepb.BranchSite{site}},
+			{ClassName: "com.example.Pricing", MethodName: "price", Kind: otherlodepb.ProbeKind_BRANCH, BranchKey: proto.String(testBranchKey)},
+		},
 	}
 	manifest.ProtoReflect().SetUnknown(unknown)
 	return manifest
 }
 
+const (
+	// testBranchKey and testSiteKey have the shape of the agent's keys.
+	testBranchKey = "0123456789abcdef0123456789abcdef"
+	testSiteKey   = "fedcba9876543210fedcba9876543210"
+)
+
 // forwardManifest posts manifestWithLiteral to a collector wired with
 // redactCfg and returns the manifest its backend received.
 func forwardManifest(t *testing.T, redactCfg processor.RedactionConfig) *otherlodepb.ProbeManifest {
+	t.Helper()
+	return forwardManifestLogging(t, redactCfg, nil)
+}
+
+// forwardManifestLogging is forwardManifest with the collector logging to
+// logger, or to slog.Default() when logger is nil.
+func forwardManifestLogging(t *testing.T, redactCfg processor.RedactionConfig, logger *slog.Logger) *otherlodepb.ProbeManifest {
 	t.Helper()
 	received := make(chan *otherlodepb.ProbeManifest, 1)
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -435,7 +454,7 @@ func forwardManifest(t *testing.T, redactCfg processor.RedactionConfig) *otherlo
 	defer backend.Close()
 
 	mux := http.NewServeMux()
-	fwd := mustRegisterRoutes(t, mux, routeConfig{Forward: forward.Config{URL: backend.URL}, Redaction: redactCfg})
+	fwd := mustRegisterRoutes(t, mux, routeConfig{Logger: logger, Forward: forward.Config{URL: backend.URL}, Redaction: redactCfg})
 	defer fwd.Shutdown(context.Background())
 
 	server := httptest.NewServer(mux)
@@ -464,7 +483,7 @@ func forwardManifest(t *testing.T, redactCfg processor.RedactionConfig) *otherlo
 }
 
 func TestRegisterRoutes_RedactionOn_ForwardsManifestRedactedWithoutUnknownFields(t *testing.T) {
-	manifest := forwardManifest(t, processor.RedactionConfig{BlockedValues: []*regexp.Regexp{regexp.MustCompile("LEGACY")}})
+	manifest := forwardManifest(t, processor.RedactionConfig{BlockedValues: []*regexp.Regexp{regexp.MustCompile("LEGACY")}, Secret: []byte(testRedactSecret)})
 
 	site := manifest.GetProbes()[0].GetBranchSites()[0]
 	if got := site.GetCondition()[1].GetText(); got != processor.RedactedText {
@@ -484,8 +503,60 @@ func TestRegisterRoutes_RedactionOn_ForwardsManifestRedactedWithoutUnknownFields
 	}
 }
 
+func TestRegisterRoutes_RedactionOn_ForwardsReKeyedKeys(t *testing.T) {
+	manifest := forwardManifest(t, processor.RedactionConfig{AllLiterals: true, Secret: []byte(testRedactSecret)})
+
+	hexKey := regexp.MustCompile(`^[0-9a-f]{32}$`)
+	branchKey := manifest.GetProbes()[1].GetBranchKey()
+	if branchKey == testBranchKey || !hexKey.MatchString(branchKey) {
+		t.Fatalf("forwarded branch key = %q, want a re-keyed 32-character hex key", branchKey)
+	}
+	sites := manifest.GetProbes()[0].GetBranchSites()
+	if siteKey := sites[0].GetSiteKey(); siteKey == testSiteKey || !hexKey.MatchString(siteKey) {
+		t.Fatalf("forwarded site key = %q, want a re-keyed 32-character hex key", siteKey)
+	}
+}
+
+func TestRegisterRoutes_RedactionOn_LogsSecretFingerprintNeverSecret(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	secret := []byte(testRedactSecret)
+
+	forwardManifestLogging(t, processor.RedactionConfig{AllLiterals: true, Secret: secret}, logger)
+
+	out := logs.String()
+	if want := `"secret_fingerprint":"` + processor.SecretFingerprint(secret) + `"`; !strings.Contains(out, want) {
+		t.Fatalf("logs do not hold %s:\n%s", want, out)
+	}
+	if strings.Contains(out, testRedactSecret) {
+		t.Fatalf("logs hold the redaction secret:\n%s", out)
+	}
+}
+
+func TestRegisterRoutes_RedactionWithoutValidSecret_ReturnsError(t *testing.T) {
+	for name, cfg := range map[string]processor.RedactionConfig{
+		"no secret":            {AllLiterals: true},
+		"short secret":         {AllLiterals: true, Secret: []byte("short")},
+		"secret, no redacting": {Secret: []byte(testRedactSecret)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := registerRoutes(http.NewServeMux(), routeConfig{Redaction: cfg}); err == nil {
+				t.Fatal("registerRoutes returned no error")
+			}
+		})
+	}
+}
+
 func TestRegisterRoutes_RedactionOff_ForwardsManifestWithLiteralAndUnknownFields(t *testing.T) {
 	manifest := forwardManifest(t, processor.RedactionConfig{})
+
+	if got := manifest.GetProbes()[1].GetBranchKey(); got != testBranchKey {
+		t.Fatalf("forwarded branch key = %q, want it unchanged", got)
+	}
+	sites := manifest.GetProbes()[0].GetBranchSites()
+	if got := sites[0].GetSiteKey(); got != testSiteKey {
+		t.Fatalf("forwarded site key = %q, want it unchanged", got)
+	}
 
 	site := manifest.GetProbes()[0].GetBranchSites()[0]
 	if got := site.GetCondition()[1].GetText(); got != "ENABLE_LEGACY_DISCOUNT" {

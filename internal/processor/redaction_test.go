@@ -67,9 +67,17 @@ func baselineWith(sites ...*otherlodepb.BranchSite) *otherlodepb.StaticBaseline 
 	}
 }
 
+// testSecret is a redaction secret of exactly MinSecretBytes.
+var testSecret = []byte("0123456789abcdef0123456789abcdef")
+
+// allLiterals is a config that redacts every literal.
+func allLiterals() RedactionConfig {
+	return RedactionConfig{AllLiterals: true, Secret: testSecret}
+}
+
 func blocked(t *testing.T, patterns ...string) RedactionConfig {
 	t.Helper()
-	cfg := RedactionConfig{}
+	cfg := RedactionConfig{Secret: testSecret}
 	for _, p := range patterns {
 		cfg.BlockedValues = append(cfg.BlockedValues, regexp.MustCompile(p))
 	}
@@ -153,7 +161,7 @@ func TestRedaction_CodeAndPlaceholderParts_NeverTouched(t *testing.T) {
 func TestRedaction_NonCodeKinds_TreatedAsLiterals(t *testing.T) {
 	const unknownKind otherlodepb.ConditionPartKind = 7
 	configs := map[string]RedactionConfig{
-		"AllLiterals":   {AllLiterals: true},
+		"AllLiterals":   allLiterals(),
 		"BlockedValues": blocked(t, "secret"),
 	}
 	for name, cfg := range configs {
@@ -203,7 +211,7 @@ func TestRedaction_BlockedPatternMatchesUnanchored(t *testing.T) {
 
 func TestRedaction_AllLiterals_ManifestConditionsAndCaseLabelsReplaced(t *testing.T) {
 	next := &recordingSink{}
-	r := NewRedaction(next, RedactionConfig{AllLiterals: true}, nil)
+	r := NewRedaction(next, allLiterals(), nil)
 
 	manifest := manifestWith(
 		site([]*otherlodepb.ConditionPart{code("name == "), literal("alice")}, []*otherlodepb.ConditionPart{literal("bob")}),
@@ -222,7 +230,7 @@ func TestRedaction_AllLiterals_ManifestConditionsAndCaseLabelsReplaced(t *testin
 
 func TestRedaction_AllLiterals_StaticBaselineConditionsAndCaseLabelsReplaced(t *testing.T) {
 	next := &recordingSink{}
-	r := NewRedaction(next, RedactionConfig{AllLiterals: true}, nil)
+	r := NewRedaction(next, allLiterals(), nil)
 
 	baseline := baselineWith(site(
 		[]*otherlodepb.ConditionPart{code("System.getenv("), literal("MODE"), code(")")},
@@ -299,7 +307,7 @@ func TestRedaction_On_UnknownFieldsDroppedFromManifest(t *testing.T) {
 
 func TestRedaction_On_UnknownFieldsDroppedFromStaticBaseline(t *testing.T) {
 	next := &recordingSink{}
-	r := NewRedaction(next, RedactionConfig{AllLiterals: true}, nil)
+	r := NewRedaction(next, allLiterals(), nil)
 
 	s := site([]*otherlodepb.ConditionPart{code("ok")}, nil)
 	s.ProtoReflect().SetUnknown(unknownBytes())
@@ -322,7 +330,7 @@ func TestRedaction_On_UnknownFieldsDroppedFromStaticBaseline(t *testing.T) {
 
 func TestRedaction_On_UnknownFieldsDroppedFromDeltaBatch(t *testing.T) {
 	next := &recordingSink{}
-	r := NewRedaction(next, RedactionConfig{AllLiterals: true}, nil)
+	r := NewRedaction(next, allLiterals(), nil)
 
 	delta := &otherlodepb.ProbeDelta{ClassId: 7, HitsTotal: 3}
 	delta.ProtoReflect().SetUnknown(unknownBytes())
@@ -352,7 +360,7 @@ func TestRedaction_On_UnknownFieldsDroppedFromDeltaBatch(t *testing.T) {
 func TestRedaction_NextError_Returned(t *testing.T) {
 	wantErr := errors.New("sink unavailable")
 	next := &recordingSink{err: wantErr}
-	r := NewRedaction(next, RedactionConfig{AllLiterals: true}, nil)
+	r := NewRedaction(next, allLiterals(), nil)
 
 	if err := r.AcceptManifest(context.Background(), manifestWith()); !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want %v", err, wantErr)
@@ -429,7 +437,7 @@ func strippedCases() []strippedCase {
 func TestRedaction_UnknownFieldStripped_SetsFieldsStripped(t *testing.T) {
 	for _, c := range strippedCases() {
 		t.Run(c.name, func(t *testing.T) {
-			r := NewRedaction(&recordingSink{}, RedactionConfig{AllLiterals: true}, nil)
+			r := NewRedaction(&recordingSink{}, allLiterals(), nil)
 			res := c.send(t, r, "run-1", true, false)
 			if !res.GetFieldsStripped() {
 				t.Fatal("fields_stripped not set on a payload that lost a field")
@@ -441,7 +449,7 @@ func TestRedaction_UnknownFieldStripped_SetsFieldsStripped(t *testing.T) {
 func TestRedaction_NoUnknownField_LeavesFieldsStrippedUnset(t *testing.T) {
 	for _, c := range strippedCases() {
 		t.Run(c.name, func(t *testing.T) {
-			r := NewRedaction(&recordingSink{}, RedactionConfig{AllLiterals: true}, nil)
+			r := NewRedaction(&recordingSink{}, allLiterals(), nil)
 			res := c.send(t, r, "run-1", false, false)
 			if res.GetFieldsStripped() {
 				t.Fatal("fields_stripped set on a payload that lost nothing")
@@ -453,7 +461,7 @@ func TestRedaction_NoUnknownField_LeavesFieldsStrippedUnset(t *testing.T) {
 func TestRedaction_AlreadyFlaggedPayload_StaysFlagged(t *testing.T) {
 	for _, c := range strippedCases() {
 		t.Run(c.name, func(t *testing.T) {
-			r := NewRedaction(&recordingSink{}, RedactionConfig{AllLiterals: true}, nil)
+			r := NewRedaction(&recordingSink{}, allLiterals(), nil)
 			res := c.send(t, r, "run-1", false, true)
 			if !res.GetFieldsStripped() {
 				t.Fatal("fields_stripped cleared on an already flagged payload")
@@ -464,7 +472,7 @@ func TestRedaction_AlreadyFlaggedPayload_StaysFlagged(t *testing.T) {
 
 func TestRedaction_UnknownFieldAndNilResource_PassesWithoutPanic(t *testing.T) {
 	next := &recordingSink{}
-	r := NewRedaction(next, RedactionConfig{AllLiterals: true}, nil)
+	r := NewRedaction(next, allLiterals(), nil)
 	batch := &otherlodepb.DeltaBatch{}
 	batch.ProtoReflect().SetUnknown(unknownBytes())
 	if err := r.AcceptDeltaBatch(context.Background(), batch); err != nil {
@@ -478,7 +486,7 @@ func TestRedaction_UnknownFieldAndNilResource_PassesWithoutPanic(t *testing.T) {
 func TestRedaction_StrippedPayloads_WarnOncePerRun(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	r := NewRedaction(&recordingSink{}, RedactionConfig{AllLiterals: true}, logger)
+	r := NewRedaction(&recordingSink{}, allLiterals(), logger)
 	cases := strippedCases()
 
 	cases[0].send(t, r, "run-a", true, false)
@@ -507,7 +515,7 @@ func TestRedaction_StrippedPayloads_WarnOncePerRun(t *testing.T) {
 func TestRedaction_WarnedRuns_BoundedAndCleared(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	r := NewRedaction(&recordingSink{}, RedactionConfig{AllLiterals: true}, logger)
+	r := NewRedaction(&recordingSink{}, allLiterals(), logger)
 	c := strippedCases()[0]
 	for i := 0; i < maxWarnedRuns+1; i++ {
 		c.send(t, r, "run-"+strconv.Itoa(i), true, false)
@@ -525,7 +533,7 @@ func TestRedaction_StrippedPayloads_CounterIncrementsPerPayload(t *testing.T) {
 	for _, c := range strippedCases() {
 		before[c.payload] = metrics.FieldsStripped.Value(c.payload)
 	}
-	r := NewRedaction(&recordingSink{}, RedactionConfig{AllLiterals: true}, nil)
+	r := NewRedaction(&recordingSink{}, allLiterals(), nil)
 	for _, c := range strippedCases() {
 		c.send(t, r, "run-1", true, false)
 		c.send(t, r, "run-1", true, false)
@@ -543,7 +551,7 @@ func TestRedaction_StrippedPayloads_CounterIncrementsPerPayload(t *testing.T) {
 // not mark the payload stripped.
 func TestRedaction_On_OutsideCallerAndFailedClassesKept(t *testing.T) {
 	next := &recordingSink{}
-	r := NewRedaction(next, RedactionConfig{AllLiterals: true}, nil)
+	r := NewRedaction(next, allLiterals(), nil)
 
 	manifest := manifestWith()
 	manifest.GetProbes()[0].OutsideCaller = &otherlodepb.OutsideCaller{
@@ -576,7 +584,7 @@ func TestRedaction_On_OutsideCallerAndFailedClassesKept(t *testing.T) {
 // payload stripped.
 func TestRedaction_On_ModuleKindAndPendingCountsFieldsKept(t *testing.T) {
 	next := &recordingSink{}
-	r := NewRedaction(next, RedactionConfig{AllLiterals: true}, nil)
+	r := NewRedaction(next, allLiterals(), nil)
 
 	manifest := manifestWith()
 	manifest.DisabledEndpointModules = []*otherlodepb.DisabledEndpointModule{

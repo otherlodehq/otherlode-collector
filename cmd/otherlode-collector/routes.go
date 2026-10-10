@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -36,7 +37,8 @@ type routeConfig struct {
 	Environment processor.EnvironmentConfig
 	// Namespace, when its Value is non-empty, adds a processor.Namespace.
 	Namespace processor.NamespaceConfig
-	// Redaction, when enabled, adds a processor.Redaction.
+	// Redaction, when enabled, adds a processor.Redaction. It must pass
+	// Validate.
 	Redaction processor.RedactionConfig
 }
 
@@ -56,9 +58,11 @@ type routeConfig struct {
 // onto delta batches, manifests and static baselines before the sink sees
 // them. A processor.Namespace wraps the sink outside it and writes the
 // service namespace onto the same three payloads. A processor.Redaction
-// wraps the sink outside both. It hides string literals and drops unknown
-// fields before any payload is forwarded. A zero config leaves the
-// matching processor out of the chain.
+// wraps the sink outside both. It hides string literals, re-keys branch
+// and site keys and drops unknown fields before any payload is forwarded.
+// It logs a fingerprint of its secret, never the secret. A redaction
+// config that fails Validate is returned as an error. A zero config
+// leaves the matching processor out of the chain.
 func registerRoutes(mux *http.ServeMux, cfg routeConfig) (*forward.ForwardingSink, error) {
 	logger := cfg.Logger
 	if logger == nil {
@@ -87,9 +91,13 @@ func registerRoutes(mux *http.ServeMux, cfg routeConfig) (*forward.ForwardingSin
 		logger.Info("stamping service namespace on ingested payloads", "namespace", cfg.Namespace.Value, "action", cfg.Namespace.Action)
 		sink = processor.NewNamespace(sink, cfg.Namespace, logger)
 	}
+	if err := cfg.Redaction.Validate(); err != nil {
+		return nil, fmt.Errorf("redaction: %w", err)
+	}
 	if cfg.Redaction.Enabled() {
-		logger.Info("redacting string literals in ingested payloads",
-			"blocked_values", len(cfg.Redaction.BlockedValues), "all_literals", cfg.Redaction.AllLiterals)
+		logger.Info("redacting string literals and re-keying branch and site keys in ingested payloads",
+			"blocked_values", len(cfg.Redaction.BlockedValues), "all_literals", cfg.Redaction.AllLiterals,
+			"secret_fingerprint", processor.SecretFingerprint(cfg.Redaction.Secret))
 		sink = processor.NewRedaction(sink, cfg.Redaction, logger)
 	}
 	handler := ingest.NewHandler(sink, logger, ingest.WithMaxConcurrentDecodes(cfg.MaxDecodes))

@@ -591,11 +591,11 @@ marked as code, string literal or placeholder. The processor looks only
 at string literal parts, in manifests and static baselines. A redacted
 part keeps its kind, and its text becomes `…`. Code parts, placeholders,
 and class, method and file names are never changed, since the pipeline
-needs the names. Branch and site keys are not changed either. They still
-digest the literal, so someone who holds the keys and the rest of a
-condition can test guesses at a weak secret offline.
+needs the names.
 
-Two settings turn it on. Both are off by default.
+Two settings turn it on. Both are off by default. Either one also needs
+a secret, set as described under
+[Branch and site keys](#branch-and-site-keys).
 
 | Variable | Meaning |
 | --- | --- |
@@ -605,6 +605,7 @@ Two settings turn it on. Both are off by default.
 ```
 OTHERLODE_COLLECTOR_REDACT_BLOCKED_VALUES='(?i)password|secret|token
 ^sk_live_' \
+OTHERLODE_COLLECTOR_REDACT_SECRET_FILE=/run/secrets/otherlode-redact-secret \
 go run ./cmd/otherlode-collector
 ```
 
@@ -645,7 +646,53 @@ placeholder is treated as a string literal. A newer agent's unknown
 literal kind is redacted too, so redaction fails closed.
 
 Redaction happens only here. An agent that posts straight to a backend,
-with no collector in between, sends literals in clear.
+with no collector in between, sends literals and plain keys in clear.
+That includes a test JVM that runs the agent with `testRun`: point it at
+a collector with the same redaction settings and secret as production's.
+
+#### Branch and site keys
+
+The agent names each branch outcome and site with a key, a digest of the
+site's bytecode that includes its string literals. A plain key lets
+anyone who holds it hash a guess at a redacted literal and compare. So
+while redaction is on, the collector replaces each `branch_key` and
+`site_key` with HMAC-SHA256 of the key under a secret, as 32 lowercase
+hex characters, the shape the agent sends. Equal keys stay equal, so the
+backend still joins one branch across builds and instances. See
+[ADR 0007](docs/adr/0007-redaction-re-keys-branch-and-site-keys-with-a-tenant-secret.md).
+
+| Variable | Meaning |
+| --- | --- |
+| `OTHERLODE_COLLECTOR_REDACT_SECRET` | The secret, at least 32 bytes. Spaces around it are trimmed. |
+| `OTHERLODE_COLLECTOR_REDACT_SECRET_FILE` | A file that holds the secret on one line. Blank lines and lines that start with `#` are skipped, and spaces are trimmed, as in the token files. |
+
+```
+OTHERLODE_COLLECTOR_REDACT_ALL_LITERALS=1 \
+OTHERLODE_COLLECTOR_REDACT_SECRET_FILE=/run/secrets/otherlode-redact-secret \
+go run ./cmd/otherlode-collector
+```
+
+Make the secret with `openssl rand -hex 32`. Give the same secret to
+every collector that sends to one Otherlode tenant: each environment's,
+and the one your test runs go through. A collector with a different
+secret gives one branch a different key, and the backend then keeps two
+histories for it. At startup the collector logs a `secret_fingerprint`,
+16 hex characters that name the secret without revealing it. Two
+collectors with the same secret log the same fingerprint, so compare
+them to check that a tenant's collectors agree.
+
+With redaction on, the collector stops at startup when neither variable
+is set or both are, when the secret is shorter than 32 bytes or holds a
+control character, and when it equals an agent auth token or the
+forward key. Every agent holds the auth token and the backend holds the
+forward key, so neither can protect the keys. It also stops when either
+variable is set and redaction is off. The collector reads the secret
+once, at startup. A changed file takes effect at the next restart.
+
+Turning redaction on, or changing the secret, changes every key. The
+backend then treats every branch and site as new, and the history it
+holds under the old keys stops there. There is no way to change the
+secret without that break.
 
 ## Development
 

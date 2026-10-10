@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/time/rate"
 
+	"github.com/otherlodehq/otherlode-collector/internal/auth"
 	"github.com/otherlodehq/otherlode-collector/internal/forward"
 	"github.com/otherlodehq/otherlode-collector/internal/processor"
 	"github.com/otherlodehq/otherlode-collector/metrics"
@@ -899,5 +900,117 @@ func TestResolveRedaction_AllLiteralsGarbage_Errors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "OTHERLODE_COLLECTOR_REDACT_ALL_LITERALS") {
 		t.Fatalf("error %q does not name the variable", err)
+	}
+}
+
+// testRedactSecret is a redaction secret long enough to pass
+// processor.CheckSecret.
+const testRedactSecret = "redact-secret-0123456789abcdef-0123456789"
+
+func TestResolveRedactionSecret(t *testing.T) {
+	oneSecret := writeTokenFile(t, "# redaction secret\n  "+testRedactSecret+"  \n\n")
+	twoSecrets := writeTokenFile(t, testRedactSecret+"\n"+testRedactSecret+"x\n")
+	shortSecret := writeTokenFile(t, "short\n")
+	missing := filepath.Join(t.TempDir(), "missing")
+	agentToken := strings.Repeat("a", processor.MinSecretBytes)
+	forwardKey := strings.Repeat("f", processor.MinSecretBytes)
+
+	tests := map[string]struct {
+		env       map[string]string
+		redacting bool
+		want      string
+		errHas    string
+	}{
+		"redaction off, nothing set": {},
+		"redaction off, secret set": {
+			env:    map[string]string{"OTHERLODE_COLLECTOR_REDACT_SECRET": testRedactSecret},
+			errHas: "redaction is off",
+		},
+		"redaction off, secret file set": {
+			env:    map[string]string{"OTHERLODE_COLLECTOR_REDACT_SECRET_FILE": oneSecret},
+			errHas: "redaction is off",
+		},
+		"redaction on, nothing set": {
+			redacting: true,
+			errHas:    "neither OTHERLODE_COLLECTOR_REDACT_SECRET nor OTHERLODE_COLLECTOR_REDACT_SECRET_FILE",
+		},
+		"secret from variable, spaces trimmed": {
+			env:       map[string]string{"OTHERLODE_COLLECTOR_REDACT_SECRET": " " + testRedactSecret + "\n"},
+			redacting: true,
+			want:      testRedactSecret,
+		},
+		"secret from file": {
+			env:       map[string]string{"OTHERLODE_COLLECTOR_REDACT_SECRET_FILE": oneSecret},
+			redacting: true,
+			want:      testRedactSecret,
+		},
+		"both set": {
+			env:       map[string]string{"OTHERLODE_COLLECTOR_REDACT_SECRET": testRedactSecret, "OTHERLODE_COLLECTOR_REDACT_SECRET_FILE": oneSecret},
+			redacting: true,
+			errHas:    "both set",
+		},
+		"variable with only spaces": {
+			env:       map[string]string{"OTHERLODE_COLLECTOR_REDACT_SECRET": "  "},
+			redacting: true,
+			errHas:    "only spaces",
+		},
+		"short variable": {
+			env:       map[string]string{"OTHERLODE_COLLECTOR_REDACT_SECRET": "hunter2"},
+			redacting: true,
+			errHas:    "OTHERLODE_COLLECTOR_REDACT_SECRET: the secret is 7 bytes, want at least 32",
+		},
+		"short file": {
+			env:       map[string]string{"OTHERLODE_COLLECTOR_REDACT_SECRET_FILE": shortSecret},
+			redacting: true,
+			errHas:    "OTHERLODE_COLLECTOR_REDACT_SECRET_FILE: the secret is 5 bytes",
+		},
+		"file with two secrets": {
+			env:       map[string]string{"OTHERLODE_COLLECTOR_REDACT_SECRET_FILE": twoSecrets},
+			redacting: true,
+			errHas:    "want exactly one",
+		},
+		"missing file": {
+			env:       map[string]string{"OTHERLODE_COLLECTOR_REDACT_SECRET_FILE": missing},
+			redacting: true,
+			errHas:    "OTHERLODE_COLLECTOR_REDACT_SECRET_FILE",
+		},
+		"control character": {
+			env:       map[string]string{"OTHERLODE_COLLECTOR_REDACT_SECRET": testRedactSecret[:10] + "\x01" + testRedactSecret[10:]},
+			redacting: true,
+			errHas:    "control character at byte 10",
+		},
+		"equals an agent auth token": {
+			env:       map[string]string{"OTHERLODE_COLLECTOR_REDACT_SECRET": agentToken},
+			redacting: true,
+			errHas:    "equals an agent auth token",
+		},
+		"equals the forward key": {
+			env:       map[string]string{"OTHERLODE_COLLECTOR_REDACT_SECRET": forwardKey},
+			redacting: true,
+			errHas:    "equals the forward key",
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := resolveRedactionSecret(envFrom(tt.env), tt.redacting, auth.NewTokenSet([]string{agentToken}), forwardKey)
+			if tt.errHas != "" {
+				if err == nil {
+					t.Fatalf("got secret %q, want an error containing %q", got, tt.errHas)
+				}
+				if !strings.Contains(err.Error(), tt.errHas) {
+					t.Fatalf("error %q does not contain %q", err, tt.errHas)
+				}
+				if secret := tt.env["OTHERLODE_COLLECTOR_REDACT_SECRET"]; len(strings.TrimSpace(secret)) > 3 && strings.Contains(err.Error(), strings.TrimSpace(secret)) {
+					t.Fatalf("error %q quotes the secret", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if string(got) != tt.want {
+				t.Fatalf("secret = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

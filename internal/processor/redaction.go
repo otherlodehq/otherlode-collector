@@ -19,15 +19,30 @@ const RedactedText = "…"
 // RedactionConfig configures a Redaction processor. A literal part is
 // redacted when AllLiterals is true or any pattern in BlockedValues
 // matches some of its text. A part counts as a literal unless its kind is
-// CODE or PLACEHOLDER. A zero RedactionConfig means the processor is off.
+// CODE or PLACEHOLDER. Secret keys the HMAC that replaces branch and site
+// keys. A zero RedactionConfig means the processor is off.
 type RedactionConfig struct {
 	BlockedValues []*regexp.Regexp
 	AllLiterals   bool
+	Secret        []byte
 }
 
 // Enabled reports whether the config redacts anything.
 func (c RedactionConfig) Enabled() bool {
 	return c.AllLiterals || len(c.BlockedValues) > 0
+}
+
+// Validate returns an error when the config is enabled and its Secret
+// fails CheckSecret, or when it is off and still holds a Secret. See ADR
+// 0007.
+func (c RedactionConfig) Validate() error {
+	if !c.Enabled() {
+		if len(c.Secret) > 0 {
+			return errSecretWithoutRedaction
+		}
+		return nil
+	}
+	return CheckSecret(c.Secret)
 }
 
 // Redaction is an ingest.Sink that hides string literals before a payload
@@ -42,6 +57,13 @@ func (c RedactionConfig) Enabled() bool {
 // newer agent can add a literal kind, so a part of an unknown kind fails
 // closed. A redacted part keeps its kind, and its text becomes
 // RedactedText. Names and files pass through unchanged.
+//
+// It replaces each branch key and site key with HMAC-SHA256 of the key
+// under the config's Secret, cut to 16 bytes and written as 32 lowercase
+// hex characters. The agent digests a site's string constants into its
+// keys, so a plain key lets anyone who holds it test guesses at a
+// redacted literal. Equal keys stay equal, which is all the server needs.
+// An empty key stays empty. See ADR 0007.
 //
 // It also drops unknown fields from every message of every payload. A
 // field the collector's bindings do not know could carry a literal that
@@ -69,8 +91,12 @@ var _ ingest.Sink = (*Redaction)(nil)
 
 // NewRedaction returns a Redaction that applies cfg before passing
 // payloads to next, logging to logger, or slog.Default() when logger is
-// nil.
+// nil. It panics when cfg fails Validate, since a weak secret would leave
+// every redacted literal open to guesses.
 func NewRedaction(next ingest.Sink, cfg RedactionConfig, logger *slog.Logger) *Redaction {
+	if err := cfg.Validate(); err != nil {
+		panic("processor.NewRedaction: " + err.Error())
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -86,12 +112,16 @@ func (r *Redaction) AcceptDeltaBatch(ctx context.Context, batch *otherlodepb.Del
 }
 
 // AcceptManifest redacts the literals in the branch sites of every probe,
-// drops unknown fields, marks the manifest if it lost any, then passes it
-// to next.
+// re-keys every branch key and site key, drops unknown fields, marks the
+// manifest if it lost any, then passes it to next.
 func (r *Redaction) AcceptManifest(ctx context.Context, manifest *otherlodepb.ProbeManifest) error {
+	keys := newRekeyer(r.cfg.Secret)
 	n := 0
 	for _, probe := range manifest.GetProbes() {
-		n += r.redactSites(probe.GetBranchSites())
+		if probe.HasBranchKey() && probe.GetBranchKey() != "" {
+			probe.SetBranchKey(keys.rekey(probe.GetBranchKey()))
+		}
+		n += r.redactSites(probe.GetBranchSites(), keys)
 	}
 	r.record(manifest.GetResource(), "manifest", n)
 	r.markStripped(manifest.GetResource(), "manifest", dropUnknown(manifest.ProtoReflect()))
@@ -99,13 +129,14 @@ func (r *Redaction) AcceptManifest(ctx context.Context, manifest *otherlodepb.Pr
 }
 
 // AcceptStaticBaseline redacts the literals in the branch sites of every
-// declared method, drops unknown fields, marks the baseline if it lost
-// any, then passes it to next.
+// declared method, re-keys every site key, drops unknown fields, marks the
+// baseline if it lost any, then passes it to next.
 func (r *Redaction) AcceptStaticBaseline(ctx context.Context, baseline *otherlodepb.StaticBaseline) error {
+	keys := newRekeyer(r.cfg.Secret)
 	n := 0
 	for _, class := range baseline.GetDeclaredClasses() {
 		for _, method := range class.GetMethods() {
-			n += r.redactSites(method.GetBranchSites())
+			n += r.redactSites(method.GetBranchSites(), keys)
 		}
 	}
 	r.record(baseline.GetResource(), "static_baseline", n)
@@ -114,10 +145,14 @@ func (r *Redaction) AcceptStaticBaseline(ctx context.Context, baseline *otherlod
 }
 
 // redactSites redacts each site's condition and each of its outcomes'
-// case labels. It returns the number of parts it replaced.
-func (r *Redaction) redactSites(sites []*otherlodepb.BranchSite) int {
+// case labels, and re-keys each site key. It returns the number of parts
+// it replaced.
+func (r *Redaction) redactSites(sites []*otherlodepb.BranchSite, keys *rekeyer) int {
 	n := 0
 	for _, site := range sites {
+		if site.HasSiteKey() && site.GetSiteKey() != "" {
+			site.SetSiteKey(keys.rekey(site.GetSiteKey()))
+		}
 		n += r.redactParts(site.GetCondition())
 		for _, outcome := range site.GetOutcomes() {
 			n += r.redactParts(outcome.GetCaseLabel())
@@ -155,7 +190,7 @@ func (r *Redaction) blocks(text string) bool {
 }
 
 // record counts n replaced parts and logs them once for the payload. It
-// never logs a literal's text.
+// never logs a literal's text or a key.
 func (r *Redaction) record(res *otherlodepb.ResourceAttributes, payload string, n int) {
 	if n == 0 {
 		return

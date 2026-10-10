@@ -130,6 +130,15 @@ func main() {
 		logger.Error(err.Error())
 		os.Exit(1)
 	}
+	var forwardKey string
+	if forwardCfg.AuthToken != nil {
+		forwardKey = forwardCfg.AuthToken.Token()
+	}
+	redactCfg.Secret, err = resolveRedactionSecret(os.Getenv, redactCfg.Enabled(), authTokens, forwardKey)
+	if err != nil {
+		logger.Error(err.Error())
+		os.Exit(1)
+	}
 
 	mux := http.NewServeMux()
 	fwd, err := registerRoutes(mux, routeConfig{
@@ -618,4 +627,71 @@ func resolveRedaction(blockedRaw, allLiteralsRaw string) (processor.RedactionCon
 		cfg.AllLiterals = all
 	}
 	return cfg, nil
+}
+
+// resolveRedactionSecret returns the secret that keys the HMAC over branch
+// and site keys while redaction is on (ADR 0007).
+// OTHERLODE_COLLECTOR_REDACT_SECRET holds the secret, with spaces around it
+// trimmed. OTHERLODE_COLLECTOR_REDACT_SECRET_FILE names a file that holds
+// exactly one secret, read with the token file rules. Setting both is an
+// error. The file is read once: a secret that changed during a run would
+// change every key from then on.
+//
+// It fails closed. With redacting true, a missing secret is an error, and
+// so is a secret that fails processor.CheckSecret. A secret equal to an
+// agent auth token or to forwardKey is an error, since every agent holds
+// the first and the backend holds the second. With redacting false, a set
+// variable is an error: the operator meant to protect the keys, and
+// redaction is off. No error quotes the secret.
+func resolveRedactionSecret(getenv func(string) string, redacting bool, authTokens *auth.TokenSet, forwardKey string) ([]byte, error) {
+	const (
+		valueVar = "OTHERLODE_COLLECTOR_REDACT_SECRET"
+		fileVar  = "OTHERLODE_COLLECTOR_REDACT_SECRET_FILE"
+	)
+	raw := getenv(valueVar)
+	path := getenv(fileVar)
+	if raw != "" && path != "" {
+		return nil, errors.New(valueVar + " and " + fileVar + " are both set; set one")
+	}
+	if !redacting {
+		if raw != "" || path != "" {
+			return nil, errors.New(valueVar + " or " + fileVar + " is set but redaction is off; " +
+				"set OTHERLODE_COLLECTOR_REDACT_BLOCKED_VALUES or OTHERLODE_COLLECTOR_REDACT_ALL_LITERALS, or unset the secret variable")
+		}
+		return nil, nil
+	}
+
+	var name, secret string
+	switch {
+	case path != "":
+		name = fileVar
+		tokens, err := tokenfile.Read(path)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		if err := tokenfile.ExactlyOne(tokens); err != nil {
+			return nil, fmt.Errorf("%s: %s: %w", name, path, err)
+		}
+		secret = tokens[0]
+	case raw != "":
+		name = valueVar
+		secret = strings.TrimSpace(raw)
+		if secret == "" {
+			return nil, errors.New(name + " holds only spaces")
+		}
+	default:
+		return nil, errors.New("redaction is on but neither " + valueVar + " nor " + fileVar + " is set; " +
+			"refusing to start, since plain branch and site keys let anyone who holds them test guesses at a redacted literal")
+	}
+
+	if err := processor.CheckSecret([]byte(secret)); err != nil {
+		return nil, fmt.Errorf("%s: %w", name, err)
+	}
+	if authTokens != nil && authTokens.Matches(secret) {
+		return nil, errors.New(name + " equals an agent auth token, which every agent holds; use a secret of its own")
+	}
+	if forwardKey != "" && secret == forwardKey {
+		return nil, errors.New(name + " equals the forward key, which the backend holds; use a secret of its own")
+	}
+	return []byte(secret), nil
 }
