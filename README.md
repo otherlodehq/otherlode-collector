@@ -474,7 +474,10 @@ CPUs (`GOMAXPROCS`), because decoding is CPU-bound and more parallel
 decodes than CPUs gain no throughput. A request reads its body first and
 takes a slot only after that, so a slow sender holds no slot. A request
 that waits for a slot is dropped if its client disconnects. One that
-waits more than 5 seconds gets `503` with `Retry-After: 1`. The forward
+waits more than 5 seconds gets `503` with `Retry-After: 1`. The collector
+logs a warning for such a refusal at most once a minute. Its
+`unlogged_busy_refusals` field counts the refusals since the previous
+warning that were not logged. The forward
 queue is also bounded by bytes: `OTHERLODE_COLLECTOR_FORWARD_QUEUE_BYTES`
 (default `67108864`, 64 MiB) is the budget per shard for queued and
 in-flight payloads. A shard over budget refuses new payloads with `503`,

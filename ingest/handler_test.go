@@ -1,9 +1,11 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1154,6 +1156,63 @@ func TestHandler_MaxConcurrentDecodes_BusyWaiterAnswers503AfterSlotWait(t *testi
 	}
 	if got := sink.calls.Load(); got != 1 {
 		t.Errorf("sink calls = %d, want 1 (the busy request must not reach it)", got)
+	}
+
+	sink.gate <- struct{}{}
+	<-first
+}
+
+// TestHandler_MaxConcurrentDecodes_BusyRefusalsLogAtMostOncePerInterval
+// pins that busy refusals are logged, and that a burst of them writes one
+// line, not one per request.
+func TestHandler_MaxConcurrentDecodes_BusyRefusalsLogAtMostOncePerInterval(t *testing.T) {
+	sink := newGateSink()
+	mux := http.NewServeMux()
+	var logs bytes.Buffer
+	h := NewHandler(sink, slog.New(slog.NewJSONHandler(&logs, nil)), WithMaxConcurrentDecodes(1))
+	h.slotWait = 10 * time.Millisecond
+	h.Register(mux)
+
+	first := make(chan struct{})
+	go func() {
+		mux.ServeHTTP(httptest.NewRecorder(), manifestRequest(context.Background(), t))
+		close(first)
+	}()
+	<-sink.entered
+
+	busyLines := func() []string {
+		var lines []string
+		for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+			if strings.Contains(line, "no decode slot came free") {
+				lines = append(lines, line)
+			}
+		}
+		return lines
+	}
+
+	for range 3 {
+		serveWithin(t, mux, httptest.NewRecorder(), manifestRequest(context.Background(), t))
+	}
+	lines := busyLines()
+	if len(lines) != 1 {
+		t.Fatalf("busy log lines after 3 refusals = %d, want 1: %q", len(lines), logs.String())
+	}
+	if !strings.Contains(lines[0], `"level":"WARN"`) || !strings.Contains(lines[0], `"unlogged_busy_refusals":0`) {
+		t.Errorf("first busy line = %s, want a WARN with unlogged_busy_refusals 0", lines[0])
+	}
+
+	// Once the interval has passed, the next refusal logs again and counts
+	// the two that wrote no line.
+	h.busyMu.Lock()
+	h.busyLogged = time.Now().Add(-h.busyLogEvery)
+	h.busyMu.Unlock()
+	serveWithin(t, mux, httptest.NewRecorder(), manifestRequest(context.Background(), t))
+	lines = busyLines()
+	if len(lines) != 2 {
+		t.Fatalf("busy log lines after the interval = %d, want 2: %q", len(lines), logs.String())
+	}
+	if !strings.Contains(lines[1], `"unlogged_busy_refusals":2`) {
+		t.Errorf("second busy line = %s, want unlogged_busy_refusals 2", lines[1])
 	}
 
 	sink.gate <- struct{}{}

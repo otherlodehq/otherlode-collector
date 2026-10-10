@@ -12,6 +12,7 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -98,6 +99,12 @@ type Handler struct {
 
 	// slotWait is the longest a request waits for a slot.
 	slotWait time.Duration
+
+	// busyMu guards busyLogged and busyUnlogged. See logBusy.
+	busyMu       sync.Mutex
+	busyLogEvery time.Duration
+	busyLogged   time.Time
+	busyUnlogged int
 }
 
 // maxSlotWait is how long a request waits for a decode slot. It is shorter
@@ -105,6 +112,10 @@ type Handler struct {
 // reaches the client. The write deadline starts when the headers are read,
 // so a slow body upload can still use up the rest.
 const maxSlotWait = 5 * time.Second
+
+// busyLogInterval is the shortest gap between two log lines for requests
+// refused because no decode slot came free.
+const busyLogInterval = time.Minute
 
 // HandlerOption configures a Handler. See NewHandler.
 type HandlerOption func(*Handler)
@@ -125,8 +136,9 @@ type HandlerOption func(*Handler)
 // one. If its context ends first, the Handler writes no response, since
 // the client is gone, and counts the request as rejected with reason
 // "canceled". If no slot comes free within five seconds, the Handler
-// answers 503 with "Retry-After: 1" and counts reason "busy". The wait is
-// bounded so the answer usually arrives before the server's write timeout.
+// answers 503 with "Retry-After: 1" and counts reason "busy". It logs a
+// warning for such refusals at most once a minute. The wait is bounded so
+// the answer usually arrives before the server's write timeout.
 func WithMaxConcurrentDecodes(n int) HandlerOption {
 	return func(h *Handler) {
 		if n > 0 {
@@ -141,7 +153,7 @@ func NewHandler(sink Sink, logger *slog.Logger, opts ...HandlerOption) *Handler 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	h := &Handler{sink: sink, logger: logger, slotWait: maxSlotWait}
+	h := &Handler{sink: sink, logger: logger, slotWait: maxSlotWait, busyLogEvery: busyLogInterval}
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -327,8 +339,8 @@ func (h *Handler) readRequest(w http.ResponseWriter, r *http.Request, kind paylo
 // acquire waits for a free decode slot. Without a cap it returns true at
 // once. It reports false when it took no slot. If ctx ends first, it
 // counts reason "canceled" and writes no response, since the client is
-// gone. If slotWait passes first, it counts reason "busy" and answers 503
-// with "Retry-After: 1".
+// gone. If slotWait passes first, it counts reason "busy", logs it through
+// logBusy and answers 503 with "Retry-After: 1".
 func (h *Handler) acquire(ctx context.Context, w http.ResponseWriter, kind payloadKind) bool {
 	if h.slots == nil {
 		return true
@@ -343,10 +355,34 @@ func (h *Handler) acquire(ctx context.Context, w http.ResponseWriter, kind paylo
 		return false
 	case <-timer.C:
 		metrics.IngestRejected.Inc(kind.label, "busy")
+		h.logBusy(kind)
 		w.Header().Set("Retry-After", "1")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		return false
 	}
+}
+
+// logBusy logs a request refused because no decode slot came free. Such
+// refusals come in bursts while the collector is overloaded, so it writes
+// at most one line per busyLogEvery. The line counts the refusals since
+// the previous line that wrote none of their own.
+func (h *Handler) logBusy(kind payloadKind) {
+	h.busyMu.Lock()
+	now := time.Now()
+	if !h.busyLogged.IsZero() && now.Sub(h.busyLogged) < h.busyLogEvery {
+		h.busyUnlogged++
+		h.busyMu.Unlock()
+		return
+	}
+	unlogged := h.busyUnlogged
+	h.busyLogged = now
+	h.busyUnlogged = 0
+	h.busyMu.Unlock()
+	h.logger.Warn("refusing "+kind.name+": no decode slot came free",
+		"wait", h.slotWait.String(),
+		"max_concurrent_decodes", cap(h.slots),
+		"unlogged_busy_refusals", unlogged,
+	)
 }
 
 // release frees the slot that a successful acquire took.
