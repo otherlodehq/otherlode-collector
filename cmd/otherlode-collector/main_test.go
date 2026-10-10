@@ -623,6 +623,16 @@ func TestResolveEnvironment(t *testing.T) {
 			action: "upsert",
 			want:   processor.EnvironmentConfig{Value: "prod", Action: processor.Upsert},
 		},
+		"action with surrounding spaces": {
+			value:  "prod",
+			action: " upsert ",
+			want:   processor.EnvironmentConfig{Value: "prod", Action: processor.Upsert},
+		},
+		"whitespace-only action without value": {
+			value:  "",
+			action: "  ",
+			want:   processor.EnvironmentConfig{},
+		},
 		"bad action": {
 			value:   "prod",
 			action:  "overwrite",
@@ -698,6 +708,11 @@ func TestResolveNamespace(t *testing.T) {
 		"value and upsert": {
 			value:  "team-a",
 			action: "UPSERT",
+			want:   processor.NamespaceConfig{Value: "team-a", Action: processor.Upsert},
+		},
+		"action with surrounding spaces": {
+			value:  "team-a",
+			action: "upsert\n",
 			want:   processor.NamespaceConfig{Value: "team-a", Action: processor.Upsert},
 		},
 		"bad action": {

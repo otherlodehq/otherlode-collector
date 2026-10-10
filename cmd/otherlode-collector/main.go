@@ -521,13 +521,14 @@ func positiveDurationEnv(getenv func(string) string, name string) (time.Duration
 
 // resolveEnvironment builds the processor.EnvironmentConfig from
 // OTHERLODE_COLLECTOR_ENVIRONMENT and
-// OTHERLODE_COLLECTOR_ENVIRONMENT_ACTION. A value that is blank after
-// trimming space turns the processor off. An action with no value is an
-// error: the operator meant to label payloads, and starting without the
-// label would hide that mistake. A value that is not valid UTF-8 is an
+// OTHERLODE_COLLECTOR_ENVIRONMENT_ACTION. It trims space around both. A
+// value that is blank after trimming turns the processor off. An action
+// with no value is an error: the operator meant to label payloads, and
+// starting without the label would hide that mistake. A value that is not valid UTF-8 is an
 // error, since a payload that carries it cannot be encoded for forwarding.
 func resolveEnvironment(valueRaw, actionRaw string) (processor.EnvironmentConfig, error) {
 	value := strings.TrimSpace(valueRaw)
+	actionRaw = strings.TrimSpace(actionRaw)
 	if !utf8.ValidString(value) {
 		return processor.EnvironmentConfig{}, errors.New("OTHERLODE_COLLECTOR_ENVIRONMENT is not valid UTF-8")
 	}
@@ -551,16 +552,17 @@ func resolveEnvironment(valueRaw, actionRaw string) (processor.EnvironmentConfig
 
 // resolveNamespace builds the processor.NamespaceConfig from
 // OTHERLODE_COLLECTOR_SERVICE_NAMESPACE and
-// OTHERLODE_COLLECTOR_SERVICE_NAMESPACE_ACTION. A value that is blank after
-// trimming space turns the processor off, so each agent's namespace
-// passes through unchanged. An action with no value is an error: the
-// operator meant to set a namespace, and starting without it would hide
-// that mistake. A value of "." or ".." is an error, since the ingest
+// OTHERLODE_COLLECTOR_SERVICE_NAMESPACE_ACTION. It trims space around
+// both. A value that is blank after trimming turns the processor off, so
+// each agent's namespace passes through unchanged. An action with no value
+// is an error: the operator meant to set a namespace, and starting without
+// it would hide that mistake. A value of "." or ".." is an error, since the ingest
 // handler rejects that namespace from an agent too. So is a value that is
 // not valid UTF-8, since a payload that carries it cannot be encoded for
 // forwarding.
 func resolveNamespace(valueRaw, actionRaw string) (processor.NamespaceConfig, error) {
 	value := strings.TrimSpace(valueRaw)
+	actionRaw = strings.TrimSpace(actionRaw)
 	if !utf8.ValidString(value) {
 		return processor.NamespaceConfig{}, errors.New("OTHERLODE_COLLECTOR_SERVICE_NAMESPACE is not valid UTF-8")
 	}

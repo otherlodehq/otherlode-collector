@@ -508,6 +508,8 @@ payload already names an environment:
 | `insert` (default) | Fills in the environment only when the agent left it blank; an agent's explicit value wins |
 | `upsert` | Always writes the collector's value, even over one the agent set; guarantees nothing passing through a prod collector is ever labelled anything else |
 
+The action ignores case and surrounding spaces.
+
 When the agent's value differs from the collector's, that is a mismatch:
 `otherlode_collector_environment_mismatch_total` goes up under either
 action, and a `debug` log line names the service, instance and run involved. A
@@ -549,6 +551,8 @@ payload already names a namespace:
 | --- | --- |
 | `insert` (default) | Fills in the namespace only for an agent that sent none; an agent's explicit value wins |
 | `upsert` | Always writes the collector's value, even over one the agent set |
+
+The action ignores case and surrounding spaces.
 
 The collector compares the two values after it trims surrounding spaces.
 Case counts: `Payments` and `payments` are different namespaces. An agent
