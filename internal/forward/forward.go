@@ -1,7 +1,9 @@
 // Package forward relays decoded ingest payloads to a backend. It uses the
-// shape this collector accepts from the agent: the same content type, body
-// and paths. It plays the role of an OTel Collector exporter. It forwards
-// what came in and does not change it.
+// shape this collector accepts from the agent: the same content type and
+// paths, with a protobuf body. It plays the role of an OTel Collector
+// exporter. It marshals the decoded message again, so the body it sends
+// holds what the processors left, not the bytes the agent sent. It changes
+// no field itself.
 package forward
 
 import (

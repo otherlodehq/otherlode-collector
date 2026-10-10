@@ -36,8 +36,9 @@ type Sink interface {
 
 // maxBodyBytes caps a single request body. A static baseline chunk can
 // hold up to 20000 method entries and reach several MiB. The agent does
-// not retry a 413: it stops sending the rest of the scan on the first
-// failure, so a false 413 loses the baseline for the life of that
+// not retry a 413 within one send. It keeps the chunk and the chunks after
+// it, and resends one after each flush the collector confirms. The limit
+// is fixed, so a false 413 holds back that scan for the life of the
 // process. This limit exists to bound memory use from a bad or hostile
 // sender, not to fit any expected payload size.
 const maxBodyBytes = 16 << 20 // 16 MiB

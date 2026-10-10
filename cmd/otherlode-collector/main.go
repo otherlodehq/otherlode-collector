@@ -39,9 +39,10 @@ const (
 	shutdownTimeout = 10 * time.Second
 
 	// defaultRateLimitRPS and defaultRateLimitBurst set the per-client-IP
-	// token bucket. An agent flushes every 30 to 60 seconds, so several
-	// instances behind one shared address stay far below 5 requests per
-	// second. A request storm from one address is still capped.
+	// token bucket. An agent flushes every 60 seconds by default, so
+	// several instances behind one shared address stay far below 5
+	// requests per second. A request storm from one address is still
+	// capped.
 	defaultRateLimitRPS   = 5
 	defaultRateLimitBurst = 20
 

@@ -27,9 +27,9 @@ const defaultStaleAfter = 10 * time.Minute
 // defaultMaxVisitors caps the number of tracked clients. When the map is
 // full, a request from a new client evicts the least recently used client.
 // An evicted client loses only its bucket and gets a fresh full one on its
-// next request. Agents flush every 30 to 60 seconds, so legitimate clients
-// stay near the front of the list. A flood of new keys pushes out idle
-// clients first, and never locks out a new one.
+// next request. Agents flush every 60 seconds by default, so legitimate
+// clients stay near the front of the list. A flood of new keys pushes out
+// idle clients first, and never locks out a new one.
 const defaultMaxVisitors = 100_000
 
 // DefaultIPv6Prefix keys each IPv6 address on its own.

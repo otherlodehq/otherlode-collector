@@ -24,7 +24,7 @@ be worth open-sourcing on its own, independent of any particular backend.
 ```
 Otherlode agent  --POST protobuf-->  otherlode-collector  -->  Sink
 (JVM, pushes                         (this repo,                (real backend:
- every 30-60s)                        decode only)               storage, aggregation)
+ every flush)                         decode only)               storage, aggregation)
 ```
 
 The agent's `HttpExporter` posts three payload types, matching
@@ -35,7 +35,9 @@ namespace and name together. The agent makes a fresh random run ID for each proc
 instance restarted under a pinned instance ID still names a different run.
 
 - `POST /v1/otherlode/deltas` — a `DeltaBatch`: resource attributes plus
-  per-probe hit counts since the last successful flush. Sent every flush interval even when empty, as a
+  per-probe hit totals, counted from the start of the process. A batch
+  carries a probe only when its total changed since the last batch the
+  collector confirmed. Sent every flush interval even when empty, as a
   liveness heartbeat — an idle instance and a dead one both need to be
   distinguishable from silence. It also carries endpoint hit totals, one
   entry per HTTP endpoint a web framework has matched a request to.
@@ -111,8 +113,9 @@ repo and is published to the Buf Schema Registry as
 - `metrics` — a handful of counters served at `GET /metrics` in
   the Prometheus text format, with no client library dependency.
 - `cmd/otherlode-collector` — a minimal HTTP server wiring the sink into
-  the handler and listening on `:4319` (the agent's default
-  `collectorEndpoint`), overridable via `OTHERLODE_COLLECTOR_ADDR`.
+  the handler and listening on `:4319` (the port in the agent's default
+  `exportUrl`, `http://localhost:4319`), overridable via
+  `OTHERLODE_COLLECTOR_ADDR`.
 
 ## Running it
 
@@ -125,7 +128,7 @@ OTHERLODE_COLLECTOR_INSECURE_NO_AUTH=1 go run ./cmd/otherlode-collector
 ```
 
 Listens on `:4319` by default; set `OTHERLODE_COLLECTOR_ADDR` to change
-that. Point the Otherlode agent's `collectorEndpoint` at it, or send a
+that. Point the Otherlode agent's `exportUrl` at it, or send a
 payload by hand. This posts a `DeltaBatch` for service `demo`, instance `i1`, run
 `r1`, with no probe deltas (the same shape the agent sends as an idle
 heartbeat):
@@ -144,8 +147,11 @@ and does nothing else with it.
 
 Logs are JSON lines on stdout at `info` and above. Set
 `OTHERLODE_COLLECTOR_LOG_LEVEL` to `debug`, `info`, `warn`, or `error` to
-change that. Without forwarding configured every payload is logged at
-`info`, so `warn` is the quiet setting for a busy collector.
+change that. Case does not matter. A level can take a signed offset, such
+as `warn+1` or `info-2`, to set a threshold between two named levels,
+which sit 4 apart. Any other value stops the collector at startup.
+Without forwarding configured every payload is logged at `info`, so
+`warn` is the quiet setting for a busy collector.
 
 ### Authentication
 
@@ -252,7 +258,7 @@ TLS-terminating reverse proxy or load balancer whenever agents reach it
 across a network you do not control. Without one, the agent's bearer
 token and every payload travel in the clear, including string literals,
 which the redaction processor only sees once they reach the collector.
-Point the agent's `endpoint` at the proxy's `https` URL, and make sure
+Point the agent's `exportUrl` at the proxy's `https` URL, and make sure
 agents and anything else outside your control can reach the listener
 only through the proxy; that is also the condition for setting
 `OTHERLODE_COLLECTOR_CLIENT_IP_HEADER` (see below). Probes and scrapers of
@@ -266,9 +272,10 @@ since that hop carries `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN`.
 `/v1/otherlode/deltas`, `/v1/otherlode/manifest`, and
 `/v1/otherlode/static-baseline` are throttled per client IP: 5
 requests/second with a burst of 20 by default, sized around the agent's
-30-60s flush interval. Override with `OTHERLODE_COLLECTOR_RATE_LIMIT_RPS`
-and `OTHERLODE_COLLECTOR_RATE_LIMIT_BURST`, or set the rate to `0` to
-disable it.
+flush interval, which is 60 seconds by default. Override with
+`OTHERLODE_COLLECTOR_RATE_LIMIT_RPS` and
+`OTHERLODE_COLLECTOR_RATE_LIMIT_BURST`, or set the rate to `0` to disable
+it.
 
 ```
 OTHERLODE_COLLECTOR_RATE_LIMIT_RPS=10 OTHERLODE_COLLECTOR_RATE_LIMIT_BURST=50 go run ./cmd/otherlode-collector
@@ -277,10 +284,15 @@ OTHERLODE_COLLECTOR_RATE_LIMIT_RPS=10 OTHERLODE_COLLECTOR_RATE_LIMIT_BURST=50 go
 A throttled request gets `429` with a `Retry-After` header.
 
 At startup an instance sends a manifest and then its static baseline
-chunks back to back. The agent stops a scan at the first chunk that
-fails, so a `429` on a chunk can lose that scan. Behind a proxy, set
-`OTHERLODE_COLLECTOR_CLIENT_IP_HEADER`. For pods behind one NAT address,
-raise `OTHERLODE_COLLECTOR_RATE_LIMIT_BURST`.
+chunks back to back. The agent retries a `429` a few times within one
+send. If a chunk still fails, the agent keeps it and the chunks after
+it. After each later flush that the collector confirms, the agent sends
+the next kept chunk, one chunk per flush. A `429` delays a scan but does
+not lose it. Only a `400` or `422` on a chunk makes the agent drop that
+chunk and the rest of the scan. Behind a proxy, set
+`OTHERLODE_COLLECTOR_CLIENT_IP_HEADER` so agents do not share one bucket.
+For pods behind one NAT address, raise
+`OTHERLODE_COLLECTOR_RATE_LIMIT_BURST`.
 
 The limit is keyed on the connection's remote address. Behind a reverse
 proxy or load balancer every agent arrives from the proxy's address and
@@ -309,8 +321,8 @@ and per-node pod ranges often do.
 The limiter tracks at most 100,000 clients. When that many are tracked,
 a request from a new client evicts the least recently used one. The
 evicted client loses only its bucket and gets a fresh full one on its
-next request. Agents flush every 30 to 60 seconds, so they stay near the
-front of the list.
+next request. An agent sends at least one request every flush interval,
+60 seconds by default, so it stays near the front of the list.
 
 `/healthz` is never throttled, for the same liveness/readiness reason it's
 never gated on auth.
