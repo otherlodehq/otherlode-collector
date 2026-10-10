@@ -234,6 +234,10 @@ outside your machine), opt out explicitly:
 OTHERLODE_COLLECTOR_INSECURE_NO_AUTH=1 go run ./cmd/otherlode-collector
 ```
 
+`OTHERLODE_COLLECTOR_INSECURE_NO_AUTH` takes `1`, `t`, `true`, `0`, `f`
+or `false`, and `true` and `false` in upper or title case. Any other value
+stops the collector at startup, even when a token is set.
+
 Or as a container. The same fail-closed rule applies, so the token (or
 the explicit opt-out) has to be passed in. Each release publishes an image
 for `linux/amd64` and `linux/arm64`, tagged with its version, its

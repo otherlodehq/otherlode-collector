@@ -157,6 +157,10 @@ func TestResolveAuthTokens(t *testing.T) {
 			env:     map[string]string{"OTHERLODE_COLLECTOR_INSECURE_NO_AUTH": "not-a-bool"},
 			wantErr: true,
 		},
+		"token set, unparsable opt-out": {
+			env:     map[string]string{"OTHERLODE_COLLECTOR_AUTH_TOKEN": "s3cret", "OTHERLODE_COLLECTOR_INSECURE_NO_AUTH": "yes"},
+			wantErr: true,
+		},
 	}
 
 	for name, tt := range tests {
@@ -191,6 +195,21 @@ func TestResolveAuthTokens(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestResolveAuthTokens_UnparsableOptOut_ErrorNamesVariableAndValue pins
+// that a typo in the opt-out stops startup with a message that points at
+// it, instead of the generic "no token set" error.
+func TestResolveAuthTokens_UnparsableOptOut_ErrorNamesVariableAndValue(t *testing.T) {
+	_, _, err := resolveAuthTokens(envFrom(map[string]string{"OTHERLODE_COLLECTOR_INSECURE_NO_AUTH": "ture"}))
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	for _, want := range []string{"OTHERLODE_COLLECTOR_INSECURE_NO_AUTH", `"ture"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %s", err, want)
+		}
 	}
 }
 

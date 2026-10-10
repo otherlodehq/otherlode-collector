@@ -210,11 +210,20 @@ func resolveLogLevel(raw string) (slog.Level, error) {
 //
 // It fails closed. With neither variable set, it is an error unless
 // OTHERLODE_COLLECTOR_INSECURE_NO_AUTH explicitly opts out, and then both
-// results are nil. A token file that cannot be read or holds no token is
+// results are nil. OTHERLODE_COLLECTOR_INSECURE_NO_AUTH takes
+// strconv.ParseBool syntax. A value it cannot parse is an error even when
+// a token is set, so a typo cannot pass for "off". A token file that cannot be read or holds no token is
 // an error even with the opt-out, since the operator asked for that file.
 func resolveAuthTokens(getenv func(string) string) (*auth.TokenSet, *tokenfile.File, error) {
 	raw := getenv("OTHERLODE_COLLECTOR_AUTH_TOKEN")
 	path := getenv("OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE")
+	insecureNoAuth := false
+	if noAuthRaw := getenv("OTHERLODE_COLLECTOR_INSECURE_NO_AUTH"); noAuthRaw != "" {
+		var err error
+		if insecureNoAuth, err = strconv.ParseBool(noAuthRaw); err != nil {
+			return nil, nil, fmt.Errorf("OTHERLODE_COLLECTOR_INSECURE_NO_AUTH: %w", err)
+		}
+	}
 	if raw != "" && path != "" {
 		return nil, nil, errors.New("OTHERLODE_COLLECTOR_AUTH_TOKEN and OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE are both set; set one")
 	}
@@ -236,7 +245,6 @@ func resolveAuthTokens(getenv func(string) string) (*auth.TokenSet, *tokenfile.F
 		return auth.NewTokenSet(list), nil, nil
 	}
 
-	insecureNoAuth, _ := strconv.ParseBool(getenv("OTHERLODE_COLLECTOR_INSECURE_NO_AUTH"))
 	if insecureNoAuth {
 		return nil, nil, nil
 	}
