@@ -514,6 +514,10 @@ payload already names an environment:
 
 The action ignores case and surrounding spaces.
 
+The collector compares the two environments as the server does. It trims
+surrounding spaces and ignores case, so ` Prod` and `prod` are one
+environment. An agent value made only of spaces counts as none.
+
 When the agent's value differs from the collector's, that is a mismatch:
 `otherlode_collector_environment_mismatch_total` goes up under either
 action, and a `debug` log line names the service, instance and run involved. A

@@ -106,10 +106,12 @@ func (e *Environment) AcceptManifest(ctx context.Context, manifest *otherlodepb.
 	return e.next.AcceptManifest(ctx, manifest)
 }
 
-// stamp applies the configured environment to res. It fills in an empty
-// environment under both actions. When the agent named a different
-// environment, stamp counts and logs the mismatch, and overwrites the
-// agent's value only under Upsert. A nil res is left alone:
+// stamp applies the configured environment to res. Under both actions it
+// fills in an environment that is empty or only spaces. It compares the
+// agent's environment with the configured one as the server does (see
+// sameEnvironment). When the agent named a different environment, stamp
+// counts and logs the mismatch. Under Upsert it writes the configured
+// value over the agent's, matching or not. A nil res is left alone:
 // ingest.Handler rejects such a payload before any sink sees it, but an
 // Environment used without the handler must not panic on one.
 func (e *Environment) stamp(res *otherlodepb.ResourceAttributes, payload string) {
@@ -117,11 +119,14 @@ func (e *Environment) stamp(res *otherlodepb.ResourceAttributes, payload string)
 		return
 	}
 	agentEnv := res.GetEnvironment()
-	if agentEnv == "" {
+	if strings.TrimSpace(agentEnv) == "" {
 		res.SetEnvironment(e.cfg.Value)
 		return
 	}
-	if agentEnv == e.cfg.Value {
+	if sameEnvironment(agentEnv, e.cfg.Value) {
+		if e.cfg.Action == Upsert {
+			res.SetEnvironment(e.cfg.Value)
+		}
 		return
 	}
 
@@ -139,4 +144,19 @@ func (e *Environment) stamp(res *otherlodepb.ResourceAttributes, payload string)
 	if e.cfg.Action == Upsert {
 		res.SetEnvironment(e.cfg.Value)
 	}
+}
+
+// sameEnvironment reports whether a and b name one environment, as
+// normaliseEnvironment reads them.
+func sameEnvironment(a, b string) bool {
+	return normaliseEnvironment(a) == normaliseEnvironment(b)
+}
+
+// normaliseEnvironment returns name as the server stores it: trimmed and
+// lowercased. " Prod" and "prod" are one environment there, so they must
+// not count as a mismatch here. It lowercases instead of using
+// strings.EqualFold, because case folding matches some pairs that
+// lowercasing keeps apart, and the server lowercases.
+func normaliseEnvironment(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
 }

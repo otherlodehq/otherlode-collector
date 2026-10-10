@@ -146,6 +146,52 @@ func TestEnvironment_EqualValue_CounterUnchanged(t *testing.T) {
 	}
 }
 
+// TestEnvironment_SameNameAsTheServerReadsIt_NoMismatch pins that the
+// processor compares environments as the server does: trimmed and
+// lowercased. " Prod " and "prod" are one environment there.
+func TestEnvironment_SameNameAsTheServerReadsIt_NoMismatch(t *testing.T) {
+	tests := map[Action]string{Insert: " Prod ", Upsert: "prod"}
+	for action, want := range tests {
+		t.Run(action.String(), func(t *testing.T) {
+			before := metrics.EnvironmentMismatch.Value("deltas")
+
+			env := NewEnvironment(&recordingSink{}, EnvironmentConfig{Value: "prod", Action: action}, nil)
+			res := &otherlodepb.ResourceAttributes{ServiceName: "svc", ServiceInstanceId: "i1", RunId: "run-1"}
+			res.SetEnvironment(" Prod ")
+			batch := &otherlodepb.DeltaBatch{Resource: res}
+
+			if err := env.AcceptDeltaBatch(context.Background(), batch); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := batch.GetResource().GetEnvironment(); got != want {
+				t.Fatalf("environment = %q, want %q", got, want)
+			}
+			if got := metrics.EnvironmentMismatch.Value("deltas") - before; got != 0 {
+				t.Fatalf("mismatch counter increased by %d, want 0", got)
+			}
+		})
+	}
+}
+
+func TestEnvironment_Insert_SpacesOnlyAgentValue_Stamped(t *testing.T) {
+	before := metrics.EnvironmentMismatch.Value("deltas")
+
+	env := NewEnvironment(&recordingSink{}, EnvironmentConfig{Value: "prod", Action: Insert}, nil)
+	res := &otherlodepb.ResourceAttributes{ServiceName: "svc", ServiceInstanceId: "i1", RunId: "run-1"}
+	res.SetEnvironment("   ")
+	batch := &otherlodepb.DeltaBatch{Resource: res}
+
+	if err := env.AcceptDeltaBatch(context.Background(), batch); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := batch.GetResource().GetEnvironment(); got != "prod" {
+		t.Fatalf("environment = %q, want %q", got, "prod")
+	}
+	if got := metrics.EnvironmentMismatch.Value("deltas") - before; got != 0 {
+		t.Fatalf("mismatch counter increased by %d, want 0", got)
+	}
+}
+
 func TestEnvironment_Upsert_DifferentAgentValue_OverwrittenAndMismatchCounted(t *testing.T) {
 	before := metrics.EnvironmentMismatch.Value("deltas")
 
