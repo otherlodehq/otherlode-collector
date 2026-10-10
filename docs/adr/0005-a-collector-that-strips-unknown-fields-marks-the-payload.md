@@ -24,3 +24,7 @@ When the redaction processor removes at least one unknown field from a payload, 
 ## Amended on 2026-10-05: the latest collector, not the agent's version
 
 The collector is versioned on its own (ADR 0006), so the fix a stripped run points to is upgrading to the latest collector, which serves every older agent. The WARNING and the README say that instead of naming the agent's version.
+
+## Amended on 2026-10-10: one WARNING per run
+
+The redaction processor logs the WARNING once per run id, not once per instance. A run is what the server labels, and an instance restarted under a pinned instance ID starts a new run that needs its own warning.
