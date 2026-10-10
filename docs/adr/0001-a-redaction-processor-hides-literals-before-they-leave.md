@@ -1,5 +1,5 @@
 ---
-status: accepted, amended by ADR 0005
+status: accepted, amended by ADRs 0005 and 0007
 ---
 
 # A redaction processor hides literals before they leave the collector

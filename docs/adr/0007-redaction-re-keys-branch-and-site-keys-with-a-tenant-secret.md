@@ -1,0 +1,34 @@
+---
+status: accepted, amends ADR 0001
+---
+
+# Redaction re-keys branch and site keys with a tenant secret
+
+Decided on 2026-10-10. Luke approved the design after a review of redaction found that the keys give a redacted literal away.
+
+The agent names each branch outcome and each site with a key: the first 16 bytes of SHA-256 over the class name, the method name and descriptor, the origin class, the condition's fingerprint and the outcome (agent ADR 0031). The fingerprint holds the condition's string constants. A string switch the agent reads back names each case by its literal (agent ADR 0038). Every other input is in the manifest. So whoever holds a redacted payload, Otherlode or anyone who can read the tenant's data, can hash a guess at a blanked literal and compare it with the key. Short secrets fall quickly: tokens, flag names, host names and email addresses. ADR 0001 listed this as a consequence and accepted it. This record reverses that.
+
+ADR 0001 rejected a keyed hash because a secret per collector would split one service's history between collectors. A secret that every collector of a tenant shares answers that. Keys stay a pure function of the bytecode for a fixed secret, which is what agent ADR 0031 needs to join builds.
+
+## The design
+
+- **An HMAC over each key.** While redaction is on, the collector replaces every `ProbeLocation.branch_key` and `BranchSite.site_key` with HMAC-SHA256 of the key under a secret. It keeps the first 16 bytes and writes them as 32 lowercase hex characters, the shape the agent sends. Equal keys stay equal and different keys stay different. The server needs nothing more, since it compares keys for equality and never recomputes them. An unset or empty key stays as it is. Without the secret, nobody can check a guess at a literal against a key.
+- **One secret per tenant.** Every collector that sends to one tenant uses the same secret, in every environment and on the path test runs take. Otherwise one build gets different keys through two collectors, and the server splits one branch's history in two. A collector cannot see another collector's secret. So at startup it logs a fingerprint of its own: the first 8 bytes of HMAC-SHA256 of a fixed label under the secret, as 16 hex characters. Operators compare the fingerprints. No log holds the secret.
+- **Two settings, as for the tokens.** `OTHERLODE_COLLECTOR_REDACT_SECRET` holds the secret, with spaces around it trimmed. `OTHERLODE_COLLECTOR_REDACT_SECRET_FILE` names a file that holds it, read under the token file rules of ADR 0003. Setting both is an error.
+- **Fail closed.** With redaction on, startup stops when neither setting is given, when the secret is shorter than 32 bytes or holds a control character, and when it equals an agent auth token or the forward key. Every agent holds the auth token, and the backend holds the forward key. A secret set while redaction is off also stops startup, since the operator meant to protect the keys and nothing does. The collector never generates a secret, since a secret each collector made for itself would differ between collectors. 32 bytes is the size of an HMAC-SHA256 key, and `openssl rand -hex 32` prints 64.
+- **Read once.** The collector reads the secret at startup and never again, unlike the token files. A secret that changed during a run would change every key from then on.
+- **Case keys that are a literal's hash code are cleared.** A string switch whose lowering the agent cannot read stays a plain switch on `String.hashCode()`. Each case's `case_key` is then the hash code of one literal, and the literals sit in the conditions of the `equals` checks in the same method. While redaction is on, the collector clears every case key that equals the Java hash code of a literal it redacted in the same method. `otherlode_collector_redacted_case_keys_total` counts them. The wire carries no mark that says a switch is a hash-code switch, so the value is the signal.
+
+## Considered options
+
+- **A secret in every agent JVM.** The agent would key its own digest, and no plain key would leave the JVM. Rejected: the secret would sit in the configuration of every service and every test JVM, and an agent that posts straight to a backend would need one too. Redaction has one home, the collector (ADR 0001), and the secret belongs beside the redaction rules.
+- **A secret each collector generates.** Rejected: keys would differ between collectors and between restarts.
+- **Dropping `case_key` from every case while redaction is on.** Rejected: the server resolves a call edge's guard across builds by matching a baseline's case to a running one on role, case key and label. An ordinary switch on an integer would lose that match, and only a hash-code switch leaks a literal.
+
+## Consequences
+
+- Turning redaction on, or changing the secret, changes every key. The server then treats every branch and site as new. The history it holds under the old keys stops growing, and the new keys start their own. No tooling rotates the secret without that break.
+- A tenant must give every collector the same secret, and no collector can enforce it. A collector with another secret splits history the same way. The fingerprint in each startup log is how an operator checks.
+- A payload that does not pass through a redacting collector with the tenant's secret carries plain keys. A test JVM that posts straight to the backend, or through a collector with redaction off, sends its conditions in clear. It also sends the plain keys of every production class it loads, and those undo the HMAC for the literals in them. The server joins test-run call edges to production by class and method name, not by key, so findings about methods called only by tests still work.
+- A cleared case has neither a key nor a label. The server shows it unnamed and cannot match it across builds by identity. A case of an integer switch whose key equals the hash code of a literal redacted in the same method loses its key as well.
+- A hash-code case key whose literal is not in the payload stays. That happens when the agent could not write the `equals` check's condition. The hash code is a 32-bit digest of the literal, so it still lets someone test guesses at it.
