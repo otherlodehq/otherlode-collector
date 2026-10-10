@@ -26,8 +26,8 @@ import (
 //
 // ctx is the request's context, so middleware such as an auth or tenant
 // resolver can attach request scope for the sink to read back. A non-nil
-// error means the payload was not taken: the handler answers 503 and the
-// sender is expected to retry.
+// error means the payload was not taken: the handler answers 503 with
+// "Retry-After: 5" and the sender is expected to retry.
 type Sink interface {
 	AcceptDeltaBatch(ctx context.Context, batch *otherlodepb.DeltaBatch) error
 	AcceptManifest(ctx context.Context, manifest *otherlodepb.ProbeManifest) error
@@ -291,11 +291,19 @@ func (h *Handler) reject(w http.ResponseWriter, kind payloadKind, err error) {
 	http.Error(w, "invalid "+kind.name+": "+err.Error(), http.StatusBadRequest)
 }
 
-// sinkFailed answers a valid payload the sink did not take with 503 and
-// no body, so the sender retries instead of the data being lost.
+// sinkRetryAfter is the Retry-After value, in seconds, on a 503 for a
+// payload the sink did not take. A forwarder's full queue empties at the
+// backend's pace, so a sender that honours the header waits longer than
+// after a busy refusal.
+const sinkRetryAfter = "5"
+
+// sinkFailed answers a valid payload the sink did not take with 503,
+// "Retry-After: 5" and no body, so the sender retries instead of the data
+// being lost.
 func (h *Handler) sinkFailed(w http.ResponseWriter, kind payloadKind, err error) {
 	h.logger.Error("sink rejected "+kind.name, "error", err)
 	metrics.IngestRejected.Inc(kind.label, "sink")
+	w.Header().Set("Retry-After", sinkRetryAfter)
 	w.WriteHeader(http.StatusServiceUnavailable)
 }
 

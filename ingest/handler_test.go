@@ -830,6 +830,9 @@ func TestHandler_SinkError_Returns503AndIncrementsRejected(t *testing.T) {
 			if resp.StatusCode != http.StatusServiceUnavailable {
 				t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
 			}
+			if got := resp.Header.Get("Retry-After"); got != "5" {
+				t.Errorf("Retry-After = %q, want %q", got, "5")
+			}
 			body, err := io.ReadAll(resp.Body)
 			if err != nil {
 				t.Fatalf("read body: %v", err)

@@ -347,7 +347,7 @@ wildcard), exiting 0 or 1, and never through a proxy. The image's
 | Counter | Labels | Meaning |
 | --- | --- | --- |
 | `otherlode_collector_ingest_accepted_total` | `payload` | Decoded, valid, handed to the sink |
-| `otherlode_collector_ingest_rejected_total` | `payload`, `reason` | Turned away before or by the sink: `content_type` (also a `Content-Encoding` other than `identity`, answered `415`), `too_large`, `read`, `malformed`, `invalid`, `sink` (the sink refused the payload; the response was `503`), `canceled` (the client went away while the request waited for a decode slot), `busy` (no decode slot came free within 5 seconds; the response was `503`) |
+| `otherlode_collector_ingest_rejected_total` | `payload`, `reason` | Turned away before or by the sink: `content_type` (also a `Content-Encoding` other than `identity`, answered `415`), `too_large`, `read`, `malformed`, `invalid`, `sink` (the sink refused the payload; the response was `503` with `Retry-After: 5`), `canceled` (the client went away while the request waited for a decode slot), `busy` (no decode slot came free within 5 seconds; the response was `503`) |
 | `otherlode_collector_auth_rejected_total` | | 401 responses |
 | `otherlode_collector_token_reload_failures_total` | `file` | A token file re-read that failed or found no usable token, so the last good value stayed; `file` is `auth` (`OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE`) or `forward` (`OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE`) |
 | `otherlode_collector_rate_limited_total` | | 429 responses |
@@ -417,9 +417,10 @@ payload is decoded and queued; background workers deliver it, retrying
 `429`, `502`, `503`, `504` and transport errors that bring no response
 with exponential backoff for up to five minutes.
 When the payload's queue is full, or the collector is shutting down, the
-collector answers `503` instead and does not take the payload. The agent
-treats that like any failed flush: it retries a few times, then keeps its
-counts and sends them on its next flush, so nothing is lost. The agent
+collector answers `503` with `Retry-After: 5` instead and does not take
+the payload. The agent does not read `Retry-After`. It treats the `503`
+like any failed flush: it retries a few times, then keeps its counts and
+sends them on its next flush, so nothing is lost. The agent
 reports a probe again only when its hit count changes. If the collector
 acknowledged a payload and then dropped it, a rarely hit probe could look
 dead for the life of that agent instance.
