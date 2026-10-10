@@ -439,6 +439,16 @@ forwarder after the drain starts gets `503`, and the agent sends it
 again. Each shard drains in parallel with the others, and in order
 within its own shard.
 
+Each dropped payload logs a warning, such as `dropping payload:
+permanent failure`, with the namespace, service, instance and path it
+belonged to. For a backend response, `error` gives the status. When the
+response body is a JSON object with an `error` string, the warning adds
+it as `backend_error`, cut to 64 bytes, with each byte outside printable
+ASCII replaced by `?`. A 403 with `backend_error` set to
+`redaction_required` or `redaction_secret_mismatch` means the backend
+wants redacted payloads, and this collector has redaction off or a
+different secret. See [Branch and site keys](#branch-and-site-keys).
+
 The request timeout and retry defaults match the OTLP HTTP exporter's.
 The shard count, queue size and queue byte budget are this collector's
 own. The defaults should rarely need changing. Each can be overridden;

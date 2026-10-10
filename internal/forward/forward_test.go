@@ -1452,3 +1452,96 @@ func TestNewForwardingSink_FingerprintNotAHeaderValue_ReturnsError(t *testing.T)
 		t.Fatal("NewForwardingSink accepted a fingerprint with a newline")
 	}
 }
+
+// dropLogFor sends one manifest to a backend that answers status with
+// body, and returns the sink's log once the manifest is dropped.
+func dropLogFor(t *testing.T, status int, body string) string {
+	t.Helper()
+	var logs syncBuffer
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		io.WriteString(w, body)
+	}))
+	defer backend.Close()
+
+	cfg := testConfig(backend.URL)
+	cfg.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
+	sink := mustNewSink(t, cfg)
+	defer sink.Shutdown(context.Background())
+	if err := sink.AcceptManifest(context.Background(), manifestWithService("demo-service")); err != nil {
+		t.Fatalf("AcceptManifest: %v", err)
+	}
+	waitFor(t, time.Second, func() bool { return strings.Contains(logs.String(), "dropping payload") })
+	return logs.String()
+}
+
+// syncBuffer is a bytes.Buffer safe for the sink's worker and the test.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestForwardingSink_DropLog_NamesBackendErrorCode(t *testing.T) {
+	for _, code := range []string{"redaction_required", "redaction_secret_mismatch"} {
+		t.Run(code, func(t *testing.T) {
+			got := dropLogFor(t, http.StatusForbidden, `{"error":"`+code+`"}`)
+			for _, want := range []string{
+				`"msg":"dropping payload: permanent failure"`,
+				`"error":"backend returned 403 Forbidden"`,
+				`"backend_error":"` + code + `"`,
+			} {
+				if !strings.Contains(got, want) {
+					t.Fatalf("drop log does not contain %s:\n%s", want, got)
+				}
+			}
+		})
+	}
+}
+
+func TestForwardingSink_DropLog_NoErrorCode_NoAttribute(t *testing.T) {
+	for name, body := range map[string]string{
+		"empty body":     "",
+		"not JSON":       "<html>forbidden</html>",
+		"no error field": `{"message":"forbidden"}`,
+		"error not text": `{"error":42}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := dropLogFor(t, http.StatusForbidden, body)
+			if !strings.Contains(got, "dropping payload: permanent failure") {
+				t.Fatalf("no drop log:\n%s", got)
+			}
+			if strings.Contains(got, "backend_error") {
+				t.Fatalf("drop log has backend_error for body %q:\n%s", body, got)
+			}
+		})
+	}
+}
+
+func TestErrorCode_BoundedAndCleaned(t *testing.T) {
+	long := strings.Repeat("x", 200)
+	for body, want := range map[string]string{
+		`{"error":"redaction_required"}`:       "redaction_required",
+		`{"error":"` + long + `"}`:             long[:maxErrorCodeBytes],
+		`{"error":"bad\nline\u0007"}`:          "bad?line?",
+		`{"error":"caf\u00e9"}`:                "caf??",
+		`{"error":"redaction_required","x":1}`: "redaction_required",
+		`not json`:                             "",
+	} {
+		if got := errorCode([]byte(body)); got != want {
+			t.Errorf("errorCode(%q) = %q, want %q", body, got, want)
+		}
+	}
+}

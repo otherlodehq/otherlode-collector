@@ -9,6 +9,7 @@ package forward
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -43,6 +44,9 @@ const (
 	// before the connection is released. A 202 carries no body worth
 	// reading; the read only exists to let the connection be reused.
 	maxResponseBytes = 64 << 10
+
+	// maxErrorCodeBytes bounds the backend error code a drop log carries.
+	maxErrorCodeBytes = 64
 
 	// RedactionHeader is the request header that carries the redaction
 	// secret's fingerprint while redaction is on (ADR 0007).
@@ -517,6 +521,10 @@ func (s *ForwardingSink) dropped(item queuedItem, reason string, err error) {
 	}
 	if err != nil {
 		attrs = append(attrs, "error", err)
+		var backendErr *backendError
+		if errors.As(err, &backendErr) && backendErr.code != "" {
+			attrs = append(attrs, "backend_error", backendErr.code)
+		}
 	}
 	s.cfg.Logger.Warn("dropping payload: "+dropReasons[reason], attrs...)
 	metrics.ForwardDropped.Inc(ingest.PayloadLabel(item.path), reason)
@@ -638,16 +646,52 @@ func (s *ForwardingSink) attempt(ctx context.Context, item queuedItem) (retryabl
 		return true, 0, err
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBytes))
-
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBytes))
 		return false, 0, nil
 	}
-	err = fmt.Errorf("backend returned %s", resp.Status)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	err = &backendError{status: resp.Status, code: errorCode(body)}
 	if !isRetryableStatus(resp.StatusCode) {
 		return false, 0, err
 	}
 	return true, parseRetryAfter(resp.Header, time.Now()), err
+}
+
+// backendError is a response from the backend outside 2xx. code is the
+// "error" field of the backend's JSON body, as errorCode cleans it, or ""
+// when the body has none.
+type backendError struct {
+	status string
+	code   string
+}
+
+func (e *backendError) Error() string {
+	return "backend returned " + e.status
+}
+
+// errorCode returns the "error" string of body, a JSON object such as
+// {"error":"redaction_required"}, or "" when body is not such an object.
+// The backend's code goes into a log line, so errorCode keeps at most
+// maxErrorCodeBytes and replaces each byte outside printable ASCII with
+// '?'.
+func errorCode(body []byte) string {
+	var parsed struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(body, &parsed) != nil {
+		return ""
+	}
+	code := []byte(parsed.Error)
+	if len(code) > maxErrorCodeBytes {
+		code = code[:maxErrorCodeBytes]
+	}
+	for i, c := range code {
+		if c < 0x20 || c > 0x7e {
+			code[i] = '?'
+		}
+	}
+	return string(code)
 }
 
 func isRetryableStatus(code int) bool {
