@@ -1,11 +1,5 @@
-buf.build/gen/go/otherlode/otherlode/protocolbuffers/go v1.36.12-20261004114336-6678da8b5667.2 h1:pbrAQ2Po34PoWWka5SQbG7A1/5N1vP/h3skX7eYwwYU=
-buf.build/gen/go/otherlode/otherlode/protocolbuffers/go v1.36.12-20261004114336-6678da8b5667.2/go.mod h1:yi9G4+iayXI4ynW7qqgZj+OUiXPsrkhDMuUau/Lu1M0=
-buf.build/gen/go/otherlode/otherlode/protocolbuffers/go v1.36.12-20261004224552-582df6f78711.2 h1:bvOSC+El60g1vr6hWr7hDVtCkB8K2A+l6rnE+BlabjI=
-buf.build/gen/go/otherlode/otherlode/protocolbuffers/go v1.36.12-20261004224552-582df6f78711.2/go.mod h1:yi9G4+iayXI4ynW7qqgZj+OUiXPsrkhDMuUau/Lu1M0=
-buf.build/gen/go/otherlode/otherlode/protocolbuffers/go v1.36.12-20261006202525-25e52d63b5a4.2 h1:FGmkCYyd4VYAaAt//NNKsI20bnVqSvWFe4DjffusEKo=
-buf.build/gen/go/otherlode/otherlode/protocolbuffers/go v1.36.12-20261006202525-25e52d63b5a4.2/go.mod h1:yi9G4+iayXI4ynW7qqgZj+OUiXPsrkhDMuUau/Lu1M0=
-buf.build/gen/go/otherlode/otherlode/protocolbuffers/go v1.36.12-20261007193501-8650a7490d63.2 h1:ZZHb/Y0SVjOHcbIIzVsK2AgZZV607DI6rgrmty7loX4=
-buf.build/gen/go/otherlode/otherlode/protocolbuffers/go v1.36.12-20261007193501-8650a7490d63.2/go.mod h1:yi9G4+iayXI4ynW7qqgZj+OUiXPsrkhDMuUau/Lu1M0=
+buf.build/gen/go/otherlode/otherlode/protocolbuffers/go v1.36.12-20261010161314-cf4682b2ab9c.2 h1:a3jv4wix73tVDRidLeeGF0Z1vhGEwUvB84maKlgCYiw=
+buf.build/gen/go/otherlode/otherlode/protocolbuffers/go v1.36.12-20261010161314-cf4682b2ab9c.2/go.mod h1:yi9G4+iayXI4ynW7qqgZj+OUiXPsrkhDMuUau/Lu1M0=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
 golang.org/x/time v0.16.0 h1:vMb6ptszcQMkcwiRTAuNNU50gom6++Q/6gY2hDM6VDE=
