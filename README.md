@@ -611,7 +611,7 @@ a secret, set as described under
 | Variable | Meaning |
 | --- | --- |
 | `OTHERLODE_COLLECTOR_REDACT_BLOCKED_VALUES` | Regular expressions in Go syntax, one per line, since a comma can appear inside a pattern. A literal that any of them matches anywhere in its text is redacted. Anchor a pattern with `^` and `$` to match the whole literal. Blank lines are ignored. |
-| `OTHERLODE_COLLECTOR_REDACT_ALL_LITERALS` | `1` or `true` redacts every string literal. |
+| `OTHERLODE_COLLECTOR_REDACT_ALL_LITERALS` | `1`, `t` or `true`, with `true` also in upper or title case, redacts every string literal. `0`, `f` or `false`, in the same forms, leaves this setting off. |
 
 ```
 OTHERLODE_COLLECTOR_REDACT_BLOCKED_VALUES='(?i)password|secret|token
@@ -633,12 +633,6 @@ fields when it re-encodes a message for forwarding. An agent built
 against a newer schema than this collector could send a new field that
 carries a literal, and the collector would forward it unseen. The cost is
 that a newer agent's new fields are lost until the collector is updated.
-`test_run`, which marks a run in the adopter's test JVM (agent ADR 0050),
-is a field that older collectors drop this way. With redaction on, such a
-collector forwards a test run as an ordinary run in the `test`
-environment. If the test JVM names an environment, or the collector
-stamps its own with `upsert`, the run lands in that environment instead.
-So update the collector before an agent sets `testRun`.
 
 A payload that loses at least one field this way is marked. The collector
 sets `fields_stripped` on the payload's resource and never clears it. The
@@ -750,6 +744,10 @@ schema change, bump the Go bindings:
 ```
 go get buf.build/gen/go/otherlode/otherlode/protocolbuffers/go@latest
 ```
+
+The Go module proxy can go on serving an older version as `@latest` for
+a while after a push. If the bump does not pick up the new schema, run
+it again with `GOPROXY=direct`.
 
 ## License
 
