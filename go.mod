@@ -2,7 +2,7 @@ module github.com/otherlodehq/otherlode-collector
 
 go 1.26.0
 
-toolchain go1.26.6
+toolchain go1.26.9
 
 require google.golang.org/protobuf v1.36.12
 
