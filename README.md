@@ -380,6 +380,11 @@ startup. It is a separate secret from `OTHERLODE_COLLECTOR_AUTH_TOKEN`:
 the agent authenticates to the collector, the collector authenticates to
 the backend, and the two need not match.
 
+The forwarder honours the standard `HTTPS_PROXY`, `HTTP_PROXY` and
+`NO_PROXY` variables, so it can reach a backend through an outbound
+proxy. It never sends a request for `localhost` or a loopback address
+through a proxy.
+
 ```
 OTHERLODE_COLLECTOR_AUTH_TOKEN=s3cret \
 OTHERLODE_COLLECTOR_FORWARD_URL=https://backend.example.com \

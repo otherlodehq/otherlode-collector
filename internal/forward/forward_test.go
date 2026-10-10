@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -904,6 +905,29 @@ func TestNewHTTPClient_IdleConnsMatchShardCount(t *testing.T) {
 	}
 	if transport.MaxIdleConns < 8 {
 		t.Fatalf("MaxIdleConns = %d, want at least 8", transport.MaxIdleConns)
+	}
+}
+
+// TestDefaultHTTPClient_UsesTheEnvironmentProxy pins that the default
+// forwarding client honours HTTPS_PROXY, HTTP_PROXY and NO_PROXY, since a
+// backend outside the network may be reachable only through a proxy. The
+// healthcheck client must do the opposite; see
+// TestHealthcheckClient_NeverUsesAProxy in cmd/otherlode-collector.
+//
+// The test compares functions instead of setting the variables, because
+// http.ProxyFromEnvironment reads them once per process and an earlier
+// test may already have made it do so.
+func TestDefaultHTTPClient_UsesTheEnvironmentProxy(t *testing.T) {
+	client := Config{}.withDefaults().HTTPClient
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport is %T, want *http.Transport", client.Transport)
+	}
+	if transport.Proxy == nil {
+		t.Fatal("forward transport has no proxy function; HTTPS_PROXY would be ignored")
+	}
+	if reflect.ValueOf(transport.Proxy).Pointer() != reflect.ValueOf(http.ProxyFromEnvironment).Pointer() {
+		t.Fatal("forward transport's proxy function is not http.ProxyFromEnvironment")
 	}
 }
 

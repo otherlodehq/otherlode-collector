@@ -171,8 +171,9 @@ func (c Config) withDefaults() Config {
 }
 
 // newHTTPClient returns a client sized for shards concurrent workers all
-// talking to one backend host. It does not follow redirects, so a 3xx
-// response reaches attempt as a failure.
+// talking to one backend host. It keeps http.DefaultTransport's proxy
+// function, so HTTPS_PROXY, HTTP_PROXY and NO_PROXY apply. It does not
+// follow redirects, so a 3xx response reaches attempt as a failure.
 func newHTTPClient(shards int) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.MaxIdleConnsPerHost = shards
