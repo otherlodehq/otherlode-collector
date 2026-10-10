@@ -43,6 +43,10 @@ const (
 	// before the connection is released. A 202 carries no body worth
 	// reading; the read only exists to let the connection be reused.
 	maxResponseBytes = 64 << 10
+
+	// RedactionHeader is the request header that carries the redaction
+	// secret's fingerprint while redaction is on (ADR 0007).
+	RedactionHeader = "Otherlode-Redaction"
 )
 
 // Config configures a ForwardingSink. URL is required. Every other field
@@ -65,6 +69,15 @@ type Config struct {
 	// authenticates to the collector, the collector authenticates to the
 	// backend, and the two need not share a secret.
 	AuthToken TokenSource
+
+	// RedactionFingerprint, when not empty, goes on every request in the
+	// RedactionHeader header. It is the fingerprint of the redaction
+	// secret, which the collector computes once at startup, never the
+	// secret. A backend can then refuse a payload that no redacting
+	// collector sent, such as one an agent posted to it directly. Leave it
+	// empty while redaction is off, so no header is sent. It must be a
+	// valid header value.
+	RedactionFingerprint string
 
 	// Shards is the number of independent worker/queue pairs. A payload is
 	// routed to a shard by hashing its namespace, service name and
@@ -304,6 +317,11 @@ func NewForwardingSink(cfg Config) (*ForwardingSink, error) {
 		return nil, err
 	}
 	cfg.URL = baseURL
+	for i := 0; i < len(cfg.RedactionFingerprint); i++ {
+		if c := cfg.RedactionFingerprint[i]; c < 0x21 || c > 0x7e {
+			return nil, fmt.Errorf("redaction fingerprint holds a byte a header value cannot carry at byte %d", i)
+		}
+	}
 	if scheme == "http" && cfg.authToken() != "" {
 		cfg.Logger.Warn("forward URL uses plain http; the backend auth token is sent unencrypted", "url", cfg.URL)
 	}
@@ -610,6 +628,9 @@ func (s *ForwardingSink) attempt(ctx context.Context, item queuedItem) (retryabl
 	req.Header.Set("Content-Type", "application/x-protobuf")
 	if token := s.cfg.authToken(); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if s.cfg.RedactionFingerprint != "" {
+		req.Header.Set(RedactionHeader, s.cfg.RedactionFingerprint)
 	}
 
 	resp, err := s.cfg.HTTPClient.Do(req)

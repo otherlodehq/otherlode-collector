@@ -766,3 +766,106 @@ func TestRegisterRoutes_ForwardTokenFile_NextRequestSendsReloadedKey(t *testing.
 		t.Fatalf("authorization after a two-key file = %q, want the last good %q", got, "Bearer key-2")
 	}
 }
+
+// forwardedRequest is what the backend received for one forwarded
+// payload.
+type forwardedRequest struct {
+	header http.Header
+	body   []byte
+}
+
+// forwardAllThree posts a delta batch, a manifest and a static baseline
+// to a collector wired with redactCfg and logging to logger. It returns
+// what the backend received, by path.
+func forwardAllThree(t *testing.T, redactCfg processor.RedactionConfig, logger *slog.Logger) map[string]forwardedRequest {
+	t.Helper()
+	received := make(chan struct {
+		path string
+		req  forwardedRequest
+	}, 3)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read forwarded body: %v", err)
+		}
+		received <- struct {
+			path string
+			req  forwardedRequest
+		}{r.URL.Path, forwardedRequest{r.Header.Clone(), body}}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer backend.Close()
+
+	mux := http.NewServeMux()
+	fwd := mustRegisterRoutes(t, mux, routeConfig{Logger: logger, Forward: forward.Config{URL: backend.URL}, Redaction: redactCfg})
+	defer fwd.Shutdown(context.Background())
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	manifest, err := proto.Marshal(manifestWithLiteral())
+	if err != nil {
+		t.Fatalf("marshal manifest: %v", err)
+	}
+	manifestReq, err := http.NewRequest(http.MethodPost, server.URL+"/v1/otherlode/manifest", bytes.NewReader(manifest))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	manifestReq.Header.Set("Content-Type", "application/x-protobuf")
+	for _, req := range []*http.Request{deltaRequest(t, server.URL), manifestReq, staticBaselineRequest(t, server.URL)} {
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("post %s: %v", req.URL.Path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusAccepted {
+			t.Fatalf("post %s: status = %d, want %d", req.URL.Path, resp.StatusCode, http.StatusAccepted)
+		}
+	}
+
+	got := make(map[string]forwardedRequest)
+	for len(got) < 3 {
+		select {
+		case r := <-received:
+			got[r.path] = r.req
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out with %d of 3 payloads forwarded", len(got))
+		}
+	}
+	return got
+}
+
+func TestRegisterRoutes_RedactionOn_EveryForwardedRequestCarriesLoggedFingerprint(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	secret := []byte(testRedactSecret)
+
+	got := forwardAllThree(t, processor.RedactionConfig{AllLiterals: true, Secret: secret}, logger)
+
+	fingerprint := processor.SecretFingerprint(secret)
+	if want := `"secret_fingerprint":"` + fingerprint + `"`; !strings.Contains(logs.String(), want) {
+		t.Fatalf("startup log does not hold %s:\n%s", want, logs.String())
+	}
+	for path, req := range got {
+		if values := req.header.Values(forward.RedactionHeader); len(values) != 1 || values[0] != fingerprint {
+			t.Errorf("%s: %s = %q, want the logged fingerprint %q", path, forward.RedactionHeader, values, fingerprint)
+		}
+		for name, values := range req.header {
+			for _, v := range values {
+				if strings.Contains(v, testRedactSecret) {
+					t.Errorf("%s: header %s carries the redaction secret", path, name)
+				}
+			}
+		}
+		if bytes.Contains(req.body, secret) {
+			t.Errorf("%s: body carries the redaction secret", path)
+		}
+	}
+}
+
+func TestRegisterRoutes_RedactionOff_ForwardsNoRedactionHeader(t *testing.T) {
+	for path, req := range forwardAllThree(t, processor.RedactionConfig{}, nil) {
+		if values := req.header.Values(forward.RedactionHeader); len(values) != 0 {
+			t.Errorf("%s: %s = %q, want no header", path, forward.RedactionHeader, values)
+		}
+	}
+}

@@ -682,6 +682,18 @@ histories for it. At startup the collector logs a `secret_fingerprint`,
 collectors with the same secret log the same fingerprint, so compare
 them to check that a tenant's collectors agree.
 
+While redaction is on, the collector also sends the fingerprint in an
+`Otherlode-Redaction` header on every request it forwards. With
+redaction off it sends no such header. A backend may require the header
+for a tenant that wants only redacted payloads. It then refuses a
+payload without the header, such as one an agent posted to it directly,
+with 403 `redaction_required`. It refuses a payload with another
+fingerprint with 403 `redaction_secret_mismatch`. The collector drops
+either payload and logs a warning, as described under
+[Forwarding](#forwarding). The header catches a setup mistake. It does
+not prove who sent a payload, since the fingerprint travels in every
+request and appears in the startup log.
+
 With redaction on, the collector stops at startup when neither variable
 is set or both are, when the secret is shorter than 32 bytes or holds a
 control character, and when it equals an agent auth token or the

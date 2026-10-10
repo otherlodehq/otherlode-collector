@@ -1385,3 +1385,70 @@ func TestForwardingSink_QueueBytes_ReturnToZeroAfterShutdown(t *testing.T) {
 		t.Errorf("held bytes after Shutdown = %d, want 0", got)
 	}
 }
+
+// sendAllThree passes one payload of each kind to sink.
+func sendAllThree(t *testing.T, sink *ForwardingSink) {
+	t.Helper()
+	res := &otherlodepb.ResourceAttributes{ServiceName: "demo-service", ServiceInstanceId: "instance-1", RunId: "run-1"}
+	if err := sink.AcceptDeltaBatch(context.Background(), &otherlodepb.DeltaBatch{Resource: res}); err != nil {
+		t.Fatalf("AcceptDeltaBatch: %v", err)
+	}
+	if err := sink.AcceptManifest(context.Background(), &otherlodepb.ProbeManifest{Resource: res}); err != nil {
+		t.Fatalf("AcceptManifest: %v", err)
+	}
+	if err := sink.AcceptStaticBaseline(context.Background(), &otherlodepb.StaticBaseline{Resource: res}); err != nil {
+		t.Fatalf("AcceptStaticBaseline: %v", err)
+	}
+}
+
+// redactionHeaders runs a sink with fingerprint over all three payload
+// kinds and returns the RedactionHeader values each path received.
+func redactionHeaders(t *testing.T, fingerprint string) map[string][]string {
+	t.Helper()
+	var mu sync.Mutex
+	got := make(map[string][]string)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		got[r.URL.Path] = r.Header.Values(RedactionHeader)
+		mu.Unlock()
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer backend.Close()
+
+	cfg := testConfig(backend.URL)
+	cfg.RedactionFingerprint = fingerprint
+	sink := mustNewSink(t, cfg)
+	sendAllThree(t, sink)
+	sink.Shutdown(context.Background())
+	waitFor(t, time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(got) == 3
+	})
+	return got
+}
+
+func TestForwardingSink_RedactionFingerprint_SentOnEveryPath(t *testing.T) {
+	got := redactionHeaders(t, "3b53bbb8311eab74")
+	for _, path := range []string{ingest.DeltaBatchPath, ingest.ManifestPath, ingest.StaticBaselinePath} {
+		if values := got[path]; len(values) != 1 || values[0] != "3b53bbb8311eab74" {
+			t.Errorf("%s: %s = %q, want exactly the fingerprint", path, RedactionHeader, values)
+		}
+	}
+}
+
+func TestForwardingSink_NoRedactionFingerprint_SendsNoHeader(t *testing.T) {
+	for path, values := range redactionHeaders(t, "") {
+		if len(values) != 0 {
+			t.Errorf("%s: %s = %q, want no header", path, RedactionHeader, values)
+		}
+	}
+}
+
+func TestNewForwardingSink_FingerprintNotAHeaderValue_ReturnsError(t *testing.T) {
+	cfg := testConfig("http://backend.example")
+	cfg.RedactionFingerprint = "abc\ndef"
+	if _, err := NewForwardingSink(cfg); err == nil {
+		t.Fatal("NewForwardingSink accepted a fingerprint with a newline")
+	}
+}
