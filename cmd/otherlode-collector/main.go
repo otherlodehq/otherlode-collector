@@ -36,7 +36,12 @@ import (
 )
 
 const (
-	defaultAddr     = ":4319"
+	defaultAddr = ":4319"
+
+	// shutdownTimeout bounds the whole shutdown: stopping the HTTP server
+	// and draining the forwarder, which run at the same time. docker stop
+	// sends SIGKILL 10 seconds after SIGTERM, so a longer budget would be
+	// cut short there.
 	shutdownTimeout = 10 * time.Second
 
 	// defaultRateLimitRPS and defaultRateLimitBurst set the per-client-IP
@@ -180,14 +185,12 @@ func main() {
 		stop()
 		logger.Info("shutting down")
 
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-		srvErr := srv.Shutdown(shutdownCtx)
+		var drain func(context.Context)
 		if fwd != nil {
-			fwd.Shutdown(shutdownCtx)
+			drain = fwd.Shutdown
 		}
-		if srvErr != nil {
-			logger.Error("graceful shutdown failed", "error", srvErr)
+		if err := shutdown(srv, drain, shutdownTimeout); err != nil {
+			logger.Error("graceful shutdown failed", "error", err)
 			os.Exit(1)
 		}
 	}
@@ -202,6 +205,26 @@ func listen(addr string, logger *slog.Logger) (net.Listener, error) {
 	}
 	logger.Info("otherlode-collector listening", "addr", addr, "version", version)
 	return ln, nil
+}
+
+// shutdown stops srv and runs drain, which may be nil, at the same time.
+// Both share one deadline of timeout. drain starts at once, so a slow HTTP
+// drain cannot use up the forwarder's time. A request that reaches the
+// forwarder after drain starts gets 503, and the agent sends it again.
+// shutdown waits for both and returns srv's error.
+func shutdown(srv *http.Server, drain func(context.Context), timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		if drain != nil {
+			drain(ctx)
+		}
+	}()
+	err := srv.Shutdown(ctx)
+	<-drained
+	return err
 }
 
 // resolveLogLevel parses OTHERLODE_COLLECTOR_LOG_LEVEL (debug, info, warn,

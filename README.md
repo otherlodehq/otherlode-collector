@@ -430,9 +430,12 @@ past five minutes. A `3xx` from the backend is a permanent failure,
 because the collector does not follow redirects. On shutdown, every
 payload the collector still holds gets one more delivery attempt within
 the shutdown deadline, whether it sits in a queue or a worker was waiting
-to retry it. The deadline is 10 seconds in total, shared between stopping
-the HTTP server and draining the forward queues. Each shard drains in
-parallel with the others, and in order within its own shard.
+to retry it. The deadline is 10 seconds in total. The collector stops the
+HTTP server and drains the forward queues at the same time, so a slow
+request cannot use up the drain's time. A payload that reaches the
+forwarder after the drain starts gets `503`, and the agent sends it
+again. Each shard drains in parallel with the others, and in order
+within its own shard.
 
 The request timeout and retry defaults match the OTLP HTTP exporter's.
 The shard count, queue size and queue byte budget are this collector's

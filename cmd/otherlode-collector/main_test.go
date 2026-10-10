@@ -2,8 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -227,6 +230,64 @@ func TestListen_FreePort_LogsListening(t *testing.T) {
 	defer ln.Close()
 	if !strings.Contains(logs.String(), `"msg":"otherlode-collector listening"`) {
 		t.Fatalf("logs = %q, want the listening line", logs.String())
+	}
+}
+
+// TestShutdown_SlowHTTPDrain_ForwarderStillGetsItsTime pins that the
+// forwarder drains while the HTTP server stops, not after it. A request
+// that outlasts the deadline must not leave the forwarder an expired
+// context.
+func TestShutdown_SlowHTTPDrain_ForwarderStillGetsItsTime(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(entered)
+		<-release
+	})}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	go func() { _ = srv.Serve(ln) }()
+	defer srv.Close()
+	defer close(release)
+	go func() {
+		if resp, err := http.Get("http://" + ln.Addr().String()); err == nil {
+			resp.Body.Close()
+		}
+	}()
+	<-entered
+
+	var drainErr error
+	drain := func(ctx context.Context) {
+		// Stands in for one final delivery attempt that needs some time.
+		select {
+		case <-time.After(100 * time.Millisecond):
+		case <-ctx.Done():
+		}
+		drainErr = ctx.Err()
+	}
+	if err := shutdown(srv, drain, 500*time.Millisecond); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("shutdown error = %v, want the deadline, since a request was still running", err)
+	}
+	if drainErr != nil {
+		t.Fatalf("the forwarder's context ended before its drain finished: %v", drainErr)
+	}
+}
+
+func TestShutdown_NoForwarder_StopsServer(t *testing.T) {
+	srv := &http.Server{Handler: http.NotFoundHandler()}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	served := make(chan error, 1)
+	go func() { served <- srv.Serve(ln) }()
+	if err := shutdown(srv, nil, time.Second); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	if err := <-served; !errors.Is(err, http.ErrServerClosed) {
+		t.Fatalf("Serve returned %v, want http.ErrServerClosed", err)
 	}
 }
 
