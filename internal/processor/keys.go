@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"unicode/utf16"
 )
 
 // MinSecretBytes is the shortest redaction secret the collector accepts.
@@ -69,6 +70,17 @@ func (k *rekeyer) rekey(key string) string {
 	io.WriteString(k.mac, key)
 	k.sum = k.mac.Sum(k.sum[:0])
 	return hex.EncodeToString(k.sum[:keyBytes])
+}
+
+// javaStringHash returns what Java's String.hashCode() returns for s. Java
+// hashes UTF-16 code units, and the int arithmetic wraps on overflow, as
+// Go's int32 arithmetic does.
+func javaStringHash(s string) int32 {
+	var h int32
+	for _, unit := range utf16.Encode([]rune(s)) {
+		h = 31*h + int32(unit)
+	}
+	return h
 }
 
 var errSecretWithoutRedaction = errors.New("a redaction secret is set but redaction is off")

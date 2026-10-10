@@ -67,6 +67,12 @@ var (
 	RedactedLiterals = NewCounter("otherlode_collector_redacted_literals_total",
 		"String literal parts replaced by the redaction processor.", "payload")
 
+	// RedactedCaseKeys counts case keys the redaction processor cleared
+	// because each equals the Java hash code of a literal it redacted. Its
+	// "payload" is "manifest" or "static_baseline".
+	RedactedCaseKeys = NewCounter("otherlode_collector_redacted_case_keys_total",
+		"Case keys cleared by the redaction processor because each equals the hash code of a redacted literal.", "payload")
+
 	// FieldsStripped counts payloads from which the redaction processor
 	// dropped at least one unknown field and so set fields_stripped. Its
 	// "payload" is "deltas", "manifest" or "static_baseline".

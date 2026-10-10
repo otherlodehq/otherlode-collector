@@ -358,6 +358,7 @@ wildcard), exiting 0 or 1, and never through a proxy. The image's
 | `otherlode_collector_environment_mismatch_total` | `payload` | The agent's environment differed from the collector's configured one (see [Environment](#environment)); `payload` is `deltas`, `manifest`, or `static_baseline` |
 | `otherlode_collector_namespace_mismatch_total` | `payload` | The agent's service namespace differed from the collector's configured one (see [Namespace](#namespace)); `payload` is `deltas`, `manifest`, or `static_baseline` |
 | `otherlode_collector_redacted_literals_total` | `payload` | String literal parts replaced by the redaction processor (see [Redaction](#redaction)); `payload` is `manifest` or `static_baseline` |
+| `otherlode_collector_redacted_case_keys_total` | `payload` | Case keys cleared by the redaction processor because each equals the hash code of a redacted literal (see [Branch and site keys](#branch-and-site-keys)); `payload` is `manifest` or `static_baseline` |
 | `otherlode_collector_fields_stripped_total` | `payload` | Payloads that lost an unknown field to the redaction processor and were marked `fields_stripped` (see [Redaction](#redaction)); `payload` is `deltas`, `manifest` or `static_baseline` |
 
 `payload` is `deltas`, `manifest`, or `static_baseline`. The dropped
@@ -693,6 +694,15 @@ Turning redaction on, or changing the secret, changes every key. The
 backend then treats every branch and site as new, and the history it
 holds under the old keys stops there. There is no way to change the
 secret without that break.
+
+A string `switch` that the agent cannot read back reaches the collector
+as a switch on the subject's `hashCode()`, and each case key is the hash
+code of one case's literal. While redaction is on, the collector clears
+every case key that equals the Java hash code of a literal it redacted
+in the same method. The case then has neither a key nor a label.
+`otherlode_collector_redacted_case_keys_total` counts the cleared keys.
+A hash code whose literal is not in the payload, because the agent
+could not write that condition, is not cleared.
 
 ## Development
 

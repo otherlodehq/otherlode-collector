@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	otherlodepb "buf.build/gen/go/otherlode/otherlode/protocolbuffers/go/otherlode/v1"
+
+	"github.com/otherlodehq/otherlode-collector/metrics"
 )
 
 // agentKey derives a key the way the agent's BranchKeys.digest does: hex
@@ -32,6 +34,8 @@ func pricingKey(literal, outcome string) string {
 }
 
 var hexKey = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
+func int32Ptr(v int32) *int32 { return &v }
 
 func keyedSite(siteKey string, outcomes ...*otherlodepb.BranchOutcome) *otherlodepb.BranchSite {
 	return &otherlodepb.BranchSite{SiteKey: ptr(siteKey), Outcomes: outcomes}
@@ -149,6 +153,132 @@ func TestRedaction_EmptyAndUnsetKeys_StayAsSent(t *testing.T) {
 	}
 	if sites[1].HasSiteKey() {
 		t.Fatal("an unset site key was set")
+	}
+}
+
+// hashSwitchMethod is one method's sites from a string switch the agent
+// could not read back: a switch on the subject's hash code whose case keys
+// are the literals' hash codes, an equals check for each literal, and a
+// plain switch on an int whose case key 7 matches no literal.
+func hashSwitchMethod() []*otherlodepb.BranchSite {
+	caseOutcome := func(key int32) *otherlodepb.BranchOutcome {
+		return &otherlodepb.BranchOutcome{Role: otherlodepb.BranchRole_CASE, CaseKey: int32Ptr(key)}
+	}
+	equalsCheck := func(literal string) *otherlodepb.BranchSite {
+		return &otherlodepb.BranchSite{
+			Condition: []*otherlodepb.ConditionPart{code("mode != "), part(otherlodepb.ConditionPartKind_STRING_LITERAL, literal)},
+			Outcomes:  []*otherlodepb.BranchOutcome{{Role: otherlodepb.BranchRole_TAKEN}, {Role: otherlodepb.BranchRole_FALL_THROUGH}},
+		}
+	}
+	return []*otherlodepb.BranchSite{
+		{
+			Condition: []*otherlodepb.ConditionPart{code("mode.hashCode()")},
+			Outcomes: []*otherlodepb.BranchOutcome{
+				caseOutcome(javaStringHash("legacy")),
+				caseOutcome(javaStringHash("ENABLE_LEGACY_DISCOUNT")),
+				{Role: otherlodepb.BranchRole_DEFAULT},
+			},
+		},
+		equalsCheck("legacy"),
+		equalsCheck("ENABLE_LEGACY_DISCOUNT"),
+		{
+			Condition: []*otherlodepb.ConditionPart{code("count")},
+			Outcomes:  []*otherlodepb.BranchOutcome{caseOutcome(7), {Role: otherlodepb.BranchRole_DEFAULT}},
+		},
+	}
+}
+
+func TestRedaction_HashCodeCaseKeys_ClearedInManifestAndBaseline(t *testing.T) {
+	beforeManifest := metrics.RedactedCaseKeys.Value("manifest")
+	beforeBaseline := metrics.RedactedCaseKeys.Value("static_baseline")
+
+	next := &recordingSink{}
+	r := NewRedaction(next, allLiterals(), nil)
+	if err := r.AcceptManifest(context.Background(), manifestWith(hashSwitchMethod()...)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := r.AcceptStaticBaseline(context.Background(), baselineWith(hashSwitchMethod()...)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for name, sites := range map[string][]*otherlodepb.BranchSite{
+		"manifest":        next.manifests[0].GetProbes()[0].GetBranchSites(),
+		"static baseline": next.baselines[0].GetDeclaredClasses()[0].GetMethods()[0].GetBranchSites(),
+	} {
+		for i, outcome := range sites[0].GetOutcomes()[:2] {
+			if outcome.HasCaseKey() {
+				t.Errorf("%s: hash switch case %d kept case key %d, want it cleared", name, i, outcome.GetCaseKey())
+			}
+			if outcome.GetRole() != otherlodepb.BranchRole_CASE {
+				t.Errorf("%s: hash switch case %d role = %v, want CASE", name, i, outcome.GetRole())
+			}
+		}
+		if got := sites[3].GetOutcomes()[0]; !got.HasCaseKey() || got.GetCaseKey() != 7 {
+			t.Errorf("%s: int switch case key = %v, want 7 kept", name, got.CaseKey)
+		}
+	}
+	if got := metrics.RedactedCaseKeys.Value("manifest") - beforeManifest; got != 2 {
+		t.Errorf("manifest case key counter increased by %d, want 2", got)
+	}
+	if got := metrics.RedactedCaseKeys.Value("static_baseline") - beforeBaseline; got != 2 {
+		t.Errorf("static_baseline case key counter increased by %d, want 2", got)
+	}
+}
+
+func TestRedaction_HashCodeCaseKeys_KeptWhenLiteralNotRedacted(t *testing.T) {
+	next := &recordingSink{}
+	r := NewRedaction(next, blocked(t, "^ENABLE_"), nil)
+	if err := r.AcceptManifest(context.Background(), manifestWith(hashSwitchMethod()...)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	outcomes := next.manifests[0].GetProbes()[0].GetBranchSites()[0].GetOutcomes()
+	if got := outcomes[0]; !got.HasCaseKey() || got.GetCaseKey() != javaStringHash("legacy") {
+		t.Errorf("case key of a literal sent in clear = %v, want it kept", got.CaseKey)
+	}
+	if outcomes[1].HasCaseKey() {
+		t.Errorf("case key of a redacted literal kept as %d, want it cleared", outcomes[1].GetCaseKey())
+	}
+}
+
+func TestRedaction_HashCodeCaseKeys_OnlyClearedInTheLiteralsMethod(t *testing.T) {
+	next := &recordingSink{}
+	r := NewRedaction(next, allLiterals(), nil)
+
+	sites := hashSwitchMethod()
+	manifest := &otherlodepb.ProbeManifest{
+		Resource: resourceFor("run-1"),
+		Probes: []*otherlodepb.ProbeLocation{
+			{MethodName: "switches", BranchSites: sites[:1]},
+			{MethodName: "checks", BranchSites: sites[1:3]},
+		},
+	}
+	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for i, outcome := range next.manifests[0].GetProbes()[0].GetBranchSites()[0].GetOutcomes()[:2] {
+		if !outcome.HasCaseKey() {
+			t.Errorf("case %d of a method with no literal lost its case key", i)
+		}
+	}
+}
+
+func TestJavaStringHash_MatchesJava(t *testing.T) {
+	// Values printed by Java's String.hashCode().
+	for s, want := range map[string]int32{
+		"":                       0,
+		"hello":                  99162322,
+		"polygenelubricants":     -2147483648,
+		"\U0001F600":             1772899,
+		"ENABLE_LEGACY_DISCOUNT": -1896388037,
+		"café":                   3045921,
+		"Aa":                     2112,
+		"BB":                     2112,
+	} {
+		if got := javaStringHash(s); got != want {
+			t.Errorf("javaStringHash(%q) = %d, want %d", s, got, want)
+		}
 	}
 }
 

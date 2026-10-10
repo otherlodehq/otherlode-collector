@@ -63,7 +63,10 @@ func (c RedactionConfig) Validate() error {
 // hex characters. The agent digests a site's string constants into its
 // keys, so a plain key lets anyone who holds it test guesses at a
 // redacted literal. Equal keys stay equal, which is all the server needs.
-// An empty key stays empty. See ADR 0007.
+// An empty key stays empty. It clears a case key that equals Java's
+// String.hashCode() of a literal it redacted in the same method. A switch
+// on a string's hash code that the agent could not read back sends those
+// hash codes as case keys. See ADR 0007.
 //
 // It also drops unknown fields from every message of every payload. A
 // field the collector's bindings do not know could carry a literal that
@@ -112,64 +115,101 @@ func (r *Redaction) AcceptDeltaBatch(ctx context.Context, batch *otherlodepb.Del
 }
 
 // AcceptManifest redacts the literals in the branch sites of every probe,
-// re-keys every branch key and site key, drops unknown fields, marks the
-// manifest if it lost any, then passes it to next.
+// re-keys every branch key and site key, clears the case keys that give
+// away a redacted literal, drops unknown fields, marks the manifest if it
+// lost any, then passes it to next. Each probe's branch sites are one
+// method's sites.
 func (r *Redaction) AcceptManifest(ctx context.Context, manifest *otherlodepb.ProbeManifest) error {
 	keys := newRekeyer(r.cfg.Secret)
-	n := 0
+	var c counts
 	for _, probe := range manifest.GetProbes() {
 		if probe.HasBranchKey() && probe.GetBranchKey() != "" {
 			probe.SetBranchKey(keys.rekey(probe.GetBranchKey()))
 		}
-		n += r.redactSites(probe.GetBranchSites(), keys)
+		c.add(r.redactMethodSites(probe.GetBranchSites(), keys))
 	}
-	r.record(manifest.GetResource(), "manifest", n)
+	r.record(manifest.GetResource(), "manifest", c)
 	r.markStripped(manifest.GetResource(), "manifest", dropUnknown(manifest.ProtoReflect()))
 	return r.next.AcceptManifest(ctx, manifest)
 }
 
 // AcceptStaticBaseline redacts the literals in the branch sites of every
-// declared method, re-keys every site key, drops unknown fields, marks the
-// baseline if it lost any, then passes it to next.
+// declared method, re-keys every site key, clears the case keys that give
+// away a redacted literal, drops unknown fields, marks the baseline if it
+// lost any, then passes it to next.
 func (r *Redaction) AcceptStaticBaseline(ctx context.Context, baseline *otherlodepb.StaticBaseline) error {
 	keys := newRekeyer(r.cfg.Secret)
-	n := 0
+	var c counts
 	for _, class := range baseline.GetDeclaredClasses() {
 		for _, method := range class.GetMethods() {
-			n += r.redactSites(method.GetBranchSites(), keys)
+			c.add(r.redactMethodSites(method.GetBranchSites(), keys))
 		}
 	}
-	r.record(baseline.GetResource(), "static_baseline", n)
+	r.record(baseline.GetResource(), "static_baseline", c)
 	r.markStripped(baseline.GetResource(), "static_baseline", dropUnknown(baseline.ProtoReflect()))
 	return r.next.AcceptStaticBaseline(ctx, baseline)
 }
 
-// redactSites redacts each site's condition and each of its outcomes'
-// case labels, and re-keys each site key. It returns the number of parts
-// it replaced.
-func (r *Redaction) redactSites(sites []*otherlodepb.BranchSite, keys *rekeyer) int {
-	n := 0
+// counts is what the processor changed in one payload.
+type counts struct {
+	literals int
+	caseKeys int
+}
+
+func (c *counts) add(o counts) {
+	c.literals += o.literals
+	c.caseKeys += o.caseKeys
+}
+
+// redactMethodSites redacts each site's condition and each of its
+// outcomes' case labels, and re-keys each site key. sites are the branch
+// sites of one method. A case key that equals String.hashCode() of a
+// literal redacted in that method is cleared: the agent sends the hash
+// codes of a string switch it could not read back as plain case keys, and
+// the literals sit in the conditions of the equals checks beside it.
+func (r *Redaction) redactMethodSites(sites []*otherlodepb.BranchSite, keys *rekeyer) counts {
+	var c counts
+	var hashes map[int32]struct{}
 	for _, site := range sites {
 		if site.HasSiteKey() && site.GetSiteKey() != "" {
 			site.SetSiteKey(keys.rekey(site.GetSiteKey()))
 		}
-		n += r.redactParts(site.GetCondition())
+		c.literals += r.redactParts(site.GetCondition(), &hashes)
 		for _, outcome := range site.GetOutcomes() {
-			n += r.redactParts(outcome.GetCaseLabel())
+			c.literals += r.redactParts(outcome.GetCaseLabel(), &hashes)
 		}
 	}
-	return n
+	if len(hashes) == 0 {
+		return c
+	}
+	for _, site := range sites {
+		for _, outcome := range site.GetOutcomes() {
+			if !outcome.HasCaseKey() {
+				continue
+			}
+			if _, ok := hashes[outcome.GetCaseKey()]; ok {
+				outcome.ClearCaseKey()
+				c.caseKeys++
+			}
+		}
+	}
+	return c
 }
 
 // redactParts replaces the text of each literal part that the config
-// blocks. It returns the number of parts it replaced.
-func (r *Redaction) redactParts(parts []*otherlodepb.ConditionPart) int {
+// blocks, and adds the Java hash code of each replaced text to *hashes.
+// It returns the number of parts it replaced.
+func (r *Redaction) redactParts(parts []*otherlodepb.ConditionPart, hashes *map[int32]struct{}) int {
 	n := 0
 	for _, p := range parts {
 		if k := p.GetKind(); k == otherlodepb.ConditionPartKind_CODE || k == otherlodepb.ConditionPartKind_PLACEHOLDER {
 			continue
 		}
 		if r.blocks(p.GetText()) {
+			if *hashes == nil {
+				*hashes = make(map[int32]struct{})
+			}
+			(*hashes)[javaStringHash(p.GetText())] = struct{}{}
 			p.SetText(RedactedText)
 			n++
 		}
@@ -189,20 +229,22 @@ func (r *Redaction) blocks(text string) bool {
 	return false
 }
 
-// record counts n replaced parts and logs them once for the payload. It
-// never logs a literal's text or a key.
-func (r *Redaction) record(res *otherlodepb.ResourceAttributes, payload string, n int) {
-	if n == 0 {
+// record counts the replaced parts and cleared case keys in c and logs
+// them once for the payload. It never logs a literal's text or a key.
+func (r *Redaction) record(res *otherlodepb.ResourceAttributes, payload string, c counts) {
+	if c.literals == 0 && c.caseKeys == 0 {
 		return
 	}
-	metrics.RedactedLiterals.Add(int64(n), payload)
+	metrics.RedactedLiterals.Add(int64(c.literals), payload)
+	metrics.RedactedCaseKeys.Add(int64(c.caseKeys), payload)
 	r.logger.Debug("redacted string literals",
 		"namespace", res.GetServiceNamespace(),
 		"service", res.GetServiceName(),
 		"instance", res.GetServiceInstanceId(),
 		"run", res.GetRunId(),
 		"payload", payload,
-		"redacted", n,
+		"redacted", c.literals,
+		"case_keys_cleared", c.caseKeys,
 	)
 }
 

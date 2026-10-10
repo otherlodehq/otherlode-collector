@@ -406,10 +406,16 @@ func manifestWithLiteral() *otherlodepb.ProbeManifest {
 		},
 	}
 	site.ProtoReflect().SetUnknown(unknown)
+	// A switch on the literal's String.hashCode(), as the agent sends one
+	// it could not read back.
+	hashSwitch := &otherlodepb.BranchSite{Outcomes: []*otherlodepb.BranchOutcome{
+		{Role: otherlodepb.BranchRole_CASE, CaseKey: proto.Int32(testLiteralHash)},
+		{Role: otherlodepb.BranchRole_DEFAULT},
+	}}
 	manifest := &otherlodepb.ProbeManifest{
 		Resource: &otherlodepb.ResourceAttributes{ServiceName: "demo-service", ServiceInstanceId: "instance-1", RunId: "run-1", TestRun: true},
 		Probes: []*otherlodepb.ProbeLocation{
-			{ClassName: "com.example.Pricing", MethodName: "price", BranchSites: []*otherlodepb.BranchSite{site}},
+			{ClassName: "com.example.Pricing", MethodName: "price", BranchSites: []*otherlodepb.BranchSite{site, hashSwitch}},
 			{ClassName: "com.example.Pricing", MethodName: "price", Kind: otherlodepb.ProbeKind_BRANCH, BranchKey: proto.String(testBranchKey)},
 		},
 	}
@@ -421,6 +427,8 @@ const (
 	// testBranchKey and testSiteKey have the shape of the agent's keys.
 	testBranchKey = "0123456789abcdef0123456789abcdef"
 	testSiteKey   = "fedcba9876543210fedcba9876543210"
+	// testLiteralHash is Java's "ENABLE_LEGACY_DISCOUNT".hashCode().
+	testLiteralHash = -1896388037
 )
 
 // forwardManifest posts manifestWithLiteral to a collector wired with
@@ -503,7 +511,7 @@ func TestRegisterRoutes_RedactionOn_ForwardsManifestRedactedWithoutUnknownFields
 	}
 }
 
-func TestRegisterRoutes_RedactionOn_ForwardsReKeyedKeys(t *testing.T) {
+func TestRegisterRoutes_RedactionOn_ForwardsReKeyedKeysAndNoHashCodeCaseKey(t *testing.T) {
 	manifest := forwardManifest(t, processor.RedactionConfig{AllLiterals: true, Secret: []byte(testRedactSecret)})
 
 	hexKey := regexp.MustCompile(`^[0-9a-f]{32}$`)
@@ -514,6 +522,9 @@ func TestRegisterRoutes_RedactionOn_ForwardsReKeyedKeys(t *testing.T) {
 	sites := manifest.GetProbes()[0].GetBranchSites()
 	if siteKey := sites[0].GetSiteKey(); siteKey == testSiteKey || !hexKey.MatchString(siteKey) {
 		t.Fatalf("forwarded site key = %q, want a re-keyed 32-character hex key", siteKey)
+	}
+	if outcome := sites[1].GetOutcomes()[0]; outcome.HasCaseKey() {
+		t.Fatalf("forwarded the redacted literal's hash code %d as a case key", outcome.GetCaseKey())
 	}
 }
 
@@ -556,6 +567,9 @@ func TestRegisterRoutes_RedactionOff_ForwardsManifestWithLiteralAndUnknownFields
 	sites := manifest.GetProbes()[0].GetBranchSites()
 	if got := sites[0].GetSiteKey(); got != testSiteKey {
 		t.Fatalf("forwarded site key = %q, want it unchanged", got)
+	}
+	if got := sites[1].GetOutcomes()[0]; !got.HasCaseKey() || got.GetCaseKey() != testLiteralHash {
+		t.Fatalf("forwarded case key = %v, want it unchanged", got.CaseKey)
 	}
 
 	site := manifest.GetProbes()[0].GetBranchSites()[0]
