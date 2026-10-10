@@ -358,7 +358,7 @@ wildcard), exiting 0 or 1, and never through a proxy. The image's
 | `otherlode_collector_environment_mismatch_total` | `payload` | The agent's environment differed from the collector's configured one (see [Environment](#environment)); `payload` is `deltas`, `manifest`, or `static_baseline` |
 | `otherlode_collector_namespace_mismatch_total` | `payload` | The agent's service namespace differed from the collector's configured one (see [Namespace](#namespace)); `payload` is `deltas`, `manifest`, or `static_baseline` |
 | `otherlode_collector_redacted_literals_total` | `payload` | String literal parts replaced by the redaction processor (see [Redaction](#redaction)); `payload` is `manifest` or `static_baseline` |
-| `otherlode_collector_redacted_case_keys_total` | `payload` | Case keys cleared by the redaction processor because each equals the hash code of a redacted literal (see [Branch and site keys](#branch-and-site-keys)); `payload` is `manifest` or `static_baseline` |
+| `otherlode_collector_redacted_case_keys_total` | `payload` | Case keys cleared by the redaction processor, from a switch on a string's hash code or equal to the hash code of a redacted literal (see [Branch and site keys](#branch-and-site-keys)); `payload` is `manifest` or `static_baseline` |
 | `otherlode_collector_fields_stripped_total` | `payload` | Payloads that lost an unknown field to the redaction processor and were marked `fields_stripped` (see [Redaction](#redaction)); `payload` is `deltas`, `manifest` or `static_baseline` |
 
 `payload` is `deltas`, `manifest`, or `static_baseline`. The dropped
@@ -698,11 +698,20 @@ secret without that break.
 A string `switch` that the agent cannot read back reaches the collector
 as a switch on the subject's `hashCode()`, and each case key is the hash
 code of one case's literal. While redaction is on, the collector clears
-every case key that equals the Java hash code of a literal it redacted
-in the same method. The case then has neither a key nor a label.
+two kinds of case key:
+
+- Every case key of a switch the agent marks `string_hash_code_switch`.
+  The collector cannot tell which literal a key hashes, so it clears the
+  keys whether or not a redaction setting would block that literal.
+- A case key that equals the Java hash code of a literal the collector
+  redacted in the same method. This rule covers an agent that does not
+  send the mark.
+
+A cleared case has neither a key nor a label.
 `otherlode_collector_redacted_case_keys_total` counts the cleared keys.
-A hash code whose literal is not in the payload, because the agent
-could not write that condition, is not cleared.
+From an agent that does not send the mark, a hash code whose literal is
+not in the payload, because the agent could not write that condition, is
+not cleared.
 
 ## Development
 

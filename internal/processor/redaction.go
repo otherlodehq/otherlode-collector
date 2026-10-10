@@ -63,10 +63,11 @@ func (c RedactionConfig) Validate() error {
 // hex characters. The agent digests a site's string constants into its
 // keys, so a plain key lets anyone who holds it test guesses at a
 // redacted literal. Equal keys stay equal, which is all the server needs.
-// An empty key stays empty. It clears a case key that equals Java's
-// String.hashCode() of a literal it redacted in the same method. A switch
-// on a string's hash code that the agent could not read back sends those
-// hash codes as case keys. See ADR 0007.
+// An empty key stays empty. A switch on a string's hash code that the
+// agent could not read back sends those hash codes as case keys. So it
+// clears every case key of a site the agent marks string_hash_code_switch,
+// and a case key that equals Java's String.hashCode() of a literal it
+// redacted in the same method. See ADR 0007.
 //
 // It also drops unknown fields from every message of every payload. A
 // field the collector's bindings do not know could carry a literal that
@@ -163,13 +164,17 @@ func (c *counts) add(o counts) {
 
 // redactMethodSites redacts each site's condition and each of its
 // outcomes' case labels, and re-keys each site key. sites are the branch
-// sites of one method. A case key that equals String.hashCode() of a
-// literal redacted in that method is cleared: the agent sends the hash
-// codes of a string switch it could not read back as plain case keys, and
-// the literals sit in the conditions of the equals checks beside it.
+// sites of one method. It clears two kinds of case key, since the agent
+// sends the hash codes of a string switch it could not read back as plain
+// case keys. It clears every case key of a site marked
+// string_hash_code_switch. It also clears a case key that equals
+// String.hashCode() of a literal redacted in that method, for an agent
+// that does not send the mark: the literals sit in the conditions of the
+// equals checks beside the switch.
 func (r *Redaction) redactMethodSites(sites []*otherlodepb.BranchSite, keys *rekeyer) counts {
 	var c counts
 	var hashes map[int32]struct{}
+	marked := false
 	for _, site := range sites {
 		if site.HasSiteKey() && site.GetSiteKey() != "" {
 			site.SetSiteKey(keys.rekey(site.GetSiteKey()))
@@ -178,16 +183,18 @@ func (r *Redaction) redactMethodSites(sites []*otherlodepb.BranchSite, keys *rek
 		for _, outcome := range site.GetOutcomes() {
 			c.literals += r.redactParts(outcome.GetCaseLabel(), &hashes)
 		}
+		marked = marked || site.GetStringHashCodeSwitch()
 	}
-	if len(hashes) == 0 {
+	if len(hashes) == 0 && !marked {
 		return c
 	}
 	for _, site := range sites {
+		hashSwitch := site.GetStringHashCodeSwitch()
 		for _, outcome := range site.GetOutcomes() {
 			if !outcome.HasCaseKey() {
 				continue
 			}
-			if _, ok := hashes[outcome.GetCaseKey()]; ok {
+			if _, ok := hashes[outcome.GetCaseKey()]; ok || hashSwitch {
 				outcome.ClearCaseKey()
 				c.caseKeys++
 			}

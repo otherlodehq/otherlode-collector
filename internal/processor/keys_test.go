@@ -264,6 +264,123 @@ func TestRedaction_HashCodeCaseKeys_OnlyClearedInTheLiteralsMethod(t *testing.T)
 	}
 }
 
+// markedHashSwitchMethod is one method's sites from a newer agent: a
+// switch it marks string_hash_code_switch, whose literals are not in the
+// payload because the agent could not write the equals checks'
+// conditions, and an unmarked switch on an int.
+func markedHashSwitchMethod() []*otherlodepb.BranchSite {
+	return []*otherlodepb.BranchSite{
+		{
+			Condition: []*otherlodepb.ConditionPart{code("mode")},
+			Outcomes: []*otherlodepb.BranchOutcome{
+				{Role: otherlodepb.BranchRole_CASE, CaseKey: int32Ptr(javaStringHash("legacy"))},
+				{Role: otherlodepb.BranchRole_CASE, CaseKey: int32Ptr(javaStringHash("ENABLE_LEGACY_DISCOUNT"))},
+				{Role: otherlodepb.BranchRole_DEFAULT},
+			},
+			StringHashCodeSwitch: true,
+		},
+		{
+			Condition: []*otherlodepb.ConditionPart{code("count")},
+			Outcomes: []*otherlodepb.BranchOutcome{
+				{Role: otherlodepb.BranchRole_CASE, CaseKey: int32Ptr(7)},
+				{Role: otherlodepb.BranchRole_DEFAULT},
+			},
+		},
+	}
+}
+
+func TestRedaction_MarkedHashCodeSwitch_CaseKeysClearedWithoutLiterals(t *testing.T) {
+	beforeManifest := metrics.RedactedCaseKeys.Value("manifest")
+	beforeBaseline := metrics.RedactedCaseKeys.Value("static_baseline")
+
+	next := &recordingSink{}
+	r := NewRedaction(next, allLiterals(), nil)
+	if err := r.AcceptManifest(context.Background(), manifestWith(markedHashSwitchMethod()...)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := r.AcceptStaticBaseline(context.Background(), baselineWith(markedHashSwitchMethod()...)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for name, sites := range map[string][]*otherlodepb.BranchSite{
+		"manifest":        next.manifests[0].GetProbes()[0].GetBranchSites(),
+		"static baseline": next.baselines[0].GetDeclaredClasses()[0].GetMethods()[0].GetBranchSites(),
+	} {
+		if !sites[0].GetStringHashCodeSwitch() {
+			t.Errorf("%s: the mark was dropped, want it forwarded", name)
+		}
+		for i, outcome := range sites[0].GetOutcomes()[:2] {
+			if outcome.HasCaseKey() {
+				t.Errorf("%s: marked switch case %d kept case key %d, want it cleared", name, i, outcome.GetCaseKey())
+			}
+		}
+		if got := sites[1].GetOutcomes()[0]; !got.HasCaseKey() || got.GetCaseKey() != 7 {
+			t.Errorf("%s: int switch case key = %v, want 7 kept", name, got.CaseKey)
+		}
+	}
+	if got := metrics.RedactedCaseKeys.Value("manifest") - beforeManifest; got != 2 {
+		t.Errorf("manifest case key counter increased by %d, want 2", got)
+	}
+	if got := metrics.RedactedCaseKeys.Value("static_baseline") - beforeBaseline; got != 2 {
+		t.Errorf("static_baseline case key counter increased by %d, want 2", got)
+	}
+	if next.manifests[0].GetResource().GetFieldsStripped() || next.baselines[0].GetResource().GetFieldsStripped() {
+		t.Error("fields_stripped set, but the bindings know string_hash_code_switch")
+	}
+}
+
+// A blocked pattern that matches no literal still clears a marked
+// switch's case keys: the collector cannot tell which literal a key
+// hashes, so it cannot tell whether the pattern would have blocked it.
+func TestRedaction_MarkedHashCodeSwitch_ClearedWhenNoLiteralIsBlocked(t *testing.T) {
+	next := &recordingSink{}
+	r := NewRedaction(next, blocked(t, "^NO_SUCH_LITERAL$"), nil)
+	if err := r.AcceptManifest(context.Background(), manifestWith(markedHashSwitchMethod()...)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	sites := next.manifests[0].GetProbes()[0].GetBranchSites()
+	for i, outcome := range sites[0].GetOutcomes()[:2] {
+		if outcome.HasCaseKey() {
+			t.Errorf("marked switch case %d kept case key %d, want it cleared", i, outcome.GetCaseKey())
+		}
+	}
+	if got := sites[1].GetOutcomes()[0]; !got.HasCaseKey() || got.GetCaseKey() != 7 {
+		t.Errorf("int switch case key = %v, want 7 kept", got.CaseKey)
+	}
+}
+
+// An agent that does not send the mark still gets the hash-code rule, and
+// a marked switch in one method leaves another method's int switch alone.
+func TestRedaction_MarkedAndUnmarkedMethods_EachRuleApplies(t *testing.T) {
+	next := &recordingSink{}
+	r := NewRedaction(next, allLiterals(), nil)
+	manifest := &otherlodepb.ProbeManifest{
+		Resource: resourceFor("run-1"),
+		Probes: []*otherlodepb.ProbeLocation{
+			{MethodName: "older", BranchSites: hashSwitchMethod()},
+			{MethodName: "newer", BranchSites: markedHashSwitchMethod()},
+		},
+	}
+	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	probes := next.manifests[0].GetProbes()
+	for _, probe := range probes {
+		sites := probe.GetBranchSites()
+		for i, outcome := range sites[0].GetOutcomes()[:2] {
+			if outcome.HasCaseKey() {
+				t.Errorf("%s: hash switch case %d kept case key %d, want it cleared", probe.GetMethodName(), i, outcome.GetCaseKey())
+			}
+		}
+		intSwitch := sites[len(sites)-1].GetOutcomes()[0]
+		if !intSwitch.HasCaseKey() || intSwitch.GetCaseKey() != 7 {
+			t.Errorf("%s: int switch case key = %v, want 7 kept", probe.GetMethodName(), intSwitch.CaseKey)
+		}
+	}
+}
+
 func TestJavaStringHash_MatchesJava(t *testing.T) {
 	// Values printed by Java's String.hashCode().
 	for s, want := range map[string]int32{
