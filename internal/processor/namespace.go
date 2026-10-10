@@ -33,9 +33,10 @@ type NamespaceConfig struct {
 // because ingest.Handler decodes a fresh message for each request and
 // nothing else holds a reference to it.
 type Namespace struct {
-	next   ingest.Sink
-	cfg    NamespaceConfig
-	logger *slog.Logger
+	next       ingest.Sink
+	cfg        NamespaceConfig
+	logger     *slog.Logger
+	mismatches mismatchLog
 }
 
 var _ ingest.Sink = (*Namespace)(nil)
@@ -73,8 +74,9 @@ func (n *Namespace) AcceptStaticBaseline(ctx context.Context, baseline *otherlod
 
 // stamp applies the configured namespace to res. Under both actions it
 // fills in a namespace that is empty or only spaces. When the agent
-// named a different namespace, stamp counts and logs the mismatch. It
-// overwrites the agent's value only under Upsert. A nil res is left
+// named a different namespace, stamp counts and logs the mismatch, at
+// warn level the first time a service sends that namespace and at debug
+// after that. It overwrites the agent's value only under Upsert. A nil res is left
 // alone: ingest.Handler rejects such a payload before any sink sees it,
 // but a Namespace used without the handler must not panic on one.
 func (n *Namespace) stamp(res *otherlodepb.ResourceAttributes, payload string) {
@@ -93,7 +95,8 @@ func (n *Namespace) stamp(res *otherlodepb.ResourceAttributes, payload string) {
 	}
 
 	metrics.NamespaceMismatch.Inc(payload)
-	n.logger.Debug("agent namespace does not match the collector's configured namespace",
+	key := mismatchKey{service: res.GetServiceName(), value: agent}
+	n.logger.Log(context.Background(), n.mismatches.level(key), "agent namespace does not match the collector's configured namespace",
 		"service", res.GetServiceName(),
 		"instance", res.GetServiceInstanceId(),
 		"run", res.GetRunId(),

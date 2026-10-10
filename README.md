@@ -520,7 +520,9 @@ environment. An agent value made only of spaces counts as none.
 
 When the agent's value differs from the collector's, that is a mismatch:
 `otherlode_collector_environment_mismatch_total` goes up under either
-action, and a `debug` log line names the service, instance and run involved. A
+action, and a log line names the service, instance and run involved. The
+line is a `warn` the first time a service sends a given environment, and
+`debug` for every later payload of that service with that environment. A
 non-zero count means some JVM is configured for a different environment
 than the collector it reports to, or that a test run reports through it.
 A test run names the environment `test` when nothing else names one
@@ -566,8 +568,10 @@ The collector compares the two values after it trims surrounding spaces.
 Case counts: `Payments` and `payments` are different namespaces. An agent
 value made only of spaces counts as none. When the agent's value differs
 from the collector's, `otherlode_collector_namespace_mismatch_total` goes up
-under either action, and a `debug` log line names the service, instance
-and run involved.
+under either action, and a log line names the service, instance and run
+involved. The line is a `warn` the first time a service sends a given
+namespace, and `debug` for every later payload of that service with that
+namespace.
 
 Setting `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE_ACTION` without also setting
 `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE` is a misconfiguration and stops the

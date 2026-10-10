@@ -68,9 +68,10 @@ type EnvironmentConfig struct {
 // because ingest.Handler decodes a fresh message for each request and
 // nothing else holds a reference to it.
 type Environment struct {
-	next   ingest.Sink
-	cfg    EnvironmentConfig
-	logger *slog.Logger
+	next       ingest.Sink
+	cfg        EnvironmentConfig
+	logger     *slog.Logger
+	mismatches mismatchLog
 }
 
 var _ ingest.Sink = (*Environment)(nil)
@@ -110,7 +111,8 @@ func (e *Environment) AcceptManifest(ctx context.Context, manifest *otherlodepb.
 // fills in an environment that is empty or only spaces. It compares the
 // agent's environment with the configured one as the server does (see
 // sameEnvironment). When the agent named a different environment, stamp
-// counts and logs the mismatch. Under Upsert it writes the configured
+// counts and logs the mismatch, at warn level the first time a service
+// sends that environment and at debug after that. Under Upsert it writes the configured
 // value over the agent's, matching or not. A nil res is left alone:
 // ingest.Handler rejects such a payload before any sink sees it, but an
 // Environment used without the handler must not panic on one.
@@ -131,7 +133,12 @@ func (e *Environment) stamp(res *otherlodepb.ResourceAttributes, payload string)
 	}
 
 	metrics.EnvironmentMismatch.Inc(payload)
-	e.logger.Debug("agent environment does not match the collector's configured environment",
+	key := mismatchKey{
+		namespace: res.GetServiceNamespace(),
+		service:   res.GetServiceName(),
+		value:     normaliseEnvironment(agentEnv),
+	}
+	e.logger.Log(context.Background(), e.mismatches.level(key), "agent environment does not match the collector's configured environment",
 		"namespace", res.GetServiceNamespace(),
 		"service", res.GetServiceName(),
 		"instance", res.GetServiceInstanceId(),
