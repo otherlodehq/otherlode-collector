@@ -8,3 +8,9 @@ Keep link reference definitions (`[0.1.0]: https://...`) at the bottom of the fi
 the section being read.
 
 ## [Unreleased]
+
+### Added
+
+- The collector accepts the agent's class listing at `/v1/otherlode/class-listing`, stamps it, strips its unknown fields while redaction is on, and forwards it like a static baseline.
+- `ingest.Sink` has an `AcceptClassListing` method. A Go backend that implements `Sink` must add it.
+- The bindings know `StaticBaseline.include_rules` and `ResourceAttributes.flush_interval_seconds`, so a redacting collector keeps both fields and no longer marks a payload `fields_stripped` for them.

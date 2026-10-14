@@ -101,6 +101,25 @@ func (s *LogSink) AcceptStaticBaseline(_ context.Context, baseline *otherlodepb.
 	return nil
 }
 
+// AcceptClassListing logs the listing's identity, its chunk position and
+// the number of class names it carries. It never fails.
+func (s *LogSink) AcceptClassListing(_ context.Context, listing *otherlodepb.ClassListing) error {
+	s.logger.Info("received class listing",
+		"namespace", listing.GetResource().GetServiceNamespace(),
+		"service", listing.GetResource().GetServiceName(),
+		"instance", listing.GetResource().GetServiceInstanceId(),
+		"run", listing.GetResource().GetRunId(),
+		"environment", listing.GetResource().GetEnvironment(),
+		"test_run", listing.GetResource().GetTestRun(),
+		"agent_version", listing.GetResource().GetAgentVersion(),
+		"listed_at", listing.GetListedAt(),
+		"chunk", listing.GetChunkIndex(),
+		"chunk_count", listing.GetChunkCount(),
+		"class_names", len(listing.GetClassNames()),
+	)
+	return nil
+}
+
 func callEdgeCount(probes []*otherlodepb.ProbeLocation) int {
 	n := 0
 	for _, p := range probes {

@@ -4,21 +4,34 @@ description: What the collector receives, what it checks and rejects, what it ch
 order: 90
 ---
 
-The collector receives the agent's three payloads, checks them, changes a few fields if you ask it to, and forwards each one to the forward URL you set. It stores nothing on disk. With no forward URL set, it sends nothing anywhere and only writes a log line for each payload.
+The collector receives the agent's four payloads, checks them, changes a few fields if you ask it to, and forwards each one to the forward URL you set. It stores nothing on disk. With no forward URL set, it sends nothing anywhere and only writes a log line for each payload.
 
 This page lists what leaves the collector and what stays in its log. What each payload contains belongs to the agent. See [what the agent sends](/docs/agent/data-sent).
 
 ## What the collector receives
 
-The agent sends three payloads to the collector, each as a `POST` with a protobuf body.
+The agent sends four payloads to the collector, each as a `POST` with a protobuf body.
 
 | Path | Payload | Contents |
 |---|---|---|
 | `/v1/otherlode/deltas` | Delta batch | [Delta batch](/docs/agent/data-sent#delta-batch) |
 | `/v1/otherlode/manifest` | Probe manifest | [Probe manifest](/docs/agent/data-sent#probe-manifest) |
 | `/v1/otherlode/static-baseline` | Static baseline chunk | [Static baseline chunk](/docs/agent/data-sent#static-baseline-chunk) |
+| `/v1/otherlode/class-listing` | Class listing chunk | [What a class listing carries](#what-a-class-listing-carries) |
 
 Every payload carries the same resource attributes. See [resource attributes](/docs/agent/data-sent#resource-attributes).
+
+### What a class listing carries
+
+A class listing names the classes that the agent's build holds, under the include and exclude rules the agent applied. One listing can arrive as several chunks. A chunk carries these fields:
+
+- The resource attributes.
+- `class_names`: dotted binary names. A listing that matches no class is one chunk with no names.
+- `include_rules`: the `include_packages` and `exclude_packages` the agent applied.
+- `listed_at`: when the agent made the listing, in milliseconds since the epoch.
+- `chunk_index` and `chunk_count`: which chunk this is, counting from 0, and how many chunks the listing has.
+
+The listing holds names only. It holds no counts, no conditions and no string literals. The collector forwards it unchanged apart from the stamps in [environment and namespace](#environment-and-namespace) and the dropped fields in [dropped unknown fields](#dropped-unknown-fields).
 
 ## What the collector checks
 
@@ -36,6 +49,7 @@ The collector checks each request in this order. A request that fails a check ge
 | The resource is missing, or `service_name` is blank, or `service_instance_id` or `run_id` is empty | `400` |
 | `service_name` or `service_namespace` is `.` or `..` | `400` |
 | A static baseline chunk has no `scanned_at`, a `chunk_count` below 1, or a `chunk_index` that is negative or not below `chunk_count` | `400` |
+| A class listing chunk has no `listed_at`, a `chunk_count` below 1, or a `chunk_index` that is negative or not below `chunk_count` | `400` |
 | The forwarder cannot take the payload because its queue is full or the collector is shutting down. See [forwarding](forwarding) | `503` |
 
 The checks look only at identity fields and chunk numbers. They do not read the code names, counts or conditions in a payload.
@@ -46,7 +60,7 @@ The collector changes a payload only when you set a matching option. It changes 
 
 ### Environment and namespace
 
-If you set `OTHERLODE_COLLECTOR_ENVIRONMENT`, the collector writes that value into `environment` on every delta batch, manifest and static baseline chunk. If you set `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE`, it does the same for `service_namespace`. A value the agent already set is kept by default. It is replaced only when `OTHERLODE_COLLECTOR_ENVIRONMENT_ACTION` or `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE_ACTION` is `upsert`. See [set the environment and namespace](environment-and-namespace).
+If you set `OTHERLODE_COLLECTOR_ENVIRONMENT`, the collector writes that value into `environment` on every delta batch, manifest, static baseline chunk and class listing chunk. If you set `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE`, it does the same for `service_namespace`. A value the agent already set is kept by default. It is replaced only when `OTHERLODE_COLLECTOR_ENVIRONMENT_ACTION` or `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE_ACTION` is `upsert`. See [set the environment and namespace](environment-and-namespace).
 
 ### Blanked string literals
 
@@ -117,16 +131,16 @@ The collector writes JSON lines to standard output. At the default `info` level,
 
 | `msg` | Extra fields | When |
 |---|---|---|
-| `rejecting invalid delta batch`, `rejecting invalid manifest` or `rejecting invalid static baseline` | `error` | A payload failed a check in the table above. The error names the check, such as `resource.run_id is empty`. It quotes the service name or namespace only when it is `.` or `..` |
-| `rejecting malformed delta batch`, `rejecting malformed manifest` or `rejecting malformed static baseline` | `error` | The body is not valid protobuf. The error names the decoding problem and holds no body content |
+| `rejecting invalid delta batch`, `rejecting invalid manifest`, `rejecting invalid static baseline` or `rejecting invalid class listing` | `error` | A payload failed a check in the table above. The error names the check, such as `resource.run_id is empty`. It quotes the service name or namespace only when it is `.` or `..` |
+| `rejecting malformed delta batch`, `rejecting malformed manifest`, `rejecting malformed static baseline` or `rejecting malformed class listing` | `error` | The body is not valid protobuf. The error names the decoding problem and holds no body content |
 | `dropping payload: ...` | `namespace`, `service`, `instance`, `path`, `error`, and `backend_error` when the backend named an error code | The forwarder gave up on a payload. See [forwarding](forwarding) for the reasons. The error is the backend's status or the HTTP client's error, which can include the forward URL. `backend_error` is the `error` field of the backend's JSON response, cut to 64 bytes |
 | `agent environment does not match the collector's configured environment` | `namespace`, `service`, `instance`, `run`, `payload`, `agent_environment`, `collector_environment`, `action` | The agent named another environment than `OTHERLODE_COLLECTOR_ENVIRONMENT`. A `WARN` the first time a service sends that environment, and `DEBUG` after that |
 | `agent namespace does not match the collector's configured namespace` | `service`, `instance`, `run`, `payload`, `agent_namespace`, `collector_namespace`, `action` | The agent named another namespace than `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE`. A `WARN` the first time a service sends that namespace, and `DEBUG` after that |
-| `refusing delta batch: no decode slot came free`, or the same with `manifest` or `static baseline` | `wait`, `max_concurrent_decodes`, `unlogged_busy_refusals` | A request waited 5 seconds for a decode slot and got `503`. At most one line a minute |
+| `refusing delta batch: no decode slot came free`, or the same with `manifest`, `static baseline` or `class listing` | `wait`, `max_concurrent_decodes`, `unlogged_busy_refusals` | A request waited 5 seconds for a decode slot and got `503`. At most one line a minute |
 | `dropped fields this collector does not know; its bindings are older than the agent's, so the server withholds findings from this run; upgrade to the latest collector` | `namespace`, `service`, `instance`, `run`, `agent_version`, `payload` | A blanking setting is on and a payload lost an unknown field. One line for each run |
 | `forward URL uses plain http; the backend auth token is sent unencrypted` | `url` | At startup, when the forward URL starts with `http://` and a forward key is set |
 
-When the forwarder refuses a payload, the collector also logs a line at `error` level. Its `msg` is `sink rejected delta batch`, `sink rejected manifest` or `sink rejected static baseline`, and its `error` field names the namespace, service and instance. See [health checks, metrics and logs](monitoring) for every level.
+When the forwarder refuses a payload, the collector also logs a line at `error` level. Its `msg` is `sink rejected delta batch`, `sink rejected manifest`, `sink rejected static baseline` or `sink rejected class listing`, and its `error` field names the namespace, service and instance. See [health checks, metrics and logs](monitoring) for every level.
 
 ### When no forward URL is set
 
@@ -144,13 +158,14 @@ The line for a delta batch has this shape.
 {"time":"...","level":"INFO","msg":"received delta batch","namespace":"","service":"checkout","instance":"checkout-7d9f","run":"...","environment":"staging","test_run":false,"agent_version":"...","deltas":412,"endpoint_deltas":18,"dependency_deltas":3}
 ```
 
-The `msg` is `received delta batch`, `received probe manifest` or `received static baseline`. Every line holds `namespace`, `service`, `instance`, `run`, `environment`, `test_run` and `agent_version`. The rest are sizes.
+The `msg` is `received delta batch`, `received probe manifest`, `received static baseline` or `received class listing`. Every line holds `namespace`, `service`, `instance`, `run`, `environment`, `test_run` and `agent_version`. The rest are sizes.
 
 | `msg` | Size fields |
 |---|---|
 | `received delta batch` | `deltas`, `endpoint_deltas`, `dependency_deltas`, and `counts_pending_since` when it is not 0 |
 | `received probe manifest` | `probes`, `call_edges`, `class_locations`, `skipped_classes`, `failed_classes`, `endpoints`, `disabled_endpoint_modules`, `dependencies`, `referenced_classes`, `class_references`, `external_classes`, `references_recorded`, `dependencies_listed`, and `counts_pending_since` when it is not 0 |
 | `received static baseline` | `scanned_at`, `chunk`, `chunk_count`, `declared_classes`, `declared_call_edges`, `declared_referenced_classes`, `unreadable_classes`, `unprobed_classes` |
+| `received class listing` | `listed_at`, `chunk`, `chunk_count`, `class_names` |
 
 Environment and namespace stamps, blanking and re-keying apply before the line is written, so the line shows the stamped values.
 

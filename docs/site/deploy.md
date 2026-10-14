@@ -100,7 +100,7 @@ The image runs the same check itself. Its `HEALTHCHECK` runs `/otherlode-collect
 
 ## Try it with no forward URL
 
-With no `OTHERLODE_COLLECTOR_FORWARD_URL`, the collector starts, accepts agent pushes, and forwards nothing. For each push it logs one `INFO` line with the service, the run, and the size of each list in the payload. It does not log the payload itself. The lines are `received delta batch`, `received probe manifest` and `received static baseline`.
+With no `OTHERLODE_COLLECTOR_FORWARD_URL`, the collector starts, accepts agent pushes, and forwards nothing. For each push it logs one `INFO` line with the service, the run, and the size of each list in the payload. It does not log the payload itself. The lines are `received delta batch`, `received probe manifest`, `received static baseline` and `received class listing`.
 
 At startup it also logs this warning:
 

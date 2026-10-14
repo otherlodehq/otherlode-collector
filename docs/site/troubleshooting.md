@@ -160,15 +160,16 @@ With `OTHERLODE_COLLECTOR_INSECURE_NO_AUTH=1` the collector never answers 401. [
 
 ### 404
 
-The body is `404 page not found`. The collector serves exactly three paths for agents, and an agent posts to them under its `exportUrl`.
+The body is `404 page not found`. The collector serves exactly four paths for agents, and an agent posts to them under its `exportUrl`.
 
 | Path | Carries |
 |---|---|
 | `/v1/otherlode/deltas` | Delta batches |
 | `/v1/otherlode/manifest` | The probe manifest |
 | `/v1/otherlode/static-baseline` | The static baseline |
+| `/v1/otherlode/class-listing` | The class listing |
 
-Any other path is a 404, including a trailing slash and any prefix. The usual cause is a path in the agent's `exportUrl` that the collector does not expect. The agent appends the three paths to whatever `exportUrl` holds, so `https://gateway.example.com/otherlode` posts to `/otherlode/v1/otherlode/deltas`. Either strip the prefix at the proxy before the request reaches the collector, or remove the path from `exportUrl`. [The agent's `exportUrl`](/docs/agent/configuration#exporturl) says how it builds the URL.
+Any other path is a 404, including a trailing slash and any prefix. The usual cause is a path in the agent's `exportUrl` that the collector does not expect. The agent appends the four paths to whatever `exportUrl` holds, so `https://gateway.example.com/otherlode` posts to `/otherlode/v1/otherlode/deltas`. Either strip the prefix at the proxy before the request reaches the collector, or remove the path from `exportUrl`. [The agent's `exportUrl`](/docs/agent/configuration#exporturl) says how it builds the URL.
 
 ### 405
 
@@ -198,7 +199,7 @@ A 400 means the collector read the request and could not use it. The body says w
 | `invalid delta batch: resource.service_name is empty` | `rejecting invalid delta batch` | The body decoded, but the agent's identity is missing or unusable. |
 | `failed to read body` | none | The collector could not read the body to the end, for example because the client disconnected. |
 
-The collector says `manifest` or `static baseline` in place of `delta batch` for the other two paths. The text after `invalid` is one of these.
+The collector says `manifest`, `static baseline` or `class listing` in place of `delta batch` for the other three paths. The text after `invalid` is one of these.
 
 | Detail | Cause and fix |
 |---|---|
@@ -207,6 +208,7 @@ The collector says `manifest` or `static baseline` in place of `delta batch` for
 | `resource.service_name is ".", which no URL path can name` | The name is `.` or `..`. Rename the service. The same rule applies to `resource.service_namespace`. |
 | `resource.service_instance_id is empty` or `resource.run_id is empty` | The agent sent no instance or run identity. Run a supported agent. |
 | `scanned_at is not set`, `chunk_count must be at least 1`, `chunk_index is negative` or `chunk_index is out of range for chunk_count` | A static baseline chunk is malformed. Something other than an Otherlode agent sent it. |
+| `listed_at is not set`, `chunk_count must be at least 1`, `chunk_index is negative` or `chunk_index is out of range for chunk_count` | A class listing chunk is malformed. Something other than an Otherlode agent sent it. |
 
 The agent's [configuration](/docs/agent/configuration) lists its service name and namespace options.
 
@@ -220,7 +222,7 @@ A 503 means the collector did not take a valid payload. The agent keeps its coun
 | `ERROR` line `sink rejected delta batch` with `error` `forward: sink is shutting down (service "checkout" instance "3f1c9a")`, `Retry-After: 5` | The collector is stopping, for example during a rollout. This is expected and clears when the new collector is up. |
 | `WARN` line `refusing delta batch: no decode slot came free`, `Retry-After: 1`, empty body | No decode slot came free within 5 seconds. Too many large requests arrived at once. The collector logs at most one such line a minute, and its `unlogged_busy_refusals` field counts the refusals since the last line that got no line of their own. The counter `otherlode_collector_ingest_rejected_total{reason="busy"}` counts every one. Raise `OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES` or give the collector more CPU and memory. [Rate and memory limits](limits) has the trade-off. |
 
-The `ERROR` and `WARN` lines name `manifest` or `static baseline` for the other payloads. The counter `otherlode_collector_forward_refused_total`, labelled `queue_full` or `shutting_down`, counts the first two causes.
+The `ERROR` and `WARN` lines name `manifest`, `static baseline` or `class listing` for the other payloads. The counter `otherlode_collector_forward_refused_total`, labelled `queue_full` or `shutting_down`, counts the first two causes.
 
 ## Payloads are dropped after forwarding
 

@@ -19,6 +19,8 @@ The collector looks at the condition parts in two places, in every branch site o
 
 A part is blanked when its kind is neither code nor placeholder, and the settings select it. A part of a kind the collector does not recognise counts as a literal, so it is blanked too. The part keeps its kind, and its text becomes `…`.
 
+The class listing holds class names and the include and exclude rules. The collector keeps both as they arrive, as it keeps class names everywhere else.
+
 Class, method, parameter and file names, line numbers, route templates and library paths pass through as they arrive. A condition's code parts stay readable, so a blanked condition still shows its shape.
 
 ## Choose what to blank
@@ -77,13 +79,13 @@ When blanking is on, the collector logs this line at startup. `secret_fingerprin
 
 ## Check that blanking works
 
-The counter `otherlode_collector_redacted_literals_total` on `/metrics` counts the parts the collector blanked. `otherlode_collector_redacted_case_keys_total` counts the case keys it cleared. See [case keys that are a hash code](#case-keys-that-are-a-hash-code). The `payload` label of both is `manifest` or `static_baseline`. Each stays at zero until a payload arrives with something to blank or clear.
+The counter `otherlode_collector_redacted_literals_total` on `/metrics` counts the parts the collector blanked. `otherlode_collector_redacted_case_keys_total` counts the case keys it cleared. See [case keys that are a hash code](#case-keys-that-are-a-hash-code). The `payload` label of both is `manifest` or `static_baseline`. A class listing holds no string literal, so it adds to neither. Each stays at zero until a payload arrives with something to blank or clear.
 
 No counter and no log line holds a literal's text, a key or the secret.
 
 ## Unknown fields are dropped while blanking is on
 
-The collector cannot see a literal inside a field it does not know. So while either setting is on, it drops every protobuf field it does not know from every payload, delta batches included. If a payload lost at least one field, the collector sets `fields_stripped` on the payload's resource attributes and counts the payload in `otherlode_collector_fields_stripped_total`. Its `payload` label is `deltas`, `manifest` or `static_baseline`.
+The collector cannot see a literal inside a field it does not know. So while either setting is on, it drops every protobuf field it does not know from every payload, delta batches and class listings included. If a payload lost at least one field, the collector sets `fields_stripped` on the payload's resource attributes and counts the payload in `otherlode_collector_fields_stripped_total`. Its `payload` label is `deltas`, `manifest`, `static_baseline` or `class_listing`.
 
 The collector logs one warning for each run, with the first payload that loses a field. The line carries the `namespace`, `service`, `instance`, `run`, `agent_version` and `payload` fields:
 
@@ -156,7 +158,7 @@ A cleared case has no key, so Otherlode shows it unnamed and cannot match it acr
 
 ### Let Otherlode refuse payloads that were not blanked
 
-While blanking is on, the collector sends the secret's fingerprint in an `Otherlode-Redaction` header on every request it forwards, for all three payloads. With blanking off it sends no such header.
+While blanking is on, the collector sends the secret's fingerprint in an `Otherlode-Redaction` header on every request it forwards, for all four payloads. With blanking off it sends no such header.
 
 A tenant can have Otherlode require the header. Otherlode then refuses a payload that has no header, such as one an agent posted to it directly, with `403` and the error code `redaction_required`. It refuses a payload with another fingerprint with `403` and `redaction_secret_mismatch`. The collector does not retry a `403`. It drops the payload and logs a warning that carries the code as `backend_error`:
 

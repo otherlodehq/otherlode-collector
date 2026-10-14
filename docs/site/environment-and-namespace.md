@@ -21,7 +21,7 @@ For the options on the agent's side, see [service identity](/docs/agent/configur
 
 The collector reads these once, at startup. Restart it after you change them. It trims the spaces around each value and each action. A value or an action that is blank after trimming counts as not set.
 
-The collector stamps all three payload types: delta batches, manifests, and static baselines. When it starts with a value set, it logs one line at the `info` level, such as `stamping environment on ingested payloads` or `stamping service namespace on ingested payloads`.
+The collector stamps all four payload types: delta batches, manifests, static baselines, and class listings. When it starts with a value set, it logs one line at the `info` level, such as `stamping environment on ingested payloads` or `stamping service namespace on ingested payloads`.
 
 ### How a value is stamped
 
@@ -87,7 +87,7 @@ Leave `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE` unset. The collector then passes e
 
 ## Watch for mismatches
 
-Two counters on `/metrics` count the payloads where the agent named a different value. Both have the label `payload`, whose value is `deltas`, `manifest` or `static_baseline`.
+Two counters on `/metrics` count the payloads where the agent named a different value. Both have the label `payload`, whose value is `deltas`, `manifest`, `static_baseline` or `class_listing`.
 
 | Counter | Counts |
 |---|---|

@@ -55,10 +55,10 @@ type routeConfig struct {
 // cannot be used is returned as an error.
 //
 // A processor.Environment wraps the chosen sink. It writes the environment
-// onto delta batches, manifests and static baselines before the sink sees
-// them. A processor.Namespace wraps the sink outside it and writes the
-// service namespace onto the same three payloads. A processor.Redaction
-// wraps the sink outside both. It hides string literals, re-keys branch
+// onto delta batches, manifests, static baselines and class listings
+// before the sink sees them. A processor.Namespace wraps the sink
+// outside it and writes the service namespace onto the same four
+// payloads. A processor.Redaction wraps the sink outside both. It hides string literals, re-keys branch
 // and site keys and drops unknown fields before any payload is forwarded.
 // It logs a fingerprint of its secret, never the secret, and the
 // forwarder sends the same fingerprint in the forward.RedactionHeader

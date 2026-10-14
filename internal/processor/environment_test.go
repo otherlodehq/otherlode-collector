@@ -16,6 +16,7 @@ type recordingSink struct {
 	deltaBatches []*otherlodepb.DeltaBatch
 	manifests    []*otherlodepb.ProbeManifest
 	baselines    []*otherlodepb.StaticBaseline
+	listings     []*otherlodepb.ClassListing
 	err          error
 }
 
@@ -31,6 +32,11 @@ func (s *recordingSink) AcceptManifest(_ context.Context, manifest *otherlodepb.
 
 func (s *recordingSink) AcceptStaticBaseline(_ context.Context, baseline *otherlodepb.StaticBaseline) error {
 	s.baselines = append(s.baselines, baseline)
+	return s.err
+}
+
+func (s *recordingSink) AcceptClassListing(_ context.Context, listing *otherlodepb.ClassListing) error {
+	s.listings = append(s.listings, listing)
 	return s.err
 }
 
@@ -63,6 +69,22 @@ func TestEnvironment_AcceptStaticBaseline_AbsentEnvironment_Stamped(t *testing.T
 	}
 	if len(next.baselines) != 1 || next.baselines[0] != baseline {
 		t.Fatalf("next did not receive the same baseline pointer")
+	}
+}
+
+func TestEnvironment_AcceptClassListing_AbsentEnvironment_Stamped(t *testing.T) {
+	next := &recordingSink{}
+	env := NewEnvironment(next, EnvironmentConfig{Value: "prod", Action: Insert}, nil)
+
+	listing := &otherlodepb.ClassListing{Resource: &otherlodepb.ResourceAttributes{ServiceName: "svc", ServiceInstanceId: "i1", RunId: "run-1"}}
+	if err := env.AcceptClassListing(context.Background(), listing); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := listing.GetResource().GetEnvironment(); got != "prod" {
+		t.Fatalf("environment = %q, want %q", got, "prod")
+	}
+	if len(next.listings) != 1 || next.listings[0] != listing {
+		t.Fatalf("next did not receive the same listing pointer")
 	}
 }
 
@@ -117,6 +139,26 @@ func TestEnvironment_Insert_DifferentAgentValue_StaticBaselineMismatchCounted(t 
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := metrics.EnvironmentMismatch.Value("static_baseline") - before; got != 1 {
+		t.Fatalf("mismatch counter increased by %d, want 1", got)
+	}
+}
+
+func TestEnvironment_Insert_DifferentAgentValue_ClassListingMismatchCounted(t *testing.T) {
+	before := metrics.EnvironmentMismatch.Value("class_listing")
+
+	env := NewEnvironment(&recordingSink{}, EnvironmentConfig{Value: "prod", Action: Insert}, nil)
+
+	res := &otherlodepb.ResourceAttributes{ServiceName: "svc", ServiceInstanceId: "i1", RunId: "run-1"}
+	res.SetEnvironment("uat")
+	listing := &otherlodepb.ClassListing{Resource: res}
+
+	if err := env.AcceptClassListing(context.Background(), listing); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := listing.GetResource().GetEnvironment(); got != "uat" {
+		t.Fatalf("environment = %q, want the agent's %q kept", got, "uat")
+	}
+	if got := metrics.EnvironmentMismatch.Value("class_listing") - before; got != 1 {
 		t.Fatalf("mismatch counter increased by %d, want 1", got)
 	}
 }

@@ -24,6 +24,7 @@ type fakeSink struct {
 	deltaBatches []*otherlodepb.DeltaBatch
 	manifests    []*otherlodepb.ProbeManifest
 	baselines    []*otherlodepb.StaticBaseline
+	listings     []*otherlodepb.ClassListing
 }
 
 func (f *fakeSink) AcceptDeltaBatch(_ context.Context, batch *otherlodepb.DeltaBatch) error {
@@ -41,6 +42,11 @@ func (f *fakeSink) AcceptStaticBaseline(_ context.Context, baseline *otherlodepb
 	return nil
 }
 
+func (f *fakeSink) AcceptClassListing(_ context.Context, listing *otherlodepb.ClassListing) error {
+	f.listings = append(f.listings, listing)
+	return nil
+}
+
 // failingSink refuses every payload, standing in for a backend that could
 // not take the write (a database outage, for example).
 type failingSink struct{}
@@ -54,6 +60,10 @@ func (failingSink) AcceptManifest(context.Context, *otherlodepb.ProbeManifest) e
 }
 
 func (failingSink) AcceptStaticBaseline(context.Context, *otherlodepb.StaticBaseline) error {
+	return errors.New("sink unavailable")
+}
+
+func (failingSink) AcceptClassListing(context.Context, *otherlodepb.ClassListing) error {
 	return errors.New("sink unavailable")
 }
 
@@ -88,6 +98,11 @@ func (s ctxCheckSink) AcceptManifest(ctx context.Context, _ *otherlodepb.ProbeMa
 }
 
 func (s ctxCheckSink) AcceptStaticBaseline(ctx context.Context, _ *otherlodepb.StaticBaseline) error {
+	s.checkContext(ctx)
+	return nil
+}
+
+func (s ctxCheckSink) AcceptClassListing(ctx context.Context, _ *otherlodepb.ClassListing) error {
 	s.checkContext(ctx)
 	return nil
 }
@@ -496,6 +511,7 @@ func TestHandler_EmptyRunId_RejectedForEveryPayload(t *testing.T) {
 		DeltaBatchPath:     &otherlodepb.DeltaBatch{Resource: res},
 		ManifestPath:       &otherlodepb.ProbeManifest{Resource: res},
 		StaticBaselinePath: &otherlodepb.StaticBaseline{Resource: res, ScannedAt: 1700000000, ChunkCount: 1},
+		ClassListingPath:   &otherlodepb.ClassListing{Resource: res, ListedAt: 1700000000, ChunkCount: 1},
 	} {
 		t.Run(path, func(t *testing.T) {
 			sink := &fakeSink{}
@@ -514,7 +530,7 @@ func TestHandler_EmptyRunId_RejectedForEveryPayload(t *testing.T) {
 			if !strings.Contains(string(body), "resource.run_id is empty") {
 				t.Errorf("body = %q, want it to name resource.run_id", body)
 			}
-			if n := len(sink.deltaBatches) + len(sink.manifests) + len(sink.baselines); n != 0 {
+			if n := len(sink.deltaBatches) + len(sink.manifests) + len(sink.baselines) + len(sink.listings); n != 0 {
 				t.Fatalf("sink received %d payloads, want 0", n)
 			}
 		})
@@ -541,6 +557,7 @@ func TestHandler_UnnameableServiceIdentity_RejectedForEveryPayload(t *testing.T)
 			DeltaBatchPath:     &otherlodepb.DeltaBatch{Resource: tc.res},
 			ManifestPath:       &otherlodepb.ProbeManifest{Resource: tc.res},
 			StaticBaselinePath: &otherlodepb.StaticBaseline{Resource: tc.res, ScannedAt: 1700000000, ChunkCount: 1},
+			ClassListingPath:   &otherlodepb.ClassListing{Resource: tc.res, ListedAt: 1700000000, ChunkCount: 1},
 		} {
 			t.Run(name+" "+path, func(t *testing.T) {
 				sink := &fakeSink{}
@@ -559,7 +576,7 @@ func TestHandler_UnnameableServiceIdentity_RejectedForEveryPayload(t *testing.T)
 				if !strings.Contains(string(body), tc.want) {
 					t.Errorf("body = %q, want it to name %s", body, tc.want)
 				}
-				if n := len(sink.deltaBatches) + len(sink.manifests) + len(sink.baselines); n != 0 {
+				if n := len(sink.deltaBatches) + len(sink.manifests) + len(sink.baselines) + len(sink.listings); n != 0 {
 					t.Fatalf("sink received %d payloads, want 0", n)
 				}
 			})
@@ -586,7 +603,7 @@ func TestHandler_WrongMethod_Rejected(t *testing.T) {
 	server := newTestServer(sink)
 	defer server.Close()
 
-	for _, path := range []string{DeltaBatchPath, ManifestPath, StaticBaselinePath} {
+	for _, path := range []string{DeltaBatchPath, ManifestPath, StaticBaselinePath, ClassListingPath} {
 		resp, err := http.Get(server.URL + path)
 		if err != nil {
 			t.Fatalf("get %s: %v", path, err)
@@ -599,7 +616,7 @@ func TestHandler_WrongMethod_Rejected(t *testing.T) {
 			t.Errorf("GET %s: Allow = %q, want it to list POST", path, allow)
 		}
 	}
-	if len(sink.deltaBatches)+len(sink.manifests)+len(sink.baselines) != 0 {
+	if len(sink.deltaBatches)+len(sink.manifests)+len(sink.baselines)+len(sink.listings) != 0 {
 		t.Fatal("a non-POST request reached the sink")
 	}
 }
@@ -783,6 +800,101 @@ func TestHandleStaticBaseline_EmptyScan_Accepted(t *testing.T) {
 	}
 }
 
+func TestHandleClassListing_ValidPayload_ReachesSink(t *testing.T) {
+	sink := &fakeSink{}
+	server := newTestServer(sink)
+	defer server.Close()
+
+	listing := &otherlodepb.ClassListing{
+		Resource: &otherlodepb.ResourceAttributes{
+			ServiceName:       "demo-service",
+			ServiceInstanceId: "instance-1",
+			RunId:             "run-1",
+		},
+		ClassNames: []string{"com.example.Bar", "com.example.Foo", "com.example.Foo$Inner"},
+		IncludeRules: &otherlodepb.IncludeRules{
+			IncludePackages: []string{"com.example"},
+			ExcludePackages: []string{"com.example.generated"},
+		},
+		ListedAt:   1700000000,
+		ChunkIndex: 1,
+		ChunkCount: 2,
+	}
+
+	resp := postProto(t, server.URL+ClassListingPath, listing)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusAccepted)
+	}
+	if len(sink.listings) != 1 {
+		t.Fatalf("sink received %d listings, want 1", len(sink.listings))
+	}
+	if !proto.Equal(sink.listings[0], listing) {
+		t.Errorf("sink received %v, want %v", sink.listings[0], listing)
+	}
+}
+
+func TestHandleClassListing_InvalidFields_RejectedWithoutReachingSink(t *testing.T) {
+	validResource := &otherlodepb.ResourceAttributes{ServiceName: "demo-service", ServiceInstanceId: "instance-1", RunId: "run-1"}
+
+	for name, tc := range map[string]struct {
+		listing *otherlodepb.ClassListing
+		want    string
+	}{
+		"empty body":                       {&otherlodepb.ClassListing{}, "missing resource"},
+		"no resource":                      {&otherlodepb.ClassListing{ListedAt: 1700000000, ChunkCount: 1}, "missing resource"},
+		"no run id":                        {&otherlodepb.ClassListing{Resource: &otherlodepb.ResourceAttributes{ServiceName: "demo-service", ServiceInstanceId: "instance-1"}, ListedAt: 1700000000, ChunkCount: 1}, "resource.run_id is empty"},
+		"zero listed_at":                   {&otherlodepb.ClassListing{Resource: validResource, ListedAt: 0, ChunkCount: 1}, "listed_at is not set"},
+		"negative listed_at":               {&otherlodepb.ClassListing{Resource: validResource, ListedAt: -1, ChunkCount: 1}, "listed_at is not set"},
+		"zero chunk_count":                 {&otherlodepb.ClassListing{Resource: validResource, ListedAt: 1700000000, ChunkCount: 0}, "chunk_count must be at least 1"},
+		"negative chunk_index":             {&otherlodepb.ClassListing{Resource: validResource, ListedAt: 1700000000, ChunkCount: 1, ChunkIndex: -1}, "chunk_index is negative"},
+		"chunk_index equal to chunk_count": {&otherlodepb.ClassListing{Resource: validResource, ListedAt: 1700000000, ChunkCount: 2, ChunkIndex: 2}, "chunk_index is out of range for chunk_count"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			sink := &fakeSink{}
+			server := newTestServer(sink)
+			defer server.Close()
+
+			resp := postProto(t, server.URL+ClassListingPath, tc.listing)
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+			}
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("read body: %v", err)
+			}
+			if !strings.Contains(string(body), tc.want) {
+				t.Fatalf("body = %q, want it to contain %q", body, tc.want)
+			}
+			if len(sink.listings) != 0 {
+				t.Fatalf("sink received %d listings, want 0", len(sink.listings))
+			}
+		})
+	}
+}
+
+func TestHandleClassListing_EmptyListing_Accepted(t *testing.T) {
+	sink := &fakeSink{}
+	server := newTestServer(sink)
+	defer server.Close()
+
+	resp := postProto(t, server.URL+ClassListingPath, &otherlodepb.ClassListing{
+		Resource:   &otherlodepb.ResourceAttributes{ServiceName: "demo-service", ServiceInstanceId: "instance-1", RunId: "run-1"},
+		ListedAt:   1700000000,
+		ChunkIndex: 0,
+		ChunkCount: 1,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d (a listing that matches no class is still a valid statement)", resp.StatusCode, http.StatusAccepted)
+	}
+	if len(sink.listings) != 1 {
+		t.Fatalf("sink received %d listings, want 1", len(sink.listings))
+	}
+}
+
 func TestHandler_SinkError_Returns503AndIncrementsRejected(t *testing.T) {
 	server := newTestServer(failingSink{})
 	defer server.Close()
@@ -816,6 +928,16 @@ func TestHandler_SinkError_Returns503AndIncrementsRejected(t *testing.T) {
 			msg: &otherlodepb.StaticBaseline{
 				Resource:   &otherlodepb.ResourceAttributes{ServiceName: "demo-service", ServiceInstanceId: "instance-1", RunId: "run-1"},
 				ScannedAt:  1700000000,
+				ChunkCount: 1,
+			},
+		},
+		{
+			name:  "class listing",
+			path:  ClassListingPath,
+			label: "class_listing",
+			msg: &otherlodepb.ClassListing{
+				Resource:   &otherlodepb.ResourceAttributes{ServiceName: "demo-service", ServiceInstanceId: "instance-1", RunId: "run-1"},
+				ListedAt:   1700000000,
 				ChunkCount: 1,
 			},
 		},
@@ -864,6 +986,7 @@ func TestHandler_PassesRequestContextToSink(t *testing.T) {
 		{"delta batch", DeltaBatchPath, &otherlodepb.DeltaBatch{Resource: res}},
 		{"manifest", ManifestPath, &otherlodepb.ProbeManifest{Resource: res}},
 		{"static baseline", StaticBaselinePath, &otherlodepb.StaticBaseline{Resource: res, ScannedAt: 1700000000, ChunkCount: 1}},
+		{"class listing", ClassListingPath, &otherlodepb.ClassListing{Resource: res, ListedAt: 1700000000, ChunkCount: 1}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -900,6 +1023,7 @@ func TestHandler_RejectedRequests_CountedByReason(t *testing.T) {
 		{"delta batch", DeltaBatchPath, "deltas"},
 		{"manifest", ManifestPath, "manifest"},
 		{"static baseline", StaticBaselinePath, "static_baseline"},
+		{"class listing", ClassListingPath, "class_listing"},
 	}
 	// An empty message has no resource, so it fails validation on every route.
 	empty, err := proto.Marshal(&otherlodepb.DeltaBatch{})
@@ -987,6 +1111,7 @@ func TestPayloadLabel(t *testing.T) {
 		DeltaBatchPath:     "deltas",
 		ManifestPath:       "manifest",
 		StaticBaselinePath: "static_baseline",
+		ClassListingPath:   "class_listing",
 		"/unknown":         "deltas",
 	} {
 		if got := PayloadLabel(path); got != want {

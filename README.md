@@ -27,7 +27,7 @@ Otherlode agent  --POST protobuf-->  otherlode-collector  -->  Sink
  every flush)                         decode only)               storage, aggregation)
 ```
 
-The agent's `HttpExporter` posts three payload types, matching
+The agent's `HttpExporter` posts four payload types, matching
 the paths this collector serves. Each one carries the same resource
 attributes: service namespace (optional), service name, version,
 instance ID, environment, a run ID, and a flag that marks a test run. A service is known by its
@@ -53,8 +53,13 @@ instance restarted under a pinned instance ID still names a different run.
   `scanned_at`, so `(instance, scanned_at)` identifies one scan; a
   backend must hold every chunk (`chunk_index` of `chunk_count`) before
   it can diff the scan against anything.
+- `POST /v1/otherlode/class-listing`: a `ClassListing`, the names of the
+  classes a run's build holds, sent once per process as one or more
+  chunks. Every chunk carries the same instance, include rules and
+  `listed_at`, so a backend must hold every chunk (`chunk_index` of
+  `chunk_count`) before it reads a class's absence from the listing.
 
-All three are protobuf over plain HTTP, not gRPC — the agent sends one batch per
+All four are protobuf over plain HTTP, not gRPC — the agent sends one batch per
 flush interval per instance, so gRPC's multiplexing advantage doesn't apply,
 and plain HTTP avoids shading grpc-java/Netty into every instrumented JVM.
 See the agent's own `CLAUDE.md` ("Transport", "Hit-data recording &
@@ -69,11 +74,11 @@ repo and is published to the Buf Schema Registry as
   as an ordinary Go module dependency. The package to import is
   `buf.build/gen/go/otherlode/otherlode/protocolbuffers/go/otherlode/v1`.
   No local `.proto` copy or `protoc` step in this repo.
-- `ingest.Handler` — decodes the three payload types above and
+- `ingest.Handler` — decodes the four payload types above and
   hands each to a `Sink`. Rejects malformed bodies, and decoded ones
   whose resource lacks the service name, instance ID or run ID a backend
   needs to attribute them, with `400` before they reach the sink; accepts
-  valid ones with `202`. All three payloads are checked the same way,
+  valid ones with `202`. All four payloads are checked the same way,
   since `class_id` and every cumulative total are only meaningful within
   one run of one instance. A service name that is blank, and a service
   name or namespace that is `.` or `..`, are rejected the same way: a
@@ -157,7 +162,8 @@ Without forwarding configured every payload is logged at `info`, so
 
 Set `OTHERLODE_COLLECTOR_AUTH_TOKEN` to require a matching
 `Authorization: Bearer <token>` header on `/v1/otherlode/deltas`,
-`/v1/otherlode/manifest`, and `/v1/otherlode/static-baseline`. Point the
+`/v1/otherlode/manifest`, `/v1/otherlode/static-baseline`, and
+`/v1/otherlode/class-listing`. Point the
 agent's exporter at the same token so its requests carry the header.
 
 ```
@@ -273,8 +279,9 @@ since that hop carries `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN`.
 
 ### Rate limiting
 
-`/v1/otherlode/deltas`, `/v1/otherlode/manifest`, and
-`/v1/otherlode/static-baseline` are throttled per client IP: 5
+`/v1/otherlode/deltas`, `/v1/otherlode/manifest`,
+`/v1/otherlode/static-baseline`, and `/v1/otherlode/class-listing` are
+throttled per client IP: 5
 requests/second with a burst of 20 by default, sized around the agent's
 flush interval, which is 60 seconds by default. Override with
 `OTHERLODE_COLLECTOR_RATE_LIMIT_RPS` and
@@ -287,8 +294,8 @@ OTHERLODE_COLLECTOR_RATE_LIMIT_RPS=10 OTHERLODE_COLLECTOR_RATE_LIMIT_BURST=50 go
 
 A throttled request gets `429` with a `Retry-After` header.
 
-At startup an instance sends a manifest and then its static baseline
-chunks back to back. The agent retries a `429` a few times within one
+At startup an instance sends a manifest, its class listing chunks and
+its static baseline chunks, each without waiting for the others. The agent retries a `429` a few times within one
 send. If a chunk still fails, the agent keeps it and the chunks after
 it. After each later flush that the collector confirms, the agent sends
 the next kept chunk, one chunk per flush. A `429` delays a scan but does
@@ -355,13 +362,13 @@ wildcard), exiting 0 or 1, and never through a proxy. The image's
 | `otherlode_collector_forward_retries_total` | `payload` | Attempts made after a retryable failure |
 | `otherlode_collector_forward_dropped_total` | `payload`, `reason` | Discarded without delivery: `marshal`, `permanent`, `retry_exhausted`, `shutdown_deadline`, `shutdown_attempt_failed` |
 | `otherlode_collector_forward_refused_total` | `payload`, `reason` | Not taken and answered `503` so the sender sends it again: `queue_full`, `shutting_down` |
-| `otherlode_collector_environment_mismatch_total` | `payload` | The agent's environment differed from the collector's configured one (see [Environment](#environment)); `payload` is `deltas`, `manifest`, or `static_baseline` |
-| `otherlode_collector_namespace_mismatch_total` | `payload` | The agent's service namespace differed from the collector's configured one (see [Namespace](#namespace)); `payload` is `deltas`, `manifest`, or `static_baseline` |
+| `otherlode_collector_environment_mismatch_total` | `payload` | The agent's environment differed from the collector's configured one (see [Environment](#environment)); `payload` is `deltas`, `manifest`, `static_baseline`, or `class_listing` |
+| `otherlode_collector_namespace_mismatch_total` | `payload` | The agent's service namespace differed from the collector's configured one (see [Namespace](#namespace)); `payload` is `deltas`, `manifest`, `static_baseline`, or `class_listing` |
 | `otherlode_collector_redacted_literals_total` | `payload` | String literal parts replaced by the redaction processor (see [Redaction](#redaction)); `payload` is `manifest` or `static_baseline` |
 | `otherlode_collector_redacted_case_keys_total` | `payload` | Case keys cleared by the redaction processor, from a switch on a string's hash code or equal to the hash code of a redacted literal (see [Branch and site keys](#branch-and-site-keys)); `payload` is `manifest` or `static_baseline` |
-| `otherlode_collector_fields_stripped_total` | `payload` | Payloads that lost an unknown field to the redaction processor and were marked `fields_stripped` (see [Redaction](#redaction)); `payload` is `deltas`, `manifest` or `static_baseline` |
+| `otherlode_collector_fields_stripped_total` | `payload` | Payloads that lost an unknown field to the redaction processor and were marked `fields_stripped` (see [Redaction](#redaction)); `payload` is `deltas`, `manifest`, `static_baseline` or `class_listing` |
 
-`payload` is `deltas`, `manifest`, or `static_baseline`. The dropped
+`payload` is `deltas`, `manifest`, `static_baseline`, or `class_listing`. The dropped
 counter is the one to alert on: every increment is agent data that never
 reached the backend. A steadily rising refused counter means the backend
 is slower than the fleet, or the queue is too small; no data is lost
@@ -374,8 +381,9 @@ read, so a rotation has not taken effect.
 By default the collector only logs what it receives. Set
 `OTHERLODE_COLLECTOR_FORWARD_URL` to the base URL of a backend and every
 decoded payload is relayed there instead, as a `POST` to the same
-`/v1/otherlode/deltas`, `/v1/otherlode/manifest`, and
-`/v1/otherlode/static-baseline` paths with the same
+`/v1/otherlode/deltas`, `/v1/otherlode/manifest`,
+`/v1/otherlode/static-baseline`, and `/v1/otherlode/class-listing` paths
+with the same
 `application/x-protobuf` body. The URL must not have a query, a fragment or
 user info, and the collector stops at startup if it does.
 `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN`,
@@ -509,7 +517,8 @@ usually runs one collector per environment, so the collector can label
 every payload that passes through it, with no change to any JVM's config.
 
 Set `OTHERLODE_COLLECTOR_ENVIRONMENT` to the environment name to stamp onto
-every delta batch, manifest and static baseline the collector ingests:
+every delta batch, manifest, static baseline and class listing the collector
+ingests:
 
 ```
 OTHERLODE_COLLECTOR_ENVIRONMENT=prod go run ./cmd/otherlode-collector
@@ -556,7 +565,8 @@ on the collector is easier than setting it on every agent. See
 [ADR 0002](docs/adr/0002-a-namespace-processor-stamps-a-service-namespace.md).
 
 Set `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE` to the namespace to stamp onto
-every delta batch, manifest and static baseline the collector ingests:
+every delta batch, manifest, static baseline and class listing the collector
+ingests:
 
 ```
 OTHERLODE_COLLECTOR_SERVICE_NAMESPACE=payments go run ./cmd/otherlode-collector

@@ -20,9 +20,9 @@ type NamespaceConfig struct {
 }
 
 // Namespace is an ingest.Sink that writes a configured service namespace
-// onto the resource of each delta batch, manifest and static baseline.
-// It then passes the payload to next. A service is known by its
-// namespace and its name. One collector often serves one team, so an
+// onto the resource of each delta batch, manifest, static baseline and
+// class listing. It then passes the payload to next. A service is known
+// by its namespace and its name. One collector often serves one team, so an
 // operator can set the team's namespace once here instead of on every
 // agent.
 //
@@ -70,6 +70,13 @@ func (n *Namespace) AcceptManifest(ctx context.Context, manifest *otherlodepb.Pr
 func (n *Namespace) AcceptStaticBaseline(ctx context.Context, baseline *otherlodepb.StaticBaseline) error {
 	n.stamp(baseline.GetResource(), "static_baseline")
 	return n.next.AcceptStaticBaseline(ctx, baseline)
+}
+
+// AcceptClassListing stamps the listing's resource with the configured
+// namespace, then passes the listing to next.
+func (n *Namespace) AcceptClassListing(ctx context.Context, listing *otherlodepb.ClassListing) error {
+	n.stamp(listing.GetResource(), "class_listing")
+	return n.next.AcceptClassListing(ctx, listing)
 }
 
 // stamp applies the configured namespace to res. Under both actions it

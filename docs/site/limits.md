@@ -23,7 +23,7 @@ A value that is not a number, a negative or non-finite rate, a burst below 1 whi
 {"time":"...","level":"WARN","msg":"rate limiting disabled; ingest endpoints accept requests unthrottled"}
 ```
 
-The limit covers every path under `/v1/otherlode/`. That includes the three ingest paths, wrong methods, and unknown paths. `/healthz` and `/metrics` are never limited.
+The limit covers every path under `/v1/otherlode/`. That includes the four ingest paths, wrong methods, and unknown paths. `/healthz` and `/metrics` are never limited.
 
 The limit runs before the token check. A request over the limit gets a 429 and never reaches authentication, so a flood is capped whether or not it carries a valid token. A request with a wrong agent token still counts against its address's bucket.
 
@@ -35,7 +35,7 @@ The defaults leave room for the agent's schedule. An agent flushes every 60 seco
 
 ### Startup requests
 
-An instance sends its manifest and its static baseline chunks back to back at startup. Several instances that start together behind one address can use up the burst of 20. The agent retries a 429 a few times within one send. If the chunk is still refused, the agent keeps it and sends the rest later, one chunk per flush, so a 429 does not lose the scan. See [after a failed send](/docs/agent/data-sent#after-a-failed-send) and [retries inside one send](/docs/agent/data-sent#retries-inside-one-send). If many instances share an address and you see 429s, raise `OTHERLODE_COLLECTOR_RATE_LIMIT_BURST`.
+At startup an instance sends its manifest, its class listing chunks and its static baseline chunks, each without waiting for the others. Several instances that start together behind one address can use up the burst of 20. The agent retries a 429 a few times within one send. If the chunk is still refused, the agent keeps it and sends the rest later, one chunk per flush, so a 429 does not lose the scan. See [after a failed send](/docs/agent/data-sent#after-a-failed-send) and [retries inside one send](/docs/agent/data-sent#retries-inside-one-send). If many instances share an address and you see 429s, raise `OTHERLODE_COLLECTOR_RATE_LIMIT_BURST`.
 
 ### Which address counts
 

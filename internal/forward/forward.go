@@ -60,9 +60,10 @@ type Config struct {
 	// URL is the backend's base URL, with an http or https scheme and a
 	// host. NewForwardingSink rejects a URL with a query, a fragment or
 	// user info. ForwardingSink posts the re-marshaled payload to
-	// URL+ingest.DeltaBatchPath, URL+ingest.ManifestPath, and
-	// URL+ingest.StaticBaselinePath. Trailing slashes are removed so the
-	// joined path has a single separator.
+	// URL+ingest.DeltaBatchPath, URL+ingest.ManifestPath,
+	// URL+ingest.StaticBaselinePath and URL+ingest.ClassListingPath.
+	// Trailing slashes are removed so the joined path has a single
+	// separator.
 	URL string
 
 	// AuthToken yields the key that authenticates the collector to the
@@ -258,16 +259,16 @@ func (sh *shard) heldBytes() int {
 	return sh.bytes
 }
 
-// ErrQueueFull is the error AcceptDeltaBatch, AcceptManifest, and
-// AcceptStaticBaseline return when the payload's shard queue has no room,
-// either in item count (Config.QueueSize) or in bytes (Config.QueueBytes).
+// ErrQueueFull is the error AcceptDeltaBatch, AcceptManifest,
+// AcceptStaticBaseline and AcceptClassListing return when the payload's
+// shard queue has no room, either in item count (Config.QueueSize) or in bytes (Config.QueueBytes).
 // The ingest handler answers 503 for it, so the agent keeps its counts
 // and sends the payload again on its next flush.
 var ErrQueueFull = errors.New("forward: shard queue is full")
 
-// ErrShuttingDown is the error AcceptDeltaBatch, AcceptManifest, and
-// AcceptStaticBaseline return once Shutdown has started. The ingest
-// handler answers 503 for it, so the agent keeps its counts and sends
+// ErrShuttingDown is the error AcceptDeltaBatch, AcceptManifest,
+// AcceptStaticBaseline and AcceptClassListing return once Shutdown has
+// started. The ingest handler answers 503 for it, so the agent keeps its counts and sends
 // the payload again on its next flush.
 var ErrShuttingDown = errors.New("forward: sink is shutting down")
 
@@ -450,6 +451,13 @@ func (s *ForwardingSink) AcceptManifest(_ context.Context, manifest *otherlodepb
 // long before the queued item is delivered in the background.
 func (s *ForwardingSink) AcceptStaticBaseline(_ context.Context, baseline *otherlodepb.StaticBaseline) error {
 	return s.marshalAndEnqueue(baseline, instanceOf(baseline.GetResource()), ingest.StaticBaselinePath)
+}
+
+// AcceptClassListing marshals listing and queues it on the shard for its
+// service instance, like AcceptStaticBaseline. It returns without waiting
+// for delivery.
+func (s *ForwardingSink) AcceptClassListing(_ context.Context, listing *otherlodepb.ClassListing) error {
+	return s.marshalAndEnqueue(listing, instanceOf(listing.GetResource()), ingest.ClassListingPath)
 }
 
 // marshalAndEnqueue marshals msg and queues it for path. A marshal failure

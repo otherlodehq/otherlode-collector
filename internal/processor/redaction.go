@@ -151,6 +151,14 @@ func (r *Redaction) AcceptStaticBaseline(ctx context.Context, baseline *otherlod
 	return r.next.AcceptStaticBaseline(ctx, baseline)
 }
 
+// AcceptClassListing keeps the listing's class names and include rules,
+// since class names are not string literals. It drops unknown fields,
+// marks the listing if it lost any, then passes it to next.
+func (r *Redaction) AcceptClassListing(ctx context.Context, listing *otherlodepb.ClassListing) error {
+	r.markStripped(listing.GetResource(), "class_listing", dropUnknown(listing.ProtoReflect()))
+	return r.next.AcceptClassListing(ctx, listing)
+}
+
 // counts is what the processor changed in one payload.
 type counts struct {
 	literals int

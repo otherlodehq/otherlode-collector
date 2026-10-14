@@ -203,6 +203,52 @@ func TestForwardingSink_StaticBaseline_RelayedToBackendPath(t *testing.T) {
 	}
 }
 
+func TestForwardingSink_ClassListing_RelayedToBackendPath(t *testing.T) {
+	var gotPath, gotContentType string
+	var gotBody []byte
+	var received atomic.Bool
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotContentType = r.Header.Get("Content-Type")
+		gotBody, _ = io.ReadAll(r.Body)
+		received.Store(true)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	sink := mustNewSink(t, testConfig(backend.URL))
+	defer sink.Shutdown(context.Background())
+
+	sent := &otherlodepb.ClassListing{
+		Resource:     &otherlodepb.ResourceAttributes{ServiceName: "demo-service", ServiceInstanceId: "instance-1", RunId: "run-1"},
+		ClassNames:   []string{"com.example.Bar", "com.example.Foo"},
+		IncludeRules: &otherlodepb.IncludeRules{IncludePackages: []string{"com.example"}},
+		ListedAt:     1700000000,
+		ChunkIndex:   1,
+		ChunkCount:   2,
+	}
+	if err := sink.AcceptClassListing(context.Background(), sent); err != nil {
+		t.Fatalf("AcceptClassListing: %v", err)
+	}
+
+	waitFor(t, time.Second, received.Load)
+	if gotPath != ingest.ClassListingPath {
+		t.Errorf("path = %q, want %q", gotPath, ingest.ClassListingPath)
+	}
+	if gotContentType != "application/x-protobuf" {
+		t.Errorf("content-type = %q, want application/x-protobuf", gotContentType)
+	}
+
+	var got otherlodepb.ClassListing
+	if err := proto.Unmarshal(gotBody, &got); err != nil {
+		t.Fatalf("unmarshal relayed body: %v", err)
+	}
+	if !proto.Equal(&got, sent) {
+		t.Errorf("relayed listing = %v, want %v", &got, sent)
+	}
+}
+
 func TestForwardingSink_RetryableStatus_RetriesThenSucceeds(t *testing.T) {
 	var attempts atomic.Int32
 	deliveredBefore := metrics.ForwardDelivered.Value("manifest")
@@ -1386,8 +1432,8 @@ func TestForwardingSink_QueueBytes_ReturnToZeroAfterShutdown(t *testing.T) {
 	}
 }
 
-// sendAllThree passes one payload of each kind to sink.
-func sendAllThree(t *testing.T, sink *ForwardingSink) {
+// sendEveryKind passes one payload of each kind to sink.
+func sendEveryKind(t *testing.T, sink *ForwardingSink) {
 	t.Helper()
 	res := &otherlodepb.ResourceAttributes{ServiceName: "demo-service", ServiceInstanceId: "instance-1", RunId: "run-1"}
 	if err := sink.AcceptDeltaBatch(context.Background(), &otherlodepb.DeltaBatch{Resource: res}); err != nil {
@@ -1399,10 +1445,13 @@ func sendAllThree(t *testing.T, sink *ForwardingSink) {
 	if err := sink.AcceptStaticBaseline(context.Background(), &otherlodepb.StaticBaseline{Resource: res}); err != nil {
 		t.Fatalf("AcceptStaticBaseline: %v", err)
 	}
+	if err := sink.AcceptClassListing(context.Background(), &otherlodepb.ClassListing{Resource: res}); err != nil {
+		t.Fatalf("AcceptClassListing: %v", err)
+	}
 }
 
-// redactionHeaders runs a sink with fingerprint over all three payload
-// kinds and returns the RedactionHeader values each path received.
+// redactionHeaders runs a sink with fingerprint over every payload
+// kind and returns the RedactionHeader values each path received.
 func redactionHeaders(t *testing.T, fingerprint string) map[string][]string {
 	t.Helper()
 	var mu sync.Mutex
@@ -1418,19 +1467,19 @@ func redactionHeaders(t *testing.T, fingerprint string) map[string][]string {
 	cfg := testConfig(backend.URL)
 	cfg.RedactionFingerprint = fingerprint
 	sink := mustNewSink(t, cfg)
-	sendAllThree(t, sink)
+	sendEveryKind(t, sink)
 	sink.Shutdown(context.Background())
 	waitFor(t, time.Second, func() bool {
 		mu.Lock()
 		defer mu.Unlock()
-		return len(got) == 3
+		return len(got) == 4
 	})
 	return got
 }
 
 func TestForwardingSink_RedactionFingerprint_SentOnEveryPath(t *testing.T) {
 	got := redactionHeaders(t, "3b53bbb8311eab74")
-	for _, path := range []string{ingest.DeltaBatchPath, ingest.ManifestPath, ingest.StaticBaselinePath} {
+	for _, path := range []string{ingest.DeltaBatchPath, ingest.ManifestPath, ingest.StaticBaselinePath, ingest.ClassListingPath} {
 		if values := got[path]; len(values) != 1 || values[0] != "3b53bbb8311eab74" {
 			t.Errorf("%s: %s = %q, want exactly the fingerprint", path, RedactionHeader, values)
 		}

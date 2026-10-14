@@ -14,7 +14,7 @@ import (
 
 // TestLogSink_LogsTheTestRunFlagAndAgentVersion covers the test_run
 // attribute (agent ADR 0050) and the agent_version attribute (agent ADR 0054)
-// on each of the three payloads' log lines.
+// on each of the four payloads' log lines.
 func TestLogSink_LogsTheTestRunFlagAndAgentVersion(t *testing.T) {
 	var buf bytes.Buffer
 	sink := ingest.NewLogSink(slog.New(slog.NewJSONHandler(&buf, nil)))
@@ -31,9 +31,13 @@ func TestLogSink_LogsTheTestRunFlagAndAgentVersion(t *testing.T) {
 		t.Fatalf("accept static baseline: %v", err)
 	}
 
+	if err := sink.AcceptClassListing(ctx, &otherlodepb.ClassListing{Resource: resource}); err != nil {
+		t.Fatalf("accept class listing: %v", err)
+	}
+
 	lines := bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte("\n"))
-	if len(lines) != 3 {
-		t.Fatalf("logged %d lines, want 3: %s", len(lines), buf.String())
+	if len(lines) != 4 {
+		t.Fatalf("logged %d lines, want 4: %s", len(lines), buf.String())
 	}
 	for _, line := range lines {
 		var record map[string]any
@@ -118,5 +122,46 @@ func TestLogSink_LogsCountsPendingSinceOnlyWhenSet(t *testing.T) {
 				t.Errorf("counts_pending_since = %v on a payload with no pending counts, want it absent", got)
 			}
 		})
+	}
+}
+
+// TestLogSink_ClassListing_LogsIdentityChunkAndNameCount covers the log
+// line of a class listing chunk.
+func TestLogSink_ClassListing_LogsIdentityChunkAndNameCount(t *testing.T) {
+	var buf bytes.Buffer
+	sink := ingest.NewLogSink(slog.New(slog.NewJSONHandler(&buf, nil)))
+	resource := &otherlodepb.ResourceAttributes{ServiceName: "svc", ServiceInstanceId: "i1", RunId: "run-1"}
+	resource.SetServiceNamespace("shop")
+	listing := &otherlodepb.ClassListing{
+		Resource:   resource,
+		ClassNames: []string{"com.example.A", "com.example.B", "com.example.B$Inner"},
+		ListedAt:   1700000000,
+		ChunkIndex: 1,
+		ChunkCount: 3,
+	}
+
+	if err := sink.AcceptClassListing(context.Background(), listing); err != nil {
+		t.Fatalf("accept class listing: %v", err)
+	}
+
+	var record map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &record); err != nil {
+		t.Fatalf("decode log line %s: %v", buf.String(), err)
+	}
+	want := map[string]any{
+		"msg":         "received class listing",
+		"namespace":   "shop",
+		"service":     "svc",
+		"instance":    "i1",
+		"run":         "run-1",
+		"listed_at":   float64(1700000000),
+		"chunk":       float64(1),
+		"chunk_count": float64(3),
+		"class_names": float64(3),
+	}
+	for key, value := range want {
+		if record[key] != value {
+			t.Errorf("log line %s has %s %v, want %v", buf.String(), key, record[key], value)
+		}
 	}
 }

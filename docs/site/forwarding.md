@@ -24,13 +24,14 @@ The collector reads the URL once, at startup. Any invalid value stops startup wi
 | The URL has no query | Startup stops with `forward URL must not contain a query` |
 | The URL has no fragment | Startup stops with `forward URL must not contain a fragment` |
 
-The collector removes trailing slashes. A path is allowed and the collector keeps it. It appends the three ingest paths to the URL. With `https://gateway.example.com/otherlode`, the collector posts to `https://gateway.example.com/otherlode/v1/otherlode/deltas`.
+The collector removes trailing slashes. A path is allowed and the collector keeps it. It appends the four ingest paths to the URL. With `https://gateway.example.com/otherlode`, the collector posts to `https://gateway.example.com/otherlode/v1/otherlode/deltas`.
 
 | Payload | Path appended to the URL |
 |---|---|
 | Delta batch | `/v1/otherlode/deltas` |
 | Probe manifest | `/v1/otherlode/manifest` |
 | Static baseline chunk | `/v1/otherlode/static-baseline` |
+| Class listing chunk | `/v1/otherlode/class-listing` |
 
 Each request is a `POST`. The body is the same protobuf message the agent sent, after the collector's processing. The `Content-Type` is `application/x-protobuf`.
 
@@ -134,7 +135,7 @@ The queues drain in parallel, and each queue drains in order. The attempt in fli
 
 ## Counters
 
-Each outcome increments these counters on `/metrics`. The `payload` label is `deltas`, `manifest` or `static_baseline`. See [monitoring](monitoring) for the full table.
+Each outcome increments these counters on `/metrics`. The `payload` label is `deltas`, `manifest`, `static_baseline` or `class_listing`. See [monitoring](monitoring) for the full table.
 
 | Outcome | Counter |
 |---|---|

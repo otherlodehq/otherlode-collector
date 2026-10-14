@@ -6,7 +6,7 @@ order: 30
 
 The collector holds two separate secrets. The agent token is what agents present to the collector. The forward key is what the collector presents to the backend it forwards to. They need not match, and each has its own variable and its own file variable. A collector with redaction on holds a third secret, which it never sends. See [replace branch and site keys](redaction#replace-branch-and-site-keys).
 
-This page sets and rotates both. Agents send `Authorization: Bearer <token>` on every request to `/v1/otherlode/deltas`, `/v1/otherlode/manifest` and `/v1/otherlode/static-baseline`. A request with no matching token gets `401` with `WWW-Authenticate: Bearer realm="otherlode-collector"`, and the collector counts it in `otherlode_collector_auth_rejected_total`. `/healthz` and `/metrics` never need a token. See [monitoring](monitoring).
+This page sets and rotates both. Agents send `Authorization: Bearer <token>` on every request to `/v1/otherlode/deltas`, `/v1/otherlode/manifest`, `/v1/otherlode/static-baseline` and `/v1/otherlode/class-listing`. A request with no matching token gets `401` with `WWW-Authenticate: Bearer realm="otherlode-collector"`, and the collector counts it in `otherlode_collector_auth_rejected_total`. `/healthz` and `/metrics` never need a token. See [monitoring](monitoring).
 
 ## Set the agent token
 

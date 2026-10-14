@@ -33,6 +33,7 @@ type Sink interface {
 	AcceptDeltaBatch(ctx context.Context, batch *otherlodepb.DeltaBatch) error
 	AcceptManifest(ctx context.Context, manifest *otherlodepb.ProbeManifest) error
 	AcceptStaticBaseline(ctx context.Context, baseline *otherlodepb.StaticBaseline) error
+	AcceptClassListing(ctx context.Context, listing *otherlodepb.ClassListing) error
 }
 
 // maxBodyBytes caps a single request body. A static baseline chunk can
@@ -47,8 +48,8 @@ const maxBodyBytes = 16 << 20 // 16 MiB
 // contentType is the only media type the ingest routes accept.
 const contentType = "application/x-protobuf"
 
-// DeltaBatchPath, ManifestPath, and StaticBaselinePath are the
-// agent-facing ingest routes. A Sink that relays payloads onward (see
+// DeltaBatchPath, ManifestPath, StaticBaselinePath and ClassListingPath
+// are the agent-facing ingest routes. A Sink that relays payloads onward (see
 // forward.ForwardingSink) posts to the same paths on the backend, so
 // both sides share these constants instead of each holding its own copy
 // of the literal.
@@ -56,6 +57,7 @@ const (
 	DeltaBatchPath     = "/v1/otherlode/deltas"
 	ManifestPath       = "/v1/otherlode/manifest"
 	StaticBaselinePath = "/v1/otherlode/static-baseline"
+	ClassListingPath   = "/v1/otherlode/class-listing"
 )
 
 // payloadKind names one payload type for logging and metrics: label is
@@ -70,17 +72,20 @@ var (
 	deltaBatchKind     = payloadKind{label: "deltas", name: "delta batch"}
 	manifestKind       = payloadKind{label: "manifest", name: "manifest"}
 	staticBaselineKind = payloadKind{label: "static_baseline", name: "static baseline"}
+	classListingKind   = payloadKind{label: "class_listing", name: "class listing"}
 )
 
 // PayloadLabel returns the metrics label for the payload type served at
-// path: "deltas", "manifest", or "static_baseline". Any other path gives
-// "deltas".
+// path: "deltas", "manifest", "static_baseline" or "class_listing". Any
+// other path gives "deltas".
 func PayloadLabel(path string) string {
 	switch path {
 	case ManifestPath:
 		return manifestKind.label
 	case StaticBaselinePath:
 		return staticBaselineKind.label
+	case ClassListingPath:
+		return classListingKind.label
 	default:
 		return deltaBatchKind.label
 	}
@@ -160,13 +165,14 @@ func NewHandler(sink Sink, logger *slog.Logger, opts ...HandlerOption) *Handler 
 	return h
 }
 
-// Register adds POST routes for DeltaBatchPath, ManifestPath and
-// StaticBaselinePath to mux. They match the paths HttpExporter
-// posts to.
+// Register adds POST routes for DeltaBatchPath, ManifestPath,
+// StaticBaselinePath and ClassListingPath to mux. They match the paths
+// HttpExporter posts to.
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+DeltaBatchPath, h.handleDeltaBatch)
 	mux.HandleFunc("POST "+ManifestPath, h.handleManifest)
 	mux.HandleFunc("POST "+StaticBaselinePath, h.handleStaticBaseline)
+	mux.HandleFunc("POST "+ClassListingPath, h.handleClassListing)
 }
 
 func (h *Handler) handleDeltaBatch(w http.ResponseWriter, r *http.Request) {
@@ -179,6 +185,10 @@ func (h *Handler) handleManifest(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleStaticBaseline(w http.ResponseWriter, r *http.Request) {
 	handle(h, w, r, staticBaselineKind, validateStaticBaseline, h.sink.AcceptStaticBaseline)
+}
+
+func (h *Handler) handleClassListing(w http.ResponseWriter, r *http.Request) {
+	handle(h, w, r, classListingKind, validateClassListing, h.sink.AcceptClassListing)
 }
 
 // handle serves one ingest request. It reads the body, takes a decode
@@ -291,6 +301,29 @@ func validateStaticBaseline(baseline *otherlodepb.StaticBaseline) error {
 		return errors.New("chunk_index is negative")
 	}
 	if baseline.GetChunkIndex() >= baseline.GetChunkCount() {
+		return errors.New("chunk_index is out of range for chunk_count")
+	}
+	return nil
+}
+
+// validateClassListing checks the fields a backend cannot do without: the
+// resource and listed_at name the listing, and the chunk fields say
+// whether the listing is complete. A chunk missing any of them can never
+// be attributed or read as a whole.
+func validateClassListing(listing *otherlodepb.ClassListing) error {
+	if err := validateResource(listing.GetResource()); err != nil {
+		return err
+	}
+	if listing.GetListedAt() <= 0 {
+		return errors.New("listed_at is not set")
+	}
+	if listing.GetChunkCount() < 1 {
+		return errors.New("chunk_count must be at least 1")
+	}
+	if listing.GetChunkIndex() < 0 {
+		return errors.New("chunk_index is negative")
+	}
+	if listing.GetChunkIndex() >= listing.GetChunkCount() {
 		return errors.New("chunk_index is out of range for chunk_count")
 	}
 	return nil

@@ -59,8 +59,8 @@ type EnvironmentConfig struct {
 }
 
 // Environment is an ingest.Sink that writes a configured environment
-// name onto the resource of each delta batch, manifest and static
-// baseline, then passes the payload to next. A backend can then expect
+// name onto the resource of each delta batch, manifest, static baseline
+// and class listing, then passes the payload to next. A backend can then expect
 // an environment on every payload, even from an agent whose own config
 // names none.
 //
@@ -98,6 +98,13 @@ func (e *Environment) AcceptDeltaBatch(ctx context.Context, batch *otherlodepb.D
 func (e *Environment) AcceptStaticBaseline(ctx context.Context, baseline *otherlodepb.StaticBaseline) error {
 	e.stamp(baseline.GetResource(), "static_baseline")
 	return e.next.AcceptStaticBaseline(ctx, baseline)
+}
+
+// AcceptClassListing stamps the listing's resource with the configured
+// environment, then passes the listing to next.
+func (e *Environment) AcceptClassListing(ctx context.Context, listing *otherlodepb.ClassListing) error {
+	e.stamp(listing.GetResource(), "class_listing")
+	return e.next.AcceptClassListing(ctx, listing)
 }
 
 // AcceptManifest stamps the manifest's resource with the configured

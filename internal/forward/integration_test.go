@@ -26,6 +26,7 @@ type captureSink struct {
 	deltaBatches []*otherlodepb.DeltaBatch
 	manifests    []*otherlodepb.ProbeManifest
 	baselines    []*otherlodepb.StaticBaseline
+	listings     []*otherlodepb.ClassListing
 }
 
 func (c *captureSink) AcceptDeltaBatch(_ context.Context, batch *otherlodepb.DeltaBatch) error {
@@ -47,6 +48,19 @@ func (c *captureSink) AcceptStaticBaseline(_ context.Context, baseline *otherlod
 	defer c.mu.Unlock()
 	c.baselines = append(c.baselines, baseline)
 	return nil
+}
+
+func (c *captureSink) AcceptClassListing(_ context.Context, listing *otherlodepb.ClassListing) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.listings = append(c.listings, listing)
+	return nil
+}
+
+func (c *captureSink) listingCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.listings)
 }
 
 func (c *captureSink) deltaBatchCount() int {
@@ -289,6 +303,46 @@ func TestIntegration_StaticBaseline_RoundTripsThroughRealHandlerOnBothEnds(t *te
 	}
 	if byChunk[0].GetScannedAt() != byChunk[1].GetScannedAt() {
 		t.Errorf("chunk scanned_at mismatch: %d vs %d", byChunk[0].GetScannedAt(), byChunk[1].GetScannedAt())
+	}
+}
+
+func TestIntegration_ClassListing_RoundTripsThroughRealHandlerOnBothEnds(t *testing.T) {
+	backend, sink := newReferenceBackend()
+	defer backend.Close()
+
+	front := newFrontCollector(t, backend.URL)
+	defer front.Close()
+
+	sent := &otherlodepb.ClassListing{
+		Resource:   &otherlodepb.ResourceAttributes{ServiceName: "checkout", ServiceInstanceId: "instance-7", RunId: "run-1"},
+		ClassNames: []string{"com.acme.CheckoutService", "com.acme.CheckoutService$Inner", "com.acme.PaymentService"},
+		IncludeRules: &otherlodepb.IncludeRules{
+			IncludePackages: []string{"com.acme"},
+			ExcludePackages: []string{"com.acme.generated"},
+		},
+		ListedAt:   1700000000,
+		ChunkIndex: 0,
+		ChunkCount: 1,
+	}
+	body, err := proto.Marshal(sent)
+	if err != nil {
+		t.Fatalf("marshal listing: %v", err)
+	}
+	resp, err := http.Post(front.URL+ingest.ClassListingPath, "application/x-protobuf", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatalf("post to front collector: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("front collector status = %d, want %d", resp.StatusCode, http.StatusAccepted)
+	}
+
+	waitFor(t, time.Second, func() bool { return sink.listingCount() == 1 })
+	sink.mu.Lock()
+	got := sink.listings[0]
+	sink.mu.Unlock()
+	if !proto.Equal(got, sent) {
+		t.Errorf("backend decoded %v, want %v", got, sent)
 	}
 }
 

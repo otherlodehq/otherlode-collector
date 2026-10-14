@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -64,6 +65,19 @@ func baselineWith(sites ...*otherlodepb.BranchSite) *otherlodepb.StaticBaseline 
 			ClassName: "com.example.Pricing",
 			Methods:   []*otherlodepb.DeclaredMethod{{MethodName: "price", BranchSites: sites}},
 		}},
+	}
+}
+
+func listingWith(names ...string) *otherlodepb.ClassListing {
+	return &otherlodepb.ClassListing{
+		Resource:   resourceFor("run-1"),
+		ClassNames: names,
+		IncludeRules: &otherlodepb.IncludeRules{
+			IncludePackages: []string{"com.example"},
+			ExcludePackages: []string{"com.example.generated"},
+		},
+		ListedAt:   1700000000,
+		ChunkCount: 1,
 	}
 }
 
@@ -431,6 +445,18 @@ func strippedCases() []strippedCase {
 			}
 			return next.baselines[len(next.baselines)-1].GetResource()
 		}},
+		{"class listing", "class_listing", func(t *testing.T, r *Redaction, run string, withUnknown, flagged bool) *otherlodepb.ResourceAttributes {
+			l := listingWith("com.example.Pricing")
+			l.Resource = prep(run, flagged)
+			if withUnknown {
+				l.GetIncludeRules().ProtoReflect().SetUnknown(unknownBytes())
+			}
+			next := r.next.(*recordingSink)
+			if err := r.AcceptClassListing(context.Background(), l); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			return next.listings[len(next.listings)-1].GetResource()
+		}},
 	}
 }
 
@@ -626,5 +652,68 @@ func TestRedaction_On_ModuleKindAndPendingCountsFieldsKept(t *testing.T) {
 	if gotBatch.GetPayloadSequence() != 5 || gotBatch.GetCountsPendingSince() != 1700000000000 {
 		t.Errorf("batch payload_sequence %d, counts_pending_since %d, want 5 and 1700000000000",
 			gotBatch.GetPayloadSequence(), gotBatch.GetCountsPendingSince())
+	}
+}
+
+// Class names are not string literals, so redaction keeps every name and
+// the include rules, even with every literal redacted.
+func TestRedaction_On_ClassListingNamesAndRulesKept(t *testing.T) {
+	next := &recordingSink{}
+	r := NewRedaction(next, allLiterals(), nil)
+
+	names := []string{"com.example.Pricing", "com.example.Pricing$Inner", "com.example.web.Handler"}
+	listing := listingWith(names...)
+
+	if err := r.AcceptClassListing(context.Background(), listing); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(next.listings) != 1 {
+		t.Fatalf("next received %d listings, want 1", len(next.listings))
+	}
+	got := next.listings[0]
+	if got.GetResource().GetFieldsStripped() {
+		t.Error("fields_stripped set on a listing whose fields the bindings know")
+	}
+	if gotNames := got.GetClassNames(); !slices.Equal(gotNames, names) {
+		t.Errorf("class names = %v, want %v", gotNames, names)
+	}
+	rules := got.GetIncludeRules()
+	if !slices.Equal(rules.GetIncludePackages(), []string{"com.example"}) || !slices.Equal(rules.GetExcludePackages(), []string{"com.example.generated"}) {
+		t.Errorf("include rules = %v, want the rules the agent sent", rules)
+	}
+	if got.GetListedAt() != 1700000000 || got.GetChunkCount() != 1 {
+		t.Errorf("listed_at %d, chunk_count %d, want 1700000000 and 1", got.GetListedAt(), got.GetChunkCount())
+	}
+}
+
+func TestRedaction_On_UnknownFieldsDroppedFromClassListing(t *testing.T) {
+	next := &recordingSink{}
+	r := NewRedaction(next, allLiterals(), nil)
+
+	listing := listingWith("com.example.Pricing")
+	listing.ProtoReflect().SetUnknown(unknownBytes())
+	listing.GetResource().ProtoReflect().SetUnknown(unknownBytes())
+	listing.GetIncludeRules().ProtoReflect().SetUnknown(unknownBytes())
+
+	if err := r.AcceptClassListing(context.Background(), listing); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := next.listings[0]
+	if n := len(got.ProtoReflect().GetUnknown()); n != 0 {
+		t.Errorf("listing still has %d unknown bytes", n)
+	}
+	if n := len(got.GetResource().ProtoReflect().GetUnknown()); n != 0 {
+		t.Errorf("resource still has %d unknown bytes", n)
+	}
+	if n := len(got.GetIncludeRules().ProtoReflect().GetUnknown()); n != 0 {
+		t.Errorf("include rules still have %d unknown bytes", n)
+	}
+	if !got.GetResource().GetFieldsStripped() {
+		t.Error("fields_stripped not set on a listing that lost a field")
+	}
+	if names := got.GetClassNames(); len(names) != 1 || names[0] != "com.example.Pricing" {
+		t.Errorf("class names = %v, want the name kept", names)
 	}
 }

@@ -50,13 +50,14 @@ Docker marks the container unhealthy after three failed probes in a row. If the 
 
 Every metric is a counter. The counters live in memory and start again at 0 when the collector restarts, so use `increase()` or `rate()` rather than the raw value. A counter without labels shows at 0 from startup. A counter with labels adds a series the first time that label combination happens, so a series you have never seen is a series that has not happened. The one exception is the token reload counter, which shows each token file you configured at 0.
 
-The `payload` label takes one of three values, named for the path the agent posted to:
+The `payload` label takes one of four values, named for the path the agent posted to:
 
 | `payload` | Agent path |
 |---|---|
 | `deltas` | `/v1/otherlode/deltas` |
 | `manifest` | `/v1/otherlode/manifest` |
 | `static_baseline` | `/v1/otherlode/static-baseline` |
+| `class_listing` | `/v1/otherlode/class-listing` |
 
 Each counter counts payloads, and one request carries one payload.
 
@@ -170,15 +171,15 @@ Without `OTHERLODE_COLLECTOR_FORWARD_URL`, the collector logs every payload it r
 | `WARN` | `OTHERLODE_COLLECTOR_AUTH_TOKEN and OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE not set; ingest endpoints are unauthenticated` | At startup, with no agent token |
 | `WARN` | `rate limiting disabled; ingest endpoints accept requests unthrottled` | At startup, when the rate limit is `0` |
 | `WARN` | `forward URL uses plain http; the backend auth token is sent unencrypted` | At startup, with an `http://` forward URL and a forward key |
-| `WARN` | `rejecting invalid delta batch`, `rejecting invalid manifest` or `rejecting invalid static baseline` | A payload failed validation, with the reason in `error` |
-| `WARN` | `rejecting malformed delta batch`, `rejecting malformed manifest` or `rejecting malformed static baseline` | A body was not valid protobuf |
+| `WARN` | `rejecting invalid delta batch`, `rejecting invalid manifest`, `rejecting invalid static baseline` or `rejecting invalid class listing` | A payload failed validation, with the reason in `error` |
+| `WARN` | `rejecting malformed delta batch`, `rejecting malformed manifest`, `rejecting malformed static baseline` or `rejecting malformed class listing` | A body was not valid protobuf |
 | `WARN` | `token file re-read failed; keeping the last good value` | A token file re-read failed, with `file` and `error` |
 | `WARN` | `dropping payload: ` followed by a reason | The forwarder dropped a payload. The line names the namespace, service, instance and path, and adds `backend_error` when the backend's response names an error code |
 | `WARN` | `dropped fields this collector does not know; ...` | Redaction dropped unknown fields. It logs once per run |
-| `WARN` | `refusing delta batch: no decode slot came free`, or the same with `manifest` or `static baseline` | A request waited 5 seconds for a decode slot and got `503`. At most one line a minute. `unlogged_busy_refusals` counts the refusals since the previous line that got no line of their own |
+| `WARN` | `refusing delta batch: no decode slot came free`, or the same with `manifest`, `static baseline` or `class listing` | A request waited 5 seconds for a decode slot and got `503`. At most one line a minute. `unlogged_busy_refusals` counts the refusals since the previous line that got no line of their own |
 | `WARN` | `agent environment does not match the collector's configured environment` | The first payload of a service that names a given environment other than the collector's. Later payloads of that service with that environment log at `DEBUG` |
 | `WARN` | `agent namespace does not match the collector's configured namespace` | The same, for the service namespace |
-| `ERROR` | `sink rejected delta batch`, `sink rejected manifest` or `sink rejected static baseline` | The collector answered `503`, with the reason in `error` |
+| `ERROR` | `sink rejected delta batch`, `sink rejected manifest`, `sink rejected static baseline` or `sink rejected class listing` | The collector answered `503`, with the reason in `error` |
 | `ERROR` | `listen tcp ...` | The collector could not open its listen address at startup, and the process exits |
 | `ERROR` | `server stopped` or `graceful shutdown failed` | The server stopped with an error after it started, or shutdown did not finish, and the process exits |
 

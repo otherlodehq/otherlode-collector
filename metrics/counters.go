@@ -1,8 +1,8 @@
 package metrics
 
 // The collector's counters. Label values for "payload" are "deltas",
-// "manifest", or "static_baseline"; "reason" values are listed on each
-// counter.
+// "manifest", "static_baseline" or "class_listing"; "reason" values are
+// listed on each counter.
 var (
 	// IngestAccepted counts payloads that decoded, passed validation, and
 	// reached the sink.
@@ -52,13 +52,13 @@ var (
 
 	// EnvironmentMismatch counts payloads whose agent-set environment
 	// differs from the collector's configured one. Its "payload" is
-	// "deltas", "manifest" or "static_baseline".
+	// "deltas", "manifest", "static_baseline" or "class_listing".
 	EnvironmentMismatch = NewCounter("otherlode_collector_environment_mismatch_total",
 		"Payloads whose agent-set environment differs from the collector's configured one.", "payload")
 
 	// NamespaceMismatch counts payloads whose agent-set service namespace
 	// differs from the collector's configured one. Its "payload" is
-	// "deltas", "manifest" or "static_baseline".
+	// "deltas", "manifest", "static_baseline" or "class_listing".
 	NamespaceMismatch = NewCounter("otherlode_collector_namespace_mismatch_total",
 		"Payloads whose agent-set service namespace differs from the collector's configured one.", "payload")
 
@@ -76,7 +76,7 @@ var (
 
 	// FieldsStripped counts payloads from which the redaction processor
 	// dropped at least one unknown field and so set fields_stripped. Its
-	// "payload" is "deltas", "manifest" or "static_baseline".
+	// "payload" is "deltas", "manifest", "static_baseline" or "class_listing".
 	FieldsStripped = NewCounter("otherlode_collector_fields_stripped_total",
 		"Payloads that lost an unknown field to the redaction processor and were marked fields_stripped.", "payload")
 )

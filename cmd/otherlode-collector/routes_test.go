@@ -66,6 +66,27 @@ func staticBaselineRequest(t *testing.T, serverURL string) *http.Request {
 	return req
 }
 
+// classListingRequest builds a POST to the class-listing route carrying
+// the smallest listing the handler accepts: identity, a listed_at, and a
+// single chunk.
+func classListingRequest(t *testing.T, serverURL string) *http.Request {
+	t.Helper()
+	body, err := proto.Marshal(&otherlodepb.ClassListing{
+		Resource:   &otherlodepb.ResourceAttributes{ServiceName: "demo-service", ServiceInstanceId: "instance-1", RunId: "run-1"},
+		ListedAt:   1700000000,
+		ChunkCount: 1,
+	})
+	if err != nil {
+		t.Fatalf("marshal listing: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, serverURL+"/v1/otherlode/class-listing", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/x-protobuf")
+	return req
+}
+
 func mustRegisterRoutes(t *testing.T, mux *http.ServeMux, cfg routeConfig) *forward.ForwardingSink {
 	t.Helper()
 	fwd, err := registerRoutes(mux, cfg)
@@ -125,6 +146,34 @@ func TestRegisterRoutes_AuthTokenSet_StaticBaselineRequiresMatchingHeader(t *tes
 	}
 
 	req2 := staticBaselineRequest(t, server.URL)
+	req2.Header.Set("Authorization", "Bearer s3cret")
+
+	resp2, err := server.Client().Do(req2)
+	if err != nil {
+		t.Fatalf("post with auth: %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusAccepted {
+		t.Fatalf("status with auth = %d, want %d", resp2.StatusCode, http.StatusAccepted)
+	}
+}
+
+func TestRegisterRoutes_AuthTokenSet_ClassListingRequiresMatchingHeader(t *testing.T) {
+	mux := http.NewServeMux()
+	mustRegisterRoutes(t, mux, routeConfig{AuthTokens: tokenSet("s3cret")})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	resp, err := server.Client().Do(classListingRequest(t, server.URL))
+	if err != nil {
+		t.Fatalf("post without auth: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status without auth = %d, want %d", resp.StatusCode, http.StatusUnauthorized)
+	}
+
+	req2 := classListingRequest(t, server.URL)
 	req2.Header.Set("Authorization", "Bearer s3cret")
 
 	resp2, err := server.Client().Do(req2)
@@ -774,15 +823,15 @@ type forwardedRequest struct {
 	body   []byte
 }
 
-// forwardAllThree posts a delta batch, a manifest and a static baseline
-// to a collector wired with redactCfg and logging to logger. It returns
-// what the backend received, by path.
-func forwardAllThree(t *testing.T, redactCfg processor.RedactionConfig, logger *slog.Logger) map[string]forwardedRequest {
+// forwardEveryKind posts a delta batch, a manifest, a static baseline and
+// a class listing to a collector wired with redactCfg and logging to
+// logger. It returns what the backend received, by path.
+func forwardEveryKind(t *testing.T, redactCfg processor.RedactionConfig, logger *slog.Logger) map[string]forwardedRequest {
 	t.Helper()
 	received := make(chan struct {
 		path string
 		req  forwardedRequest
-	}, 3)
+	}, 4)
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -811,7 +860,7 @@ func forwardAllThree(t *testing.T, redactCfg processor.RedactionConfig, logger *
 		t.Fatalf("new request: %v", err)
 	}
 	manifestReq.Header.Set("Content-Type", "application/x-protobuf")
-	for _, req := range []*http.Request{deltaRequest(t, server.URL), manifestReq, staticBaselineRequest(t, server.URL)} {
+	for _, req := range []*http.Request{deltaRequest(t, server.URL), manifestReq, staticBaselineRequest(t, server.URL), classListingRequest(t, server.URL)} {
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("post %s: %v", req.URL.Path, err)
@@ -823,12 +872,12 @@ func forwardAllThree(t *testing.T, redactCfg processor.RedactionConfig, logger *
 	}
 
 	got := make(map[string]forwardedRequest)
-	for len(got) < 3 {
+	for len(got) < 4 {
 		select {
 		case r := <-received:
 			got[r.path] = r.req
 		case <-time.After(5 * time.Second):
-			t.Fatalf("timed out with %d of 3 payloads forwarded", len(got))
+			t.Fatalf("timed out with %d of 4 payloads forwarded", len(got))
 		}
 	}
 	return got
@@ -839,7 +888,7 @@ func TestRegisterRoutes_RedactionOn_EveryForwardedRequestCarriesLoggedFingerprin
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
 	secret := []byte(testRedactSecret)
 
-	got := forwardAllThree(t, processor.RedactionConfig{AllLiterals: true, Secret: secret}, logger)
+	got := forwardEveryKind(t, processor.RedactionConfig{AllLiterals: true, Secret: secret}, logger)
 
 	fingerprint := processor.SecretFingerprint(secret)
 	if want := `"secret_fingerprint":"` + fingerprint + `"`; !strings.Contains(logs.String(), want) {
@@ -863,7 +912,7 @@ func TestRegisterRoutes_RedactionOn_EveryForwardedRequestCarriesLoggedFingerprin
 }
 
 func TestRegisterRoutes_RedactionOff_ForwardsNoRedactionHeader(t *testing.T) {
-	for path, req := range forwardAllThree(t, processor.RedactionConfig{}, nil) {
+	for path, req := range forwardEveryKind(t, processor.RedactionConfig{}, nil) {
 		if values := req.header.Values(forward.RedactionHeader); len(values) != 0 {
 			t.Errorf("%s: %s = %q, want no header", path, forward.RedactionHeader, values)
 		}

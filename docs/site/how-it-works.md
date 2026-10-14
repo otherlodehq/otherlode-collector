@@ -40,7 +40,7 @@ The collector therefore answers 202 only after the payload is in its queue, and 
 
 The collector splits its forwarding queue into shards, 8 by default. It picks a shard by hashing the service namespace, service name and instance id of each payload, and one worker per shard sends in order. The run id is left out of the hash, so an instance that restarts stays on the same shard.
 
-Two things follow. First, an instance's manifest, delta batches and static baseline reach Otherlode in the order they arrived. Second, a slow or failing Otherlode response holds up only the instances that hash to the same shard. The others keep flowing. An instance whose queue is full gets 503 while the rest still get 202.
+Two things follow. First, an instance's manifest, delta batches, static baseline and class listing reach Otherlode in the order they arrived. Second, a slow or failing Otherlode response holds up only the instances that hash to the same shard. The others keep flowing. An instance whose queue is full gets 503 while the rest still get 202.
 
 Sharing a shard is by chance, not by design. With 8 shards, roughly one instance in eight shares a queue with any given instance. Raise the shard count if a fleet is large and a stuck instance affects too many neighbours. See [forwarding](forwarding) for the variables.
 

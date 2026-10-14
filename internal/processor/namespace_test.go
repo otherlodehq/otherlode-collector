@@ -30,6 +30,7 @@ func sendEach(t *testing.T, ns *Namespace, newRes func() *otherlodepb.ResourceAt
 	batch := &otherlodepb.DeltaBatch{Resource: newRes()}
 	manifest := &otherlodepb.ProbeManifest{Resource: newRes()}
 	baseline := &otherlodepb.StaticBaseline{Resource: newRes()}
+	listing := &otherlodepb.ClassListing{Resource: newRes()}
 	if err := ns.AcceptDeltaBatch(context.Background(), batch); err != nil {
 		t.Fatalf("deltas: unexpected error: %v", err)
 	}
@@ -39,16 +40,20 @@ func sendEach(t *testing.T, ns *Namespace, newRes func() *otherlodepb.ResourceAt
 	if err := ns.AcceptStaticBaseline(context.Background(), baseline); err != nil {
 		t.Fatalf("static_baseline: unexpected error: %v", err)
 	}
+	if err := ns.AcceptClassListing(context.Background(), listing); err != nil {
+		t.Fatalf("class_listing: unexpected error: %v", err)
+	}
 	return map[string]*otherlodepb.ResourceAttributes{
 		"deltas":          batch.GetResource(),
 		"manifest":        manifest.GetResource(),
 		"static_baseline": baseline.GetResource(),
+		"class_listing":   listing.GetResource(),
 	}
 }
 
 func mismatchCounts() map[string]int64 {
 	counts := make(map[string]int64)
-	for _, payload := range []string{"deltas", "manifest", "static_baseline"} {
+	for _, payload := range []string{"deltas", "manifest", "static_baseline", "class_listing"} {
 		counts[payload] = metrics.NamespaceMismatch.Value(payload)
 	}
 	return counts
@@ -61,9 +66,11 @@ func TestNamespace_EveryPayload_ReachesNextAsSamePointer(t *testing.T) {
 	batch := &otherlodepb.DeltaBatch{Resource: resourceWithNamespace(nil)}
 	manifest := &otherlodepb.ProbeManifest{Resource: resourceWithNamespace(nil)}
 	baseline := &otherlodepb.StaticBaseline{Resource: resourceWithNamespace(nil)}
+	listing := &otherlodepb.ClassListing{Resource: resourceWithNamespace(nil)}
 	_ = ns.AcceptDeltaBatch(context.Background(), batch)
 	_ = ns.AcceptManifest(context.Background(), manifest)
 	_ = ns.AcceptStaticBaseline(context.Background(), baseline)
+	_ = ns.AcceptClassListing(context.Background(), listing)
 
 	if len(next.deltaBatches) != 1 || next.deltaBatches[0] != batch {
 		t.Fatalf("next did not receive the same batch pointer")
@@ -73,6 +80,9 @@ func TestNamespace_EveryPayload_ReachesNextAsSamePointer(t *testing.T) {
 	}
 	if len(next.baselines) != 1 || next.baselines[0] != baseline {
 		t.Fatalf("next did not receive the same baseline pointer")
+	}
+	if len(next.listings) != 1 || next.listings[0] != listing {
+		t.Fatalf("next did not receive the same listing pointer")
 	}
 }
 
@@ -216,6 +226,9 @@ func TestNamespace_NextError_Returned(t *testing.T) {
 		},
 		"static_baseline": func() error {
 			return ns.AcceptStaticBaseline(context.Background(), &otherlodepb.StaticBaseline{Resource: resourceWithNamespace(nil)})
+		},
+		"class_listing": func() error {
+			return ns.AcceptClassListing(context.Background(), &otherlodepb.ClassListing{Resource: resourceWithNamespace(nil)})
 		},
 	} {
 		if err := accept(); !errors.Is(err, wantErr) {
