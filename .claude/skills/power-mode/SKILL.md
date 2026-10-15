@@ -90,13 +90,34 @@ commands to run.
 
 - Judgement stays in this session: design, briefs, review, fixes, commit
   messages, STATUS. A subagent's report is a claim to check.
-- Implementation goes to subagents per `/chunked-build`, which owns the
-  model choices. Do not restate them here.
+- Building and editing go through the review loop below.
 - Read-only fact-finding fans out to parallel subagents, split by disjoint
   scope (a repo, a line range of STATUS). Each returns a fixed verdict
   format and cites a file, line or commit.
 - Give every subagent the facts already verified, marked "do not
   re-derive", and "do not commit".
+
+## Review loop
+
+Every playbook that builds or edits files runs this loop. `/chunked-build`
+has the detail, such as the brief format.
+
+1. **Sonnet implements.** A Sonnet subagent (`model: sonnet`) writes the
+   change from a written brief that says "do not commit". This session
+   does not write the first version itself.
+2. **A reviewer reviews.** This session is the managing agent, usually
+   Opus. It hands the diff to a fresh reviewer subagent (`model: opus`),
+   which reports findings and edits nothing. This session also reads the
+   implementation in full.
+3. **This session fixes.** Check each finding against the code or the
+   library source. Implement every finding that holds, whatever its size.
+   Say why each other finding does not hold.
+4. **Big fixes go back.** A fix that changes a rule, touches several files
+   or adds tests of its own goes to a new fresh reviewer. This session
+   re-reads small fixes itself.
+5. **Repeat until both are happy.** The loop ends when this session and
+   the reviewer both find nothing. There is no fixed number of rounds.
+   Then verify and commit.
 
 ## Environment
 

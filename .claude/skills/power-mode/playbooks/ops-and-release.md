@@ -3,7 +3,8 @@
 **Prepare everything. Luke runs what needs his credentials.**
 
 1. Do everything that needs no credentials yourself: config, scripts,
-   workflow files, the expected `terraform plan`.
+   workflow files, the expected `terraform plan`. Write file changes
+   through the review loop.
 2. List what Luke must do, as exact commands or console steps, in order,
    with what each one should print. Say which steps he can do from his
    phone.

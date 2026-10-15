@@ -10,7 +10,8 @@
    design question. Route to Design or offer a STATUS todo.
 3. When the cause is a flake, fix the test so it cannot flake. Never skip it
    or loosen it.
-4. Commit the failing test first, with a message that says what it pins.
+4. Write the failing test and the fix through the review loop. Commit the
+   failing test first, with a message that says what it pins.
    Then commit the fix on top.
 5. Run the full build and the original repro. Paste failing-then-passing
    output.

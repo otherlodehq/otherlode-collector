@@ -3,7 +3,8 @@
 **Every sentence true of the shipped code. Luke approves customer copy.**
 
 1. Read the code the page describes. Check each claim against it.
-2. For customer-facing copy, draft it and show it before you commit. For a
+2. Write the change through the review loop. For customer-facing copy,
+   show it before you commit. For a
    rewrite across many pages, show one page as a sample first.
 3. Follow the repo's `docs/site/README.md`, the `technical-writing` skill,
    and simplified technical English. Run `unslop` over everything
