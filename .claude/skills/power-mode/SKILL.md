@@ -26,7 +26,7 @@ repo carries all of them), then `~/.claude/`.
 | `/chunked-build` | `commands/chunked-build.md` |
 | `/deep-review` | `commands/deep-review.md` |
 | `/nightwork` | `skills/nightwork/SKILL.md` |
-| `humanizer`, `unslop` | `skills/humanizer/SKILL.md`, `skills/unslop/SKILL.md` |
+| `unslop` | `skills/unslop/SKILL.md` |
 | `technical-writing` | `skills/technical-writing/SKILL.md` |
 | `verify-ui` | `skills/verify-ui/SKILL.md` (server repo) |
 
@@ -126,8 +126,8 @@ he asks.
 - When you offer work and he has not taken it, keep it in the run log or
   STATUS so "do that one" still resolves later.
 - Count what you ask him to confirm, and check the count.
-- Run `unslop` over the reply as you write it. Run `unslop` and `humanizer`
-  over every comment, doc, ADR and piece of copy you touched.
+- Run `unslop` over the reply as you write it, and over every comment,
+  doc, ADR and piece of copy you touched.
 
 ## Playbooks
 

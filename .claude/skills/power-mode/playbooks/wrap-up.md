@@ -10,8 +10,8 @@ asks them.**
    are gone.
 3. Docs follow behaviour. Name the `docs/site` pages you changed, or say
    none needed changing and why.
-4. `unslop` and `humanizer` have run over every comment, doc, ADR and
-   piece of copy you wrote.
+4. `unslop` has run over every comment, doc, ADR and piece of copy you
+   wrote.
 5. List what needs Luke: confirmations, his own steps, decisions. Number
    them, and check the count matches the list.
 6. Say whether the session is ready for `/clear`, meaning everything needed

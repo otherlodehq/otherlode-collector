@@ -6,8 +6,8 @@
 2. For customer-facing copy, draft it and show it before you commit. For a
    rewrite across many pages, show one page as a sample first.
 3. Follow the repo's `docs/site/README.md`, the `technical-writing` skill,
-   and simplified technical English. Run `unslop` and `humanizer` over
-   everything you wrote, not only part of it.
+   and simplified technical English. Run `unslop` over everything
+   you wrote, not only part of it.
 4. Leave out instructions a reader at that level already knows.
 5. Keep doc links pointing at public repos. A private repo's path 404s for a
    customer.
