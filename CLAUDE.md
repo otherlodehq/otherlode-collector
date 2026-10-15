@@ -45,7 +45,7 @@ A change that breaks one of these needs an ADR first.
 - Write in simplified technical English: short sentences, one main clause
   each, plain words, no idioms. Prefer the concrete verb ("this rejects bad
   input") to the nominalization ("this handles rejection of invalid input").
-- Run the `humanizer` skill over any comment before treating it as
+- Run the `unslop` skill over any comment before treating it as
   finished: no em dashes, no stock AI phrasing ("crucial," "seamless,"
   "robust," "leverage"), no sentence that restates the code.
 - Never describe code relative to time ("now," "currently," "previously
