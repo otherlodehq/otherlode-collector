@@ -35,6 +35,8 @@ A change that breaks one of these needs an ADR first.
   page documents, updates that page in the same commit. A refactor, a fix
   that restores documented behaviour, or an internal change needs none.
 - Run `gofmt -l .`, `go vet ./...` and `go test ./...` before committing.
+- **No session ids or links in commit messages.** A commit message never
+  carries a `Claude-Session` line, a session link or a session id.
 
 ## Comments
 

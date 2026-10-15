@@ -136,7 +136,8 @@ has the detail, such as the brief format.
 - In a cloud session, Maven Central answers Gradle with 429. Point Gradle
   at Google's mirror through a user-level init script. Never edit a repo's
   build files for it, and never use the mirror outside a cloud session.
-- A public repo's commits never carry a `Claude-Session` link.
+- A commit message never carries a `Claude-Session` line, a session link
+  or a session id, in any repo.
 
 ## Writing the reply
 
