@@ -114,6 +114,12 @@ Every playbook that builds or edits files runs this loop. It is the one
 definition: `/chunked-build`, `/deep-review` and nightwork point here.
 `/chunked-build` adds how to brief, review and verify.
 
+**Small edits skip the loop.** This session makes an edit with no behaviour
+in it directly: a typo, a one-line copy fix, a rename inside one file, a
+STATUS or run-log edit. Its todo item reads `skip: trivial`. Anything that
+changes what code does, what a test pins, or more than one line a reader
+sees goes through the loop.
+
 1. **Sonnet implements.** A Sonnet subagent (`model: sonnet`) writes the
    change from a written brief that says "do not commit". This session
    does not write the first version itself.
@@ -164,6 +170,10 @@ he asks.
   doc, ADR and piece of copy you touched.
 - Write a code comment only when the repo's `CLAUDE.md` comment rule
   allows it. Delete the rest.
+- End the reply to a task with one line naming the playbook you ran and
+  each step you skipped, with the reason. For example: "Playbook: Bug fix.
+  Skipped 3 (not a flake)." A chat answer that ran no playbook needs no
+  line.
 
 ## Playbooks
 
@@ -172,7 +182,7 @@ Match the task and open its file.
 - **Question** (`question.md`). How does X work, does this need agent
   changes, is this gap big, why did CI fail. Read-only.
 - **Pickup** (`pickup.md`). What's next, what's in todo to close, what
-  pre-release items are left, resume from STATUS.
+  pre-release items are left.
 - **Design** (`design.md`). A new behaviour or a change to one, before code.
   Covers `/grill-me` and `/grill-with-docs`.
 - **Build** (`build.md`). A settled design turned into code. Covers
@@ -186,4 +196,8 @@ Match the task and open its file.
 - **Ops and release** (`ops-and-release.md`). Deploys, infra, secrets,
   release prep.
 - **Tooling** (`tooling.md`). Skills, commands, hooks, `CLAUDE.md`.
+- **Pause** (`pause.md`). Luke says stop or pause, a `/clear` is coming, or
+  the context or the container may not last.
+- **Resume** (`resume.md`). Carry on from a paused or cut-off session, a
+  `wip/` branch or a nightwork report.
 - **Wrap-up** (`wrap-up.md`). The last step of every other playbook.
