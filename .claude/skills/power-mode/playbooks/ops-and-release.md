@@ -4,7 +4,9 @@
 
 1. Do everything that needs no credentials yourself: config, scripts,
    workflow files, the expected `terraform plan`. Write file changes
-   through the review loop.
+   through the review loop. A change to the architecture, such as a new
+   service, a storage choice or an instance size, is a design change, so
+   grill it per Design first.
 2. List what Luke must do, as exact commands or console steps, in order,
    with what each one should print. Say which steps he can do from his
    phone.

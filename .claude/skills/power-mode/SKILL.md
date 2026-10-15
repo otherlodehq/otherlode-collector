@@ -34,10 +34,13 @@ repo carries all of them), then `~/.claude/`.
 
 Each one comes from something Luke asked for or corrected more than once.
 
-- **Design before code.** Anything that adds a public API, a wire field, a
-  table or a new behaviour gets grilled and written down before code. If you
-  catch yourself editing source on an unsettled design, stop and offer the
-  grill.
+- **Grill every design change.** A design change adds or changes a public
+  API, a wire field, a table, a behaviour a customer sees, or what an ADR
+  decided. Once any playbook finds that one is necessary, stop and grill it
+  with `/grill-with-docs` per the Design playbook, and write it down before
+  code. Under `/nightwork`, park it for the report instead, since Luke is
+  not there to answer. If you catch yourself editing source on an unsettled
+  design, stop and grill.
 - **Correct over cheap.** Recommend the correct, robust option. Never pick
   the smaller option because it is less work, and say so if effort is the
   only thing for it. Fix the gap rather than document it. Fail closed. Build

@@ -2,10 +2,12 @@
 
 **Every sentence true of the shipped code. Luke approves customer copy.**
 
-1. Read the code the page describes. Check each claim against it.
+1. Read the code the page describes. Check each claim against it. When the
+   code is wrong rather than the page, route it to Bug fix. If the right
+   behaviour is a design change, grill it per Design.
 2. Write the change through the review loop. For customer-facing copy,
-   show it before you commit. For a
-   rewrite across many pages, show one page as a sample first.
+   show it before you commit. For a rewrite across many pages, show one
+   page as a sample first.
 3. Follow the repo's `docs/site/README.md`, the `technical-writing` skill,
    and simplified technical English. Run `unslop` over everything
    you wrote, not only part of it.

@@ -14,8 +14,8 @@
 4. On the go-ahead, prune. STATUS keeps only open work. Delete closed
    entries and the finished history inside open ones. Leave no pointer to
    removed text.
-5. When the picked item needs design, route to Design. When it is settled,
-   route to Build.
+5. When the picked item needs a design change, grill it per Design. When its
+   design is settled, route to Build.
 6. Wrap-up.
 
 **Reply:** the grouped verdicts with line numbers, the one recommendation,

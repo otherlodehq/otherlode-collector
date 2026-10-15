@@ -6,7 +6,9 @@
 2. For a visual change, mock two or three options in the running page with
    injected CSS. Send screenshots at 1440x900 and at a phone width of 390.
    Luke picks. Do not build an option he has not picked, and do not decide
-   an open question ("always open or collapsible?") while waiting.
+   an open question ("always open or collapsible?") while waiting. If the
+   change also alters what the API serves or how something is judged,
+   grill it per Design first.
 3. Write the e2e spec in `web/e2e/` first and see it fail.
 4. Build it through the review loop, chunked per Build when it is bigger
    than one component.
