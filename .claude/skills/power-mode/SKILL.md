@@ -128,6 +128,8 @@ he asks.
 - Count what you ask him to confirm, and check the count.
 - Run `unslop` over the reply as you write it, and over every comment,
   doc, ADR and piece of copy you touched.
+- Write a code comment only when the repo's `CLAUDE.md` comment rule
+  allows it. Delete the rest.
 
 ## Playbooks
 
