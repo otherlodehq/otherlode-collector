@@ -94,8 +94,16 @@ commands to run.
 - Judgement stays in this session: design, briefs, review, fixes, commit
   messages, STATUS. A subagent's report is a claim to check.
 - Building and editing go through the review loop below.
-- Read-only fact-finding fans out to parallel subagents, split by disjoint
-  scope (a repo, a line range of STATUS). Each returns a fixed verdict
+- Pick the model by the job:
+  - Sonnet (`model: sonnet`) writes to a brief: code, tests and fixes.
+  - Opus (`model: opus`) judges: reviews, research and read-only fan-outs.
+  - Haiku (`model: haiku`) only fetches and dumps, such as copying library
+    sources or `javap` output, and reports verbatim. It never summarises,
+    counts or gives a verdict.
+  - A job that one command or a script can do gets no agent.
+  - Never use Fable.
+- Read-only fact-finding fans out to parallel Opus subagents, split by
+  disjoint scope (a repo, a line range of STATUS). Each returns a fixed verdict
   format and cites a file, line or commit.
 - Give every subagent the facts already verified, marked "do not
   re-derive", and "do not commit".
