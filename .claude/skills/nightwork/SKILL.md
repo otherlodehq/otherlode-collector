@@ -77,11 +77,8 @@ covers the build, `git` and the subagents.
 ## 3. Build each chunk with /chunked-build
 
 Follow `/chunked-build` steps 1 to 7 for every chunk, but commit where the
-user chose in step 2, not where that command's step 6 says. A Sonnet subagent
-implements from a written brief, this session reviews the implementation and
-fixes what it finds, and a fresh Opus reviewer reads every non-trivial diff.
-Repeat review and fix until both this session and the reviewer are happy.
-There is no fixed number of rounds.
+user chose in step 2, not where that command's step 6 says. Each chunk goes
+through the review loop in `.claude/skills/power-mode/SKILL.md`.
 
 Keep a run log in the job's temp directory as you go, one entry per chunk:
 the commit, every fork and what was chosen, and every item for the user. The

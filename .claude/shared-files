@@ -1,0 +1,17 @@
+# Paths every otherlode repo carries as an exact copy of otherlode-agent's.
+# otherlode-agent is the source. Change a path there, then copy it out.
+.claude/shared-files
+.claude/check-shared.sh
+.claude/settings.json
+.claude/skills/power-mode
+.claude/skills/nightwork
+.claude/skills/grilling
+.claude/skills/domain-modeling
+.claude/skills/grill-me
+.claude/skills/grill-with-docs
+.claude/skills/technical-writing
+.claude/skills/unslop
+.claude/commands/chunked-build.md
+.claude/commands/deep-review.md
+.githooks/commit-msg
+.github/workflows/claude-config.yml

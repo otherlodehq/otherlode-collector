@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "for d in \"$CLAUDE_PROJECT_DIR\" \"$CLAUDE_PROJECT_DIR\"/*/; do [ -f \"$d/.githooks/commit-msg\" ] && git -C \"$d\" config core.hooksPath .githooks; done; true"
+          }
+        ]
+      }
+    ]
+  }
+}

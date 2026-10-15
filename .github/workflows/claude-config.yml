@@ -1,0 +1,47 @@
+name: Claude config
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  shared-files:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: otherlodehq/otherlode-agent
+          path: .otherlode-agent
+      - run: sh .claude/check-shared.sh .otherlode-agent
+
+  commit-messages:
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: No session ids or links in the pushed commits
+        env:
+          FROM: ${{ github.event.pull_request.base.sha || github.event.before }}
+          TO: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if git cat-file -e "$FROM^{commit}" 2>/dev/null; then
+            commits=$(git rev-list "$FROM..$TO")
+          else
+            commits=$TO
+          fi
+          failed=0
+          for c in $commits; do
+            git log -1 --format=%B "$c" > "$RUNNER_TEMP/msg"
+            if ! sh .githooks/commit-msg "$RUNNER_TEMP/msg" 2>/dev/null; then
+              echo "$(git log -1 --format='%h %s' "$c") carries a session id or link"
+              failed=1
+            fi
+          done
+          exit $failed

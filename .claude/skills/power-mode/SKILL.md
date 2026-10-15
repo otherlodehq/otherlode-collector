@@ -110,8 +110,9 @@ commands to run.
 
 ## Review loop
 
-Every playbook that builds or edits files runs this loop. `/chunked-build`
-has the detail, such as the brief format.
+Every playbook that builds or edits files runs this loop. It is the one
+definition: `/chunked-build`, `/deep-review` and nightwork point here.
+`/chunked-build` adds how to brief, review and verify.
 
 1. **Sonnet implements.** A Sonnet subagent (`model: sonnet`) writes the
    change from a written brief that says "do not commit". This session
@@ -133,11 +134,11 @@ has the detail, such as the brief format.
 ## Environment
 
 - Pull every repo before you start. Luke and his other agents push often.
+- Each repo's `.githooks/commit-msg` rejects a session id or link. If
+  `git config core.hooksPath` is not `.githooks` in a repo, set it.
 - In a cloud session, Maven Central answers Gradle with 429. Point Gradle
   at Google's mirror through a user-level init script. Never edit a repo's
   build files for it, and never use the mirror outside a cloud session.
-- A commit message never carries a `Claude-Session` line, a session link
-  or a session id, in any repo.
 
 ## Writing the reply
 
