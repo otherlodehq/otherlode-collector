@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"google.golang.org/protobuf/proto"
 	"log/slog"
 	"regexp"
 	"slices"
@@ -715,5 +716,51 @@ func TestRedaction_On_UnknownFieldsDroppedFromClassListing(t *testing.T) {
 	}
 	if names := got.GetClassNames(); len(names) != 1 || names[0] != "com.example.Pricing" {
 		t.Errorf("class names = %v, want the name kept", names)
+	}
+}
+
+// TestRedaction_On_ClassesFailedToInitializeKept pins that the bindings
+// know a manifest's classes that failed to initialize, its unplaced
+// verification failure count and the initializer slot kinds, so redaction
+// passes them on and marks nothing stripped (agent ADR 0071).
+func TestRedaction_On_ClassesFailedToInitializeKept(t *testing.T) {
+	next := &recordingSink{}
+	r := NewRedaction(next, blocked(t, "never-matches"), nil)
+	manifest := &otherlodepb.ProbeManifest{
+		Resource: &otherlodepb.ResourceAttributes{RunId: "run-1"},
+		Probes: []*otherlodepb.ProbeLocation{
+			{ClassName: "com.example.A", MethodName: "<clinit>", Kind: otherlodepb.ProbeKind_INITIALIZER_RETURNED},
+			{ClassName: "com.example.A", MethodName: "<clinit>", Kind: otherlodepb.ProbeKind_INITIALIZER_THREW},
+		},
+		ClassesFailedToInitialize: []*otherlodepb.ClassFailedToInitialize{
+			{ClassName: "com.example.A", Reason: otherlodepb.InitializationFailure_STATIC_INITIALIZER_THREW, ObservedAt: 1},
+		},
+		UnplacedVerificationFailures: 2,
+	}
+	wire, err := proto.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	decoded := &otherlodepb.ProbeManifest{}
+	if err := proto.Unmarshal(wire, decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if err := r.AcceptManifest(context.Background(), decoded); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := next.manifests[0]
+	if got.GetResource().GetFieldsStripped() {
+		t.Fatal("fields_stripped set on a manifest that lost nothing")
+	}
+	if n := len(got.GetClassesFailedToInitialize()); n != 1 {
+		t.Fatalf("classes_failed_to_initialize has %d entries, want 1", n)
+	}
+	if got.GetUnplacedVerificationFailures() != 2 {
+		t.Fatalf("unplaced_verification_failures = %d, want 2", got.GetUnplacedVerificationFailures())
+	}
+	if k := got.GetProbes()[1].GetKind(); k != otherlodepb.ProbeKind_INITIALIZER_THREW {
+		t.Fatalf("probe kind = %v, want INITIALIZER_THREW", k)
 	}
 }
