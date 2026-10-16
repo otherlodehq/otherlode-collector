@@ -5,8 +5,9 @@
 1. Check the preconditions in `/chunked-build` step 0. If the design is not
    written down, route to Design.
 2. Run the review loop for each chunk. Sonnet implements, a fresh
-   reviewer reviews, this session fixes what holds, and big fixes go back
-   to a fresh reviewer until both are happy.
+   reviewer reviews the chunk once, this session judges each finding and
+   fixes what holds in one batch, and a fresh reviewer verifies a big
+   batch. The chunk is done when this session has nothing left to fix.
 3. Read the implementation in full, not the report. Check it against the
    library source it depends on.
 4. Verify each chunk on the real thing. Run the full build and tests. For a

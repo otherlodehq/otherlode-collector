@@ -81,7 +81,8 @@ user chose in step 2, not where that command's step 6 says. Each chunk goes
 through the review loop in `.claude/skills/power-mode/SKILL.md`.
 
 Keep a run log in the job's temp directory as you go, one entry per chunk:
-the commit, every fork and what was chosen, and every item for the user. The
+the commit, every fork and what was chosen, every review finding dismissed
+and why, every follow-up still open, and every item for the user. The
 report is built from this log, not from memory at the end.
 
 ## 4. Decide forks, or park them
@@ -108,8 +109,10 @@ Otherwise park it. Parking means:
    that do not.
 
 Park a chunk the same way when the review loop stops converging: the same
-finding returns after it was fixed, or this session and the reviewer
-disagree and the code or the library source cannot settle it.
+finding returns after it was fixed, or this session cannot tell whether a
+correctness or security finding holds and the code or the library source
+cannot settle it. A reviewer who disagrees with this session's verdict is
+not a reason to park.
 
 ## 5. Guardrails
 
@@ -166,8 +169,9 @@ Use these sections, in this order, and leave out any that is empty:
 2. **What landed.** One line per chunk: repo, branch, commit hash and what
    the chunk does, with the pull request link when the run opened one.
 3. **Forks and decisions.** Each choice you made: the question, the option
-   you picked, the reason, and the option you rejected. Mark any you would
-   like the user to confirm.
+   you picked, the reason, and the option you rejected. Then each review
+   finding you dismissed, with the reason. Mark any you would like the
+   user to confirm.
 4. **Verification.** The build, test and formatter results for each repo,
    read in this session, with counts.
 

@@ -8,7 +8,8 @@ disable-model-invocation: true
 
 Turn an already-settled design into code one chunk at a time. Each chunk
 goes through the review loop in `.claude/skills/power-mode/SKILL.md`, from a brief
-this session writes, and is committed only after a clean pass. This file
+this session writes, and is committed only after a round with nothing left
+to fix. This file
 adds how to brief, review and verify a chunk.
 `$ARGUMENTS` names the chunk to build next, or the design section whose
 landing order says what comes next.
@@ -72,7 +73,9 @@ At the start of the run ask the user once whether they want breakpoints,
 and if so which: after a named chunk, before anything that changes the
 wire schema or a public API, before the first chunk in a second repo, or
 none. Stop at exactly those points and report; everywhere else keep
-going. Stop regardless when a chunk cannot be made clean, when a review
+going. Stop regardless when the review loop stops converging (the same
+finding returns after it was fixed, or a correctness or security finding
+cannot be settled from the code or the library source), when a review
 finding contradicts the settled design, or when the next brief would
 need a decision the design did not make.
 
@@ -103,22 +106,26 @@ added: stock words, em dashes, sentences restating the code, time-relative
 wording. Delete every comment that the comment rule in the repo's
 `CLAUDE.md` does not allow.
 
-## 4. Fix everything found, regardless of size
+## 4. Fix every finding that holds, regardless of size
 
 The main session implements the fixes itself; it does not send the chunk
 back to the implementer. A test that pins a boundary the chunk left
 unpinned counts as a finding.
 
-Each big fix, as the review loop defines it, goes to a fresh reviewer
-once it is complete. Brief a reviewer with the settled design, the
-ADRs, the facts already verified, and the uncommitted diff (`git diff HEAD`
-plus untracked files, in every repo the chunk touched), and ask for
-findings only. Treat its report as claims: check each finding against the
-code or the library source before acting on it, fix the ones that hold,
-and say why the others do not.
+Brief the full reviewer with the settled design, the ADRs, the facts
+already verified, and the chunk's uncommitted diff (`git diff HEAD --
+<paths>` plus the chunk's untracked files, in every repo the chunk
+touched). Ask for findings only, each with its evidence as the review
+loop's step 3 defines it. Treat its report as claims, and judge each
+finding as that step says.
 
-Repeat as the review loop says. The commit follows a clean pass, not the
-last fix.
+Before fixing, stage the chunk's own files as the review loop's step 2
+says. Fix the whole batch, then verify it as the review loop's step 4
+says. A reviewer that verifies a big batch gets the finding list and the
+fix diff, not the whole chunk.
+
+Repeat as the review loop says. The commit follows a round with nothing
+left to fix, not the last fix.
 
 ## 5. Verify yourself
 

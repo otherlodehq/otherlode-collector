@@ -69,7 +69,7 @@ Each one comes from something Luke asked for or corrected more than once.
 **Just do it.** Commit and push straight to the default branch, but only
 while the project has not released. After its first release, work on a
 branch and ask how Luke wants it landed. Launch the next chunk. Fix every
-review finding regardless of size. Keep STATUS, ADRs and `CONTEXT.md`
+review finding that holds, regardless of size. Keep STATUS, ADRs and `CONTEXT.md`
 current. Run and stop the dev stack. Fix CI. Pick the "(Recommended)"
 option on a reversible call and report it.
 
@@ -96,6 +96,7 @@ commands to run.
 - Building and editing go through the review loop below.
 - Pick the model by the job:
   - Sonnet (`model: sonnet`) writes to a brief: code, tests and fixes.
+    The fixes for a review's findings stay in this session.
   - Opus (`model: opus`) judges: reviews, research and read-only fan-outs.
   - Haiku (`model: haiku`) only fetches and dumps, such as copying library
     sources or `javap` output, and reports verbatim. It never summarises,
@@ -123,19 +124,71 @@ sees goes through the loop.
 1. **Sonnet implements.** A Sonnet subagent (`model: sonnet`) writes the
    change from a written brief that says "do not commit". This session
    does not write the first version itself.
-2. **A reviewer reviews.** This session is the managing agent, usually
-   Opus. It hands the diff to a fresh reviewer subagent (`model: opus`),
-   which reports findings and edits nothing. This session also reads the
-   implementation in full.
-3. **This session fixes.** Check each finding against the code or the
-   library source. Implement every finding that holds, whatever its size.
-   Say why each other finding does not hold.
-4. **Big fixes go back.** A fix that changes a rule, touches several files
-   or adds tests of its own goes to a new fresh reviewer. This session
-   re-reads small fixes itself.
-5. **Repeat until both are happy.** The loop ends when this session and
-   the reviewer both find nothing. There is no fixed number of rounds.
-   Then verify and commit.
+2. **A reviewer reviews the whole change once.** This session is the
+   managing agent, usually Opus. It hands the change's diff
+   (`git diff HEAD -- <paths>` plus its untracked files) to a fresh
+   reviewer subagent (`model: opus`), which reports findings and edits
+   nothing.
+   The brief asks for evidence with every finding (see step 3). This
+   session also reads the implementation in full.
+
+   Before fixing anything, stage the change's own files in every repo it
+   touched: `git add -A -- <paths>`, with the paths taken from
+   `git status` and checked against the implementer's report. Never stage
+   a file the change did not write, such as another agent's edits. From
+   then on `git diff` shows only the fixes.
+3. **This session judges.** The reviewer reports and this session
+   decides. Check each finding against the code or the library source,
+   then put it in one bucket with a one-line reason. A finding's evidence
+   is the file and line plus one of these: the input or call path that
+   triggers it, a test that fails, or the written rule it breaks (a
+   `CLAUDE.md` rule, an ADR, a boundary no test pins).
+   - **Fix.** The evidence holds, in code the change wrote or newly
+     reaches. Fix it whatever its size.
+   - **Follow-up.** The defect is real but was there before the change,
+     and the change does not reach it. Write it in STATUS as open work
+     (under `/nightwork`, also in the run log), then fix it through this
+     loop in its own commit once the change has landed, and remove the
+     entry with that commit. It does not hold up the change.
+   - **Dismiss.** No caller can reach it (the input is checked upstream,
+     or the type rules it out), it is a preference for another approach,
+     it asks for an abstraction with one caller, or the reviewer misread
+     the context.
+
+   A finding without evidence is dismissed, except a correctness or
+   security claim. Trace that one yourself before you decide. A fix that
+   is a design change goes to a grill per the principle above, not to a
+   bucket. Reviewers fill the space they are given. When every finding is
+   a nit, the change is fine, and the verdict says so.
+4. **This session fixes the batch, then verifies it once.** This session
+   fixes every Fix finding itself, before any second look, not one
+   finding at a time. Then match the check to what the fixes did:
+   - Small fixes only: this session re-reads them.
+   - A big fix (it changes a rule, touches several files or adds tests of
+     its own): a fresh reviewer verifies the batch. Its brief is the facts
+     already verified, the design or ADR the change follows, the finding
+     list and the fix diff (`git diff` plus the change's new untracked
+     files), with "edit nothing" and "do not commit". It answers two
+     questions: is each finding fixed, and did a fix break the code it
+     touched. It does not review the rest of the change again. Judge its
+     answers as step 3 says.
+   - A fix that redesigns the change (new behaviour, a different
+     approach, or a fix diff about as large as the change): a fresh full
+     review, from step 2.
+
+   After each round, stage the change's paths again, plus any file a fix
+   added, so the next round's `git diff` holds only that round's fixes.
+5. **Stop when the judge has nothing to fix.** The loop ends when this
+   session's verdict on the latest round has nothing under Fix and no
+   grill is open. A design change waiting on a grill blocks the commit;
+   under `/nightwork`, park the chunk. The reviewer does not have to
+   agree. List the dismissed findings and their reasons in the reply
+   (under `/nightwork`, the report), so Luke can overrule one. There is
+   no fixed number of rounds. Then verify. Before you commit, unstage the
+   change's paths (`git reset -q -- <paths>`), so a playbook that splits
+   the work into several commits picks each one's files itself. Stage
+   each commit with `git add -A -- <its paths>`, never `git commit -a` or
+   a bare `git add -A`.
 
 ## Environment
 
