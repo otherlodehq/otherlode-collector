@@ -721,7 +721,8 @@ func TestRedaction_On_UnknownFieldsDroppedFromClassListing(t *testing.T) {
 
 // TestRedaction_On_ClassesFailedToInitializeKept pins that the bindings
 // know a manifest's classes that failed to initialize, its unplaced
-// verification failure count and the initializer slot kinds, so redaction
+// verification failure count, whether the verifier was watched and the
+// initializer slot kinds, so redaction
 // passes them on and marks nothing stripped (agent ADR 0071).
 func TestRedaction_On_ClassesFailedToInitializeKept(t *testing.T) {
 	next := &recordingSink{}
@@ -736,6 +737,7 @@ func TestRedaction_On_ClassesFailedToInitializeKept(t *testing.T) {
 			{ClassName: "com.example.A", Reason: otherlodepb.InitializationFailure_STATIC_INITIALIZER_THREW, ObservedAt: 1},
 		},
 		UnplacedVerificationFailures: 2,
+		VerifierRejectionsWatched:    true,
 	}
 	wire, err := proto.Marshal(manifest)
 	if err != nil {
@@ -756,6 +758,9 @@ func TestRedaction_On_ClassesFailedToInitializeKept(t *testing.T) {
 	}
 	if n := len(got.GetClassesFailedToInitialize()); n != 1 {
 		t.Fatalf("classes_failed_to_initialize has %d entries, want 1", n)
+	}
+	if !got.GetVerifierRejectionsWatched() {
+		t.Fatal("verifier_rejections_watched lost")
 	}
 	if got.GetUnplacedVerificationFailures() != 2 {
 		t.Fatalf("unplaced_verification_failures = %d, want 2", got.GetUnplacedVerificationFailures())
