@@ -605,6 +605,32 @@ func TestRedaction_On_OutsideCallerAndFailedClassesKept(t *testing.T) {
 	}
 }
 
+// The bindings know an endpoint's template kind (agent ADR 0073), so
+// redaction keeps a regex endpoint's mark and template and does not mark
+// the payload stripped.
+func TestRedaction_On_RegexTemplateKindKept(t *testing.T) {
+	next := &recordingSink{}
+	r := NewRedaction(next, allLiterals(), nil)
+
+	manifest := manifestWith()
+	manifest.Endpoints = []*otherlodepb.EndpointLocation{
+		{EndpointId: 1, Verb: "GET", RouteTemplate: "^/items/(\\d+)$", VerbatimTemplate: "^/items/(\\d+)$", TemplateKind: otherlodepb.EndpointTemplateKind_REGEX},
+	}
+
+	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+		t.Fatalf("accept manifest: %v", err)
+	}
+
+	got := next.manifests[0]
+	if got.GetResource().GetFieldsStripped() {
+		t.Error("fields_stripped set on a manifest whose fields the bindings know")
+	}
+	endpoints := got.GetEndpoints()
+	if len(endpoints) != 1 || endpoints[0].GetTemplateKind() != otherlodepb.EndpointTemplateKind_REGEX {
+		t.Errorf("endpoints = %v, want one of kind REGEX", endpoints)
+	}
+}
+
 // The bindings know the CONFIGURED_OFF module kind (agent ADR 0017), so
 // redaction keeps it and does not mark the payload stripped.
 func TestRedaction_On_ConfiguredOffModuleKindKept(t *testing.T) {
