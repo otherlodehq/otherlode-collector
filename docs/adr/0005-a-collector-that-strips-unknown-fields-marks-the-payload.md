@@ -4,7 +4,7 @@ status: accepted
 
 # A collector that strips unknown fields marks the payload
 
-Decided on 2026-10-04 in a grilling session with Luke, reviewing agent ADR 0054's wire surfaces before release (agent `STATUS.md`, pre-release checklist item 4). This amends ADR 0001.
+Decided on 2026-10-04 in a grilling session, reviewing agent ADR 0054's wire surfaces before release (agent `STATUS.md`, pre-release checklist item 4). This amends ADR 0001.
 
 While redaction is on, ADR 0001 strips every field this collector's bindings do not know, so that a newer agent's literal-carrying field fails closed. A newer field can also carry meaning the server judges by. Agent ADR 0054 added `unread_shape`: an older collector with redaction on would have dropped it, and the server would have read every unread shape as the adopter's code and reported it as a confident never-hit, the failure agent ADR 0007 rules out. Whatever detection the first released collectors lack cannot be added to them later, so the mark is in from the start.
 

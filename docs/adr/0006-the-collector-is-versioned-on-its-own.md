@@ -4,7 +4,7 @@ status: accepted
 
 # The collector is versioned on its own and released from its tag
 
-Decided on 2026-10-05 in a grilling session with Luke, as agent `STATUS.md`'s pre-release checklist item 6 (agent ADRs 0062 and 0063). This replaces the lockstep release agent ADR 0057 set out.
+Decided on 2026-10-05 in a grilling session, as agent `STATUS.md`'s pre-release checklist item 6 (agent ADRs 0062 and 0063). This replaces the lockstep release agent ADR 0057 set out.
 
 Nothing reads the collector's version but its startup log, and a newer collector serves every older agent, so the collector carries its own version: `v0.1.0` first, cut just before the agent's `0.1.0`, then a release whenever its code or its bindings change. The rule an adopter follows is "run the latest collector". The version lives in `cmd/otherlode-collector/version.go` and a release is a matching `vX.Y.Z` tag.
 

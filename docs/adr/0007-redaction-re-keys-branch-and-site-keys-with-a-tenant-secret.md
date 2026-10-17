@@ -4,7 +4,7 @@ status: accepted, amends ADR 0001
 
 # Redaction re-keys branch and site keys with a tenant secret
 
-Decided on 2026-10-10. Luke approved the design after a review of redaction found that the keys give a redacted literal away. The same day he approved a mark from the agent on switches over a string's hash code, to clear case keys the value alone cannot find. He also approved a request header that carries the fingerprint to the backend.
+Decided on 2026-10-10. The design was approved after a review of redaction found that the keys give a redacted literal away. The same day, two more parts were approved: a mark from the agent on switches over a string's hash code, to clear case keys the value alone cannot find, and a request header that carries the fingerprint to the backend.
 
 The agent names each branch outcome and each site with a key: the first 16 bytes of SHA-256 over the class name, the method name and descriptor, the origin class, the condition's fingerprint and the outcome (agent ADR 0031). The fingerprint holds the condition's string constants. A string switch the agent reads back names each case by its literal (agent ADR 0038). Every other input is in the manifest. So whoever holds a redacted payload, Otherlode or anyone who can read the tenant's data, can hash a guess at a blanked literal and compare it with the key. Short secrets fall quickly: tokens, flag names, host names and email addresses. ADR 0001 listed this as a consequence and accepted it. This record reverses that.
 
