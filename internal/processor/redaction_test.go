@@ -605,6 +605,34 @@ func TestRedaction_On_OutsideCallerAndFailedClassesKept(t *testing.T) {
 	}
 }
 
+// The bindings know the CONFIGURED_OFF module kind (agent ADR 0017), so
+// redaction keeps it and does not mark the payload stripped.
+func TestRedaction_On_ConfiguredOffModuleKindKept(t *testing.T) {
+	next := &recordingSink{}
+	r := NewRedaction(next, allLiterals(), nil)
+
+	manifest := manifestWith()
+	manifest.DisabledEndpointModules = []*otherlodepb.DisabledEndpointModule{
+		{Module: "spring-webmvc", Reason: "switched off by configuration", Kind: otherlodepb.DisabledEndpointModuleKind_CONFIGURED_OFF},
+	}
+
+	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+		t.Fatalf("accept manifest: %v", err)
+	}
+
+	got := next.manifests[0]
+	if got.GetResource().GetFieldsStripped() {
+		t.Error("fields_stripped set on a manifest whose fields the bindings know")
+	}
+	modules := got.GetDisabledEndpointModules()
+	if len(modules) != 1 ||
+		modules[0].GetKind() != otherlodepb.DisabledEndpointModuleKind_CONFIGURED_OFF ||
+		modules[0].GetModule() != "spring-webmvc" ||
+		modules[0].GetReason() != "switched off by configuration" {
+		t.Errorf("disabled modules = %v, want one spring-webmvc of kind CONFIGURED_OFF with its reason", modules)
+	}
+}
+
 // The bindings know a disabled module's kind (agent ADR 0017) and the
 // payload sequence and pending-since stamp on a delta batch and a manifest
 // (agent ADR 0068), so redaction keeps them and does not mark either
