@@ -631,6 +631,34 @@ func TestRedaction_On_RegexTemplateKindKept(t *testing.T) {
 	}
 }
 
+// The bindings know the ROUTES_NOT_COUNTED module kind (agent ADR 0017), so
+// redaction keeps it and does not mark the payload stripped.
+func TestRedaction_On_RoutesNotCountedModuleKindKept(t *testing.T) {
+	next := &recordingSink{}
+	r := NewRedaction(next, allLiterals(), nil)
+
+	manifest := manifestWith()
+	manifest.DisabledEndpointModules = []*otherlodepb.DisabledEndpointModule{
+		{Module: "micronaut", Reason: "no dispatch point", Kind: otherlodepb.DisabledEndpointModuleKind_ROUTES_NOT_COUNTED},
+	}
+
+	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+		t.Fatalf("accept manifest: %v", err)
+	}
+
+	got := next.manifests[0]
+	if got.GetResource().GetFieldsStripped() {
+		t.Error("fields_stripped set on a manifest whose fields the bindings know")
+	}
+	modules := got.GetDisabledEndpointModules()
+	if len(modules) != 1 ||
+		modules[0].GetKind() != otherlodepb.DisabledEndpointModuleKind_ROUTES_NOT_COUNTED ||
+		modules[0].GetModule() != "micronaut" ||
+		modules[0].GetReason() != "no dispatch point" {
+		t.Errorf("disabled modules = %v, want one micronaut of kind ROUTES_NOT_COUNTED with its reason", modules)
+	}
+}
+
 // The bindings know the CONFIGURED_OFF module kind (agent ADR 0017), so
 // redaction keeps it and does not mark the payload stripped.
 func TestRedaction_On_ConfiguredOffModuleKindKept(t *testing.T) {
