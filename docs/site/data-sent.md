@@ -163,7 +163,7 @@ The `msg` is `received delta batch`, `received probe manifest`, `received static
 | `msg` | Size fields |
 |---|---|
 | `received delta batch` | `deltas`, `endpoint_deltas`, `dependency_deltas`, and `counts_pending_since` when it is not 0 |
-| `received probe manifest` | `probes`, `call_edges`, `class_locations`, `skipped_classes`, `failed_classes`, `endpoints`, `disabled_endpoint_modules`, `dependencies`, `referenced_classes`, `class_references`, `external_classes`, `references_recorded`, `dependencies_listed`, and `counts_pending_since` when it is not 0 |
+| `received probe manifest` | `probes`, `call_edges`, `class_locations`, `skipped_classes`, `failed_classes`, `endpoints`, `disabled_endpoint_modules`, `dependencies`, `referenced_classes`, `class_references`, `external_classes`, `references_recorded`, `dependencies_listed`, `framework_markers`, and `counts_pending_since` when it is not 0 |
 | `received static baseline` | `scanned_at`, `chunk`, `chunk_count`, `declared_classes`, `declared_call_edges`, `declared_referenced_classes`, `unreadable_classes`, `unprobed_classes` |
 | `received class listing` | `listed_at`, `chunk`, `chunk_count`, `class_names` |
 

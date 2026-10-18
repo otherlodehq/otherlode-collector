@@ -53,6 +53,29 @@ func TestLogSink_LogsTheTestRunFlagAndAgentVersion(t *testing.T) {
 	}
 }
 
+// The number of framework markers a manifest carries goes on its log line
+// (agent ADR 0072).
+func TestLogSink_LogsTheFrameworkMarkerCount(t *testing.T) {
+	var buf bytes.Buffer
+	sink := ingest.NewLogSink(slog.New(slog.NewJSONHandler(&buf, nil)))
+	manifest := &otherlodepb.ProbeManifest{
+		Resource:         &otherlodepb.ResourceAttributes{ServiceName: "checkout"},
+		FrameworkMarkers: []*otherlodepb.FrameworkMarker{{Id: "grpc-server"}, {Id: "armeria-server"}},
+	}
+
+	if err := sink.AcceptManifest(context.Background(), manifest); err != nil {
+		t.Fatalf("accept manifest: %v", err)
+	}
+
+	var line map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
+		t.Fatalf("decode log line %q: %v", buf.String(), err)
+	}
+	if line["framework_markers"] != float64(2) {
+		t.Errorf("framework_markers = %v, want 2", line["framework_markers"])
+	}
+}
+
 // TestLogSink_LogsTheFailedClassCount covers the failed_classes attribute
 // on a manifest's log line (agent ADR 0065).
 func TestLogSink_LogsTheFailedClassCount(t *testing.T) {

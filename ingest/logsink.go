@@ -70,6 +70,7 @@ func (s *LogSink) AcceptManifest(_ context.Context, manifest *otherlodepb.ProbeM
 		"external_classes", len(manifest.GetExternalClasses()),
 		"references_recorded", manifest.GetReferencesRecorded(),
 		"dependencies_listed", manifest.GetDependenciesListed(),
+		"framework_markers", len(manifest.GetFrameworkMarkers()),
 	}
 	if since := manifest.GetCountsPendingSince(); since != 0 {
 		attrs = append(attrs, "counts_pending_since", since)
