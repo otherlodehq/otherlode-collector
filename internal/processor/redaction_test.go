@@ -631,6 +631,35 @@ func TestRedaction_On_RegexTemplateKindKept(t *testing.T) {
 	}
 }
 
+// The bindings know framework markers (agent ADR 0072), so redaction keeps
+// each marker's id, classes and time and does not mark the payload stripped.
+func TestRedaction_On_FrameworkMarkersKept(t *testing.T) {
+	next := &recordingSink{}
+	r := NewRedaction(next, allLiterals(), nil)
+
+	manifest := manifestWith()
+	manifest.FrameworkMarkers = []*otherlodepb.FrameworkMarker{
+		{Id: "grpc-server", Classes: []string{"io.grpc.internal.ServerImpl$ServerListenerImpl"}, SeenAt: 42},
+	}
+
+	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+		t.Fatalf("accept manifest: %v", err)
+	}
+
+	got := next.manifests[0]
+	if got.GetResource().GetFieldsStripped() {
+		t.Error("fields_stripped set on a manifest whose fields the bindings know")
+	}
+	markers := got.GetFrameworkMarkers()
+	if len(markers) != 1 ||
+		markers[0].GetId() != "grpc-server" ||
+		len(markers[0].GetClasses()) != 1 ||
+		markers[0].GetClasses()[0] != "io.grpc.internal.ServerImpl$ServerListenerImpl" ||
+		markers[0].GetSeenAt() != 42 {
+		t.Errorf("framework markers = %v, want one grpc-server with its class and time", markers)
+	}
+}
+
 // The bindings know the ROUTES_NOT_COUNTED module kind (agent ADR 0017), so
 // redaction keeps it and does not mark the payload stripped.
 func TestRedaction_On_RoutesNotCountedModuleKindKept(t *testing.T) {
