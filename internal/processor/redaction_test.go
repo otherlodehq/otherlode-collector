@@ -631,6 +631,34 @@ func TestRedaction_On_RegexTemplateKindKept(t *testing.T) {
 	}
 }
 
+// The bindings know the servlet pattern template kind (agent ADR 0074), so
+// redaction keeps a servlet pattern endpoint's kind and template and does
+// not mark the payload stripped.
+func TestRedaction_On_ServletPatternTemplateKindKept(t *testing.T) {
+	next := &recordingSink{}
+	r := NewRedaction(next, allLiterals(), nil)
+
+	manifest := manifestWith()
+	manifest.Endpoints = []*otherlodepb.EndpointLocation{
+		{EndpointId: 1, Verb: "GET", RouteTemplate: "*.do", VerbatimTemplate: "*.do", TemplateKind: otherlodepb.EndpointTemplateKind_SERVLET_PATTERN},
+	}
+
+	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+		t.Fatalf("accept manifest: %v", err)
+	}
+
+	got := next.manifests[0]
+	if got.GetResource().GetFieldsStripped() {
+		t.Error("fields_stripped set on a manifest whose fields the bindings know")
+	}
+	endpoints := got.GetEndpoints()
+	if len(endpoints) != 1 ||
+		endpoints[0].GetTemplateKind() != otherlodepb.EndpointTemplateKind_SERVLET_PATTERN ||
+		endpoints[0].GetRouteTemplate() != "*.do" {
+		t.Errorf("endpoints = %v, want one *.do of kind SERVLET_PATTERN", endpoints)
+	}
+}
+
 // The bindings know framework markers (agent ADR 0072), so redaction keeps
 // each marker's id, classes and time and does not mark the payload stripped.
 func TestRedaction_On_FrameworkMarkersKept(t *testing.T) {
