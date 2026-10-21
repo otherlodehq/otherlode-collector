@@ -228,7 +228,8 @@ he asks.
 - Count what you ask him to confirm, and check the count.
 - Run `unslop` over the reply as you write it, and over every comment,
   doc, ADR and piece of copy you touched. Replies, comments, ADRs and
-  commits follow `unslop` alone, while customer-facing copy also loads
+  commits follow `unslop`, plus `technical-writing` for ADRs and commits,
+  and never load `copy-style`. Customer-facing copy also loads
   `copy-style` and follows the guide its table names.
 - Write a code comment only when the repo's `CLAUDE.md` comment rule
   allows it. Delete the rest.

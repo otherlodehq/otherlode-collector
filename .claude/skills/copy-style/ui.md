@@ -4,7 +4,7 @@ This guide covers every string in `otherlode-server/web/src`: labels, buttons, e
 
 ## Who reads it
 
-Someone in the middle of a task. They opened the page to check a number, find a service or fix a setting, and they read a string only if it's in the way. Give them the fact and get out of the way.
+Someone in the middle of a task. They opened the page to check a number, find a service or fix a setting, and they read a string only when they need it. Give them the fact and nothing else.
 
 ## Voice
 
@@ -13,13 +13,13 @@ This is the tersest of the three guides. State the fact in as few words as the r
 ## What a string may do
 
 - State a fact: "Enforce SSO: on".
-- Name a status: "verified", "pending", "failed".
+- Name a status: "Counts behind", "Never called".
 - Give a number: "3 instances".
 - Link to a docs page ("Docs").
 
 ## What a string may not do
 
-- Explain how the product works, such as how a status is judged or what a column means.
+- Explain how the product works, such as how a status is judged or what a column means. A finding page's one-line definition in its header, and a badge's tooltip naming the fact behind it, are the exceptions: one sentence each, a fact, no how. Which existing tooltips explain too much is open under "UI copy that explains the product: to triage" in `otherlode-server/STATUS.md`.
 - Add a caution, banner or second line that teaches. If a person needs the background, link the docs page.
 - Describe the layout or tell the person where to look ("see the table below").
 - Soften or hedge ("Note that", "Please", "It looks like").
@@ -28,24 +28,24 @@ A confirmation may say what the action will do to the person's data or sessions,
 
 ## Labels, buttons, empty states and errors
 
-- **Sentence case** everywhere. "Verified domains", not "Verified Domains". Product terms keep their own case ("WorkOS", "SSO").
+- **Sentence case** everywhere. "Verified domains", not "Verified Domains". Product terms keep their own case ("WorkOS", "SSO"), and a value the server sends, such as a WorkOS state, renders as sent.
 - **A label is a noun.** A button is a verb phrase that says what happens: "Set up SSO", "Verify a domain", "Stop enforcing SSO".
 - **An empty state says what's missing**, in the product's own words. "No domain yet." "No service has reported yet." It doesn't say how to fill it.
-- **An error says what happened and what the person can do.** Name the thing, state the result and give the next step if there is one. "The Admin Portal could not be opened." "Another tenant holds example.com, so it was not added. Contact support to move it." Never "Oops" or "Something went wrong", and never blame the person.
-- **Names come from the server.** The browser renders what the server sent. It never decodes a name or builds a label the server didn't send. If a string needs a new name, the server sends it, and the UI shows it as given.
+- **An error says what happened and what the person can do.** Name the thing, state the result and give the next step if there is one. "The Admin Portal could not be opened." "The domains could not be refreshed from WorkOS.", followed by the server's reason. Never "Oops" or "Something went wrong", and never blame the person.
+- **Names come from the server.** The browser renders the names the server sends, and never decodes a name or builds a label of its own. A string that needs a new name waits for the server to send it.
 - **Use the codebase's terms** from `CONTEXT.md`, and one name per thing.
 
 ## Before and after
 
 An explanation to a fact, with the explanation moved to the docs.
 
-- Before: "No runs in scope. Runs drop out of scope when they fall outside the version or window you picked."
-- After: "No runs in scope." Link "Docs" to the scope page if a person needs the background.
+- Before: "No run in scope. Runs drop out of scope when their environment, version or last report falls outside what you picked."
+- After: "No run in scope." Link "Docs" to the scope page if a person needs the background.
 
 A caution to a status.
 
 - Before: "Heads up: this run hasn't delivered all its counts yet, so its numbers may be incomplete."
-- After: a "Counts behind" badge.
+- After: a "Counts behind since" badge with its time.
 
 A vague error to a specific one.
 
@@ -54,5 +54,5 @@ A vague error to a specific one.
 
 A sentence to a number and a status.
 
-- Before: "This service has three instances and all of them are reporting normally."
-- After: "3 instances", with a "live" badge.
+- Before: "This service has three instances, and two of them sent a complete baseline."
+- After: "3, 2 with a complete baseline".

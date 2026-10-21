@@ -9,13 +9,14 @@
    an open question ("always open or collapsible?") while waiting. If the
    change also alters what the API serves or how something is judged,
    grill it per Design first.
-3. Write the e2e spec in `web/e2e/` first and see it fail.
+3. Write the e2e spec in `web/e2e/` first and see it fail. Put the UI
+   strings in the build brief, written to `copy-style`'s `ui.md`.
 4. Build it through the review loop, chunked per Build when it is bigger
    than one component.
 5. Run every `verify-ui` check and every web check in the server
    `CLAUDE.md`. Look at your own screenshots before sending them.
-6. UI copy follows `copy-style`'s `ui.md`. It states facts. Cut any line
-   that explains the product, since the docs do that.
+6. Check the UI copy against `copy-style`'s `ui.md`. It states facts. Cut
+   any line that explains the product, since the docs do that.
 7. Wrap-up.
 
 **Reply:** the screenshots, what changed, the e2e result.

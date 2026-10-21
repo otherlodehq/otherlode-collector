@@ -9,12 +9,10 @@
    Luke asks for one. For customer-facing copy, show it before you commit. For a rewrite across many pages, show one
    page as a sample first.
 3. Load `copy-style` and follow the guide its table names for the kind of
-   copy (docs, UI or marketing), then the repo's `docs/site/README.md`.
-   Simplified technical English sets the ceiling (clear, one reading), and
-   the copy should still read easily, with contractions and joined
-   sentences where they read more comfortably, per `technical-writing`'s
-   "Vary the rhythm" and `unslop` rule 34. Run `unslop` over everything
-   you wrote, not only part of it.
+   copy. A README follows `technical-writing`. For docs, also follow the
+   page format in the repo's `docs/site/README.md`, or otherlode.dev's
+   `README.md` for `start/` pages. Run `unslop` over everything you wrote,
+   not only part of it.
 4. Leave out instructions a reader at that level already knows.
 5. Keep doc links pointing at public repos. A private repo's path 404s for a
    customer.
