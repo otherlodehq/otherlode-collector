@@ -24,6 +24,10 @@ The layers decide what a document says and how much each sentence carries. A doc
 
 - Mix sentence lengths on purpose. Short sentences land a point. Longer ones that take their time carry a fact with its condition or consequence.
 - One thought per sentence does not mean one length per sentence. Split the sentence that carries two thoughts. Keep the long sentence that carries one.
+- Contractions: use "it's", "don't", "isn't" and "you'll" where they make a sentence read more comfortably. Use the full form where it reads better, carries emphasis ("it is not", "do not" in a warning), or a definition needs the precision. It's a judgement per sentence, not a rule either way. The ASD-STE100 standard bans contractions. That ban doesn't apply here, since the STE rules below are about one reading, not formality.
+- Joining: when consecutive short sentences share a subject, or one is the reason, condition or result of the other, join them with "and", "but", "so", "because", "when" or "which". Three sentences that each start with the same noun usually want to be one or two. Keep the STE limits (about 25 words, one thought) as the ceiling, not the target.
+  - Stiff: "The refresh reads the rows in one transaction. The refresh builds the findings. The refresh stores them as a new snapshot."
+  - Joined: "The refresh reads the rows in one transaction, builds the findings and stores them as a new snapshot."
 - Have a view where the mode allows it. Explanation weighs trade-offs, so say what you make of them instead of listing pros and cons. Reference stays dry.
 - Be specific over sterile. Not "schema changes can cause issues" but "a column rename fails the build".
 
