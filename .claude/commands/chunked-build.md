@@ -69,15 +69,15 @@ working in. When it reports, treat the report as a claim to check, not a result.
 
 The loop runs on its own: brief, launch, review, commit, next brief, next
 launch, through the whole landing order, without asking between chunks.
-At the start of the run ask the user once whether they want breakpoints,
-and if so which: after a named chunk, before anything that changes the
-wire schema or a public API, before the first chunk in a second repo, or
-none. Stop at exactly those points and report; everywhere else keep
-going. Stop regardless when the review loop stops converging (the same
+Run with no breakpoints unless the user names some, such as after a named
+chunk, before anything that changes the wire schema or a public API, or
+before the first chunk in a second repo. Stop at exactly those points and
+report. Everywhere else keep going. Stop regardless when the review loop stops converging (the same
 finding returns after it was fixed, or a correctness or security finding
 cannot be settled from the code or the library source), when a review
 finding contradicts the settled design, or when the next brief would
-need a decision the design did not make.
+need a decision the design did not make and power-mode's Principles leave
+to the user.
 
 ## 3. Review the implementation, not the report
 

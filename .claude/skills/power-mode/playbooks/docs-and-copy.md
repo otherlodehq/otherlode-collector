@@ -6,8 +6,10 @@
    code is wrong rather than the page, route it to Bug fix. If the right
    behaviour is a design change, grill it per Design.
 2. Write the change yourself, since prose skips the review loop unless
-   Luke asks for one. For customer-facing copy, show it before you commit. For a rewrite across many pages, show one
-   page as a sample first.
+   Luke asks for one. Show marketing copy and READMEs before you commit,
+   and for a rewrite across many pages, show one page as a sample first.
+   A docs page that describes what the code does lands with the code, and
+   the reply lists it so Luke can object.
 3. Load `copy-style` and follow the guide its table names for the kind of
    copy. A README follows `technical-writing`. For docs, also follow the
    page format in the repo's `docs/site/README.md`, or otherlode.dev's

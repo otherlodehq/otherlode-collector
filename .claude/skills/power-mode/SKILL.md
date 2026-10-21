@@ -35,13 +35,29 @@ repo carries all of them), then `~/.claude/`.
 
 Each one comes from something Luke asked for or corrected more than once.
 
-- **Grill every design change.** A design change adds or changes a public
-  API, a wire field, a table, a behaviour a customer sees, or what an ADR
-  decided. Once any playbook finds that one is necessary, stop and grill it
-  with `/grill-with-docs` per the Design playbook, and write it down before
-  code. Under `/nightwork`, park it for the report instead, since Luke is
-  not there to answer. If you catch yourself editing source on an unsettled
-  design, stop and grill.
+- **Grill what is hard to undo.** A design call is hard to undo when it
+  publishes a wire field or a public API, migrates stored data, ships in a
+  release, sets a price or a plan, or changes what a claim means to a
+  customer. Once any playbook finds one, stop and grill it with
+  `/grill-with-docs` per the Design playbook, and write it down before code.
+  Under `/nightwork`, park it for the report instead, since Luke is not
+  there to answer. Any other design call is yours when it stays inside the
+  brief's scope, agrees with its decisions and has a reason the brief or
+  the codebase supports. Decide it, record it in the ADR with the option
+  you rejected, and report it. If you catch yourself editing source on a
+  call that's Luke's and still open, stop and grill.
+- **Settle it by running it.** Before you put a question to Luke, classify
+  it. If running something can answer it (behaviour, timing, cost, output,
+  whether a query fits its budget), run it: a measurement, a throwaway
+  script, or a prototype per the Prototype playbook. Let the result decide.
+  A question goes to Luke only when it is hard to undo, or it is a product
+  or preference call no experiment can settle.
+- **No is an acceptable answer.** Asked whether to do something, invited
+  to add scope or shown an approach, give your real judgement. Push back or
+  decline when that's true. Agreement isn't the default.
+- **Bend a rule that backfires.** These rules come from past corrections
+  and can't foresee every case. When following one makes the result worse,
+  do the better thing, and say in the reply which rule you bent and why.
 - **Correct over cheap.** Recommend the correct, robust option. Never pick
   the smaller option because it is less work, and say so if effort is the
   only thing for it. Fix the gap rather than document it. Fail closed. Build
@@ -78,11 +94,14 @@ option on a reversible call and report it.
 
 - Any repo another agent is working in. Ask before touching it, then work on
   a branch and merge once its default branch has been quiet for a while.
-- Customer-facing copy (site, docs, README). Show the copy and wait for an
-  OK. For a large rewrite, show a sample first.
+- Marketing copy, UI strings and READMEs. Show the copy and wait for an
+  OK. For a large rewrite, show a sample first. A docs change that
+  describes what the code does lands with the code, and the reply lists it
+  so Luke can object.
 - Deleting a branch, a release or anything public.
-- A design or product-semantics call the brief did not make. Put it in a
-  grill round.
+- A call that is hard to undo, or a product or preference call no
+  experiment can settle. Put it in a grill round. Every other call is
+  yours, per the Principles.
 
 **Luke does these himself.** Releases and tags. `terraform apply`, prod
 database resets and cloud consoles (GCP, Cloudflare, WorkOS, Google).
@@ -254,6 +273,10 @@ Match the task and open its file.
   `/chunked-build` and `/nightwork`.
 - **Bug fix** (`bug-fix.md`). A defect or a red CI job to root-cause and
   fix.
+- **Perf** (`perf.md`). Something slow or costly to measure, explain and
+  improve against a baseline.
+- **Prototype** (`prototype.md`). A throwaway that settles a question by
+  running it, so it never goes to Luke as an opinion.
 - **Review** (`review.md`). A full or focused review for bugs and QoL.
   Covers `/deep-review`.
 - **UI** (`ui.md`). Anything that changes what the web UI shows.

@@ -16,10 +16,11 @@
    project has released (then a branch, and ask how to land it) or another
    agent is working in that repo. There, use a branch and merge
    once its default branch has been quiet.
-6. Keep going chunk to chunk without asking. Ask once at the start about
-   breakpoints. Luke's usual answer is none. Stop when a chunk needs a
-   design change the brief did not make, grill it per Design, then rewrite the
-   remaining briefs.
+6. Keep going chunk to chunk without asking, with no breakpoints unless
+   Luke names some. When a chunk needs a decision the brief did not make,
+   decide it if the Principles make it yours, record it and report it. Stop
+   and grill only a call that's hard to undo or a product call, then
+   rewrite the remaining briefs.
 7. When Luke is away or says `/nightwork`, follow the nightwork skill
    instead. It already holds the run log, forks, parking and report.
 8. Wrap-up.

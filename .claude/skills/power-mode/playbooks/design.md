@@ -5,8 +5,12 @@
 1. Pull every repo. Read `CONTEXT.md`, the ADRs and STATUS for the area.
    Launch background subagents for any fact the questions depend on.
 2. Run the grilling skill (with domain-modeling for `/grill-with-docs`).
-   Ask the whole frontier each round, numbered, with a recommended answer
-   and its reason. Ask the questions that need no pending fact first.
+   Put to Luke only the questions the Principles leave to him: hard to
+   undo, or a product or preference call no experiment can settle. Settle
+   the rest by running something or from the codebase, and list them in
+   each round as a short table of decisions taken, which he can change.
+   Number his questions, each with a recommended answer and its reason,
+   and ask the ones that need no pending fact first.
 3. Recommend the correct option, not the cheaper one. If a recommendation
    leans on effort, a release deadline or compatibility before release,
    say so. Luke usually overrules those.

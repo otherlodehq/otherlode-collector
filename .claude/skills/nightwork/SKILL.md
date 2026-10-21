@@ -66,9 +66,8 @@ This is the only question the run asks. Wait for the answer, since the user
 is still at the keyboard when they start the run.
 
 Then print, in a few lines: the landing order, the repos it touches, the
-commit choice, and the guardrails in step 5. Start at once. Do not ask the
-breakpoint question in `/chunked-build` step 2. A nightwork run has no
-breakpoints.
+commit choice, and the guardrails in step 5. Start at once. A nightwork run has
+no breakpoints.
 
 Remind the user in the same message that a permission prompt stalls the run
 until they answer it, so the session needs auto mode or an allowlist that
