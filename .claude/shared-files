@@ -11,6 +11,7 @@
 .claude/skills/grill-with-docs
 .claude/skills/technical-writing
 .claude/skills/unslop
+.claude/skills/copy-style
 .claude/commands/chunked-build.md
 .claude/commands/deep-review.md
 .githooks/commit-msg

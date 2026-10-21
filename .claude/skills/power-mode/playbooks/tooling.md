@@ -14,7 +14,8 @@ them.**
    Do not keep it only in memory.
 4. A hook that misfires on ordinary commands gets fixed or removed, not
    worked around.
-5. Make the edits through the review loop. Run `unslop` over agent-facing
+5. A hook or script goes through the review loop. Skill and command prose
+   doesn't, unless Luke asks for a review. Run `unslop` over agent-facing
    prose.
 6. Commit and push to every repo that carries the copy. Wrap-up.
 
