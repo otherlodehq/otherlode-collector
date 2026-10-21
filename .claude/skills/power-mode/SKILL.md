@@ -121,7 +121,9 @@ definition: `/chunked-build`, `/deep-review` and nightwork point here.
 migrations, build and CI config, hooks and scripts, so anything that
 changes what runs or what a test pins. Prose skips the loop unless Luke
 asks for a review. That covers docs, customer copy, skills, commands,
-ADRs, `CONTEXT.md`, `STATUS.md`, `CLAUDE.md` and READMEs. This session
+ADRs, `CONTEXT.md`, `STATUS.md`, `CLAUDE.md` and READMEs. When a change
+has code and prose together, such as a feature and its docs page or its
+UI strings, the prose goes to the code's reviewer in the same diff. This session
 writes prose itself, checks every claim in it against the code and runs
 `unslop` over it. Customer copy still goes to Luke before it's committed.
 A code edit with no behaviour in it, such as a typo in a string or a
