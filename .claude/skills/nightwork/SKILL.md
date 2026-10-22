@@ -79,6 +79,10 @@ Follow `/chunked-build` steps 1 to 7 for every chunk, but commit where the
 user chose in step 2, not where that command's step 6 says. Each chunk goes
 through the review loop in `.claude/skills/power-mode/SKILL.md`.
 
+After a container restart, check each repo's tree and worktrees, restart
+the services the run uses, and relaunch every lost subagent from its brief
+and progress file. Record the restart in the run log.
+
 Keep a run log in the job's temp directory as you go, one entry per chunk:
 the commit, every fork and what was chosen, every review finding dismissed
 and why, every follow-up still open, and every item for the user. The
@@ -96,6 +100,11 @@ when every one of these is true:
 
 Record the decision where the project records decisions (the ADR, the status
 log), and in the run log with the reason and the option you rejected.
+
+A fork that changes what a claim says or when it is shown goes into the next
+brief as a test that would show the false claim, to be written before the
+code. Nobody reviews the fork until the chunk's review, so that test is what
+checks it.
 
 Otherwise park it. Parking means:
 

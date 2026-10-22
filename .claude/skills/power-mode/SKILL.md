@@ -156,7 +156,9 @@ rename inside one file, skips the loop too. Its todo item reads
    managing agent, usually Opus. It hands the change's diff
    (`git diff HEAD -- <paths>` plus its untracked files) to a fresh
    reviewer subagent (`model: opus`), which reports findings and edits
-   nothing.
+   nothing. A reviewer that runs a mutated copy makes it with
+   `git worktree add` or `git archive`. A `cp -r` of a checkout shares
+   its `.git`, so a `git stash` in the copy writes to the real repo.
    The brief asks for evidence with every finding (see step 3). This
    session also reads the implementation in full.
 
@@ -200,6 +202,9 @@ rename inside one file, skips the loop too. Its todo item reads
      questions: is each finding fixed, and did a fix break the code it
      touched. It does not review the rest of the change again. Judge its
      answers as step 3 says.
+   - A fix to a rule that decides what a claim says or when it is shown:
+     a fresh reviewer verifies the batch, however small. Each round on such
+     a change can find another way for a claim to go false.
    - A fix that redesigns the change (new behaviour, a different
      approach, or a fix diff about as large as the change): a fresh full
      review, from step 2.
@@ -221,6 +226,9 @@ rename inside one file, skips the loop too. Its todo item reads
 ## Environment
 
 - Pull every repo before you start. Luke and his other agents push often.
+- To wait for a process, wait on its PID (`tail --pid=<pid> -f /dev/null`).
+  `pgrep -f <pattern>` also matches the shell that runs it, so a loop on it
+  waits for itself.
 - Each repo's `.githooks/commit-msg` rejects a session id or link. If
   `git config core.hooksPath` is not `.githooks` in a repo, set it.
 - In a cloud session, Maven Central answers Gradle with 429. Point Gradle

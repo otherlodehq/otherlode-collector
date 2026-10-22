@@ -43,8 +43,8 @@ written against an open question produces a chunk that has to be redone.
 A brief is a file in the job's temp directory, one per chunk, and the same
 text goes to the subagent verbatim. It states:
 
-- **Where and how.** Repo path, branch, "work in place", "do not commit",
-  and which sections of the design notes and which ADRs to read first.
+- **Where and how.** Repo path, the worktree to work in (step 2), "do
+  not commit", and which sections of the design notes and which ADRs to read first.
   Point at the previous chunk's commit when the current shape of a file
   matters.
 - **Behaviour to add.** What the code must do, in terms of the project's
@@ -55,17 +55,41 @@ text goes to the subagent verbatim. It states:
   facts it may get wrong.
 - **Tests to write, failing first.** Named by behaviour, including the
   negative cases that pin what must stay excluded, and the instruction to
-  run the whole build at the end and report the result honestly.
+  run the whole build at the end and report the result honestly. When the
+  chunk replaces a broad trigger ("on any write", "on every batch") with a
+  list of events, ask for an oracle test that does not trust the list. It
+  steps through every kind of input, including time passing with no
+  input, recomputes the result the trigger guards, and fails when that
+  result changed and the trigger did not fire. Name, from the code, the
+  results that read across scopes and the ones that change with time
+  alone. A fixture without them hides exactly the events the list
+  misses.
 - **Do not.** Scope that belongs to a later chunk, files it must not touch
   (glossary, ADRs, design notes), and the project's comment and formatting
   rules.
 - **Report back.** Files changed with a reason each, exact test names, the
   build result, and any deviation from the brief with the reason.
+- **Progress on disk.** After each step, the implementer appends what it
+  did, what it measured and what is left to a progress file beside the
+  brief. A container restart ends every subagent and keeps only what is on
+  disk.
 
 ## 2. Launch and wait
 
 Launch the implementer with the brief. Do not touch the files it is
 working in. When it reports, treat the report as a claim to check, not a result.
+
+The implementer works in a git worktree of the branch the chunk lands on
+(`git worktree add <temp dir>/<chunk> <branch>`), never in the repo's own
+checkout. The checkout then holds no half-built chunk for a stop hook, a
+pull or another agent to trip over. The review, the fixes and the commit
+happen in the worktree. Push with `git push origin HEAD:<branch>` once a
+fetch shows the branch has not moved, rebasing first when it has, then
+remove the worktree.
+
+After a container restart, read the worktree and the progress file, then
+relaunch the implementer with both and the instruction to check one
+against the other before it goes on.
 
 The loop runs on its own: brief, launch, review, commit, next brief, next
 launch, through the whole landing order, without asking between chunks.

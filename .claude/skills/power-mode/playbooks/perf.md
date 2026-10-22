@@ -23,6 +23,10 @@
    7. Do it cheaper.
 4. Change one thing at a time and measure after each. Keep only what moved
    the number. A change that "might help" and measured nothing is reverted.
+   Measure the baseline and the candidate back to back, on one host, with
+   nothing else running, twice each. A number from another host or another
+   load is not a baseline: a container restart can land on a different
+   CPU.
 5. A fix that changes a result, or what the product claims, is not a perf
    fix. Grill it per Design when it's hard to undo. Code goes through the
    review loop with the tests that prove results are unchanged.
