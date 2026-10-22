@@ -1,5 +1,5 @@
 ---
-description: Build a settled design as sequential chunks, autonomously through the landing order. Each chunk goes through power-mode's review loop from a written brief; then the main session runs the build, commits one chunk per commit, and continues to the next unless the user asked for a breakpoint. Manual invocation only.
+description: Build a settled design as chunks in landing order, autonomously through the landing order. Each chunk goes through power-mode's review loop from a written brief; then the main session runs the build, commits one chunk per commit, and continues to the next unless the user asked for a breakpoint. Manual invocation only.
 argument-hint: [which chunk to build next, or the design section that lists the landing order]
 disable-model-invocation: true
 ---
@@ -26,9 +26,20 @@ landing order says what comes next.
 - Research and fact-finding (reading library sources, compiling scratch
   fixtures, reading `javap` output) go to their own subagents, never to
   the implementer.
-- Chunks run one after another, never in parallel. They share the build
-  directory and usually a few central files, and the next brief depends on
-  what the last review found.
+- Chunks run in landing order, one after another, unless two are
+  unrelated. The next brief often depends on what the last review found.
+  Two chunks may run at once when all of these hold:
+  - neither needs the other's code, result or review;
+  - they change different files, and claim no shared number such as a
+    migration's;
+  - neither one's tests or measurements would be skewed by the other's. A
+    shared test database is fine. A timing run is not, unless it measures
+    its baseline and candidate back to back in the same window.
+
+  Each runs in its own worktree (step 2) with its own brief and review
+  loop. The second to land rebases onto the first and runs the whole build
+  again before its commit. When you can't tell whether two chunks touch,
+  run them in order.
 
 ## 0. Preconditions
 
