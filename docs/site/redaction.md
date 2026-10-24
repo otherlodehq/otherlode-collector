@@ -101,7 +101,9 @@ To fix it, run the latest collector. With both settings off, the collector drops
 
 The agent names each branch outcome with a `branch_key` and each branch site with a `site_key`. Each key is a digest of the site's bytecode, and that bytecode includes the site's string literals. See [branch and site keys](/docs/agent/data-sent#branch-and-site-keys) in the agent's docs. Every other input to a key is in the payload. So anyone who holds a blanked payload and a plain key can hash a guess at the blanked literal and compare the result with the key. A short literal, such as a flag name or a host name, falls to a few guesses.
 
-So while blanking is on, the collector replaces every `branch_key` and `site_key` in manifests and static baselines with HMAC-SHA256 of the key under a secret. It keeps the first 16 bytes, written as 32 lowercase hex characters, the same shape the agent sends. Equal keys stay equal, so Otherlode still joins one branch across builds and instances. Without the secret, nobody can test a guess against a key. An empty key stays empty.
+So while blanking is on, the collector replaces every `branch_key` and `site_key` in manifests and static baselines with HMAC-SHA256 of the key under a secret. It keeps the first 16 bytes, written as 32 lowercase hex characters, the same shape the agent sends. Equal keys stay equal, so Otherlode still joins one branch across builds and instances. Without the secret, a reader of your data in Otherlode who holds no agent token cannot test a guess against a key. An empty key stays empty.
+
+The collector re-keys any key a payload carries. So anyone who holds an agent token, whichever service it was given to, can send keys built from guessed literals. The collector re-keys them, and Otherlode stores the results beside the real keys. Someone who can also read your data in Otherlode can then compare them. Give agent tokens only to the services that run the agent.
 
 ### Set the secret
 

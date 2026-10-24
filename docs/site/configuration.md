@@ -151,7 +151,7 @@ For `OTHERLODE_COLLECTOR_REDACT_BLOCKED_VALUES`, the collector skips lines that 
 
 You can set both blanking variables. Either one is enough to blank a literal. With neither set, redaction is off.
 
-While redaction is on, the collector needs a secret. It replaces each branch key and site key with an HMAC of the key under that secret, so that a key no longer lets anyone test a guess at a blanked literal. Startup fails in each of these cases:
+While redaction is on, the collector needs a secret. It replaces each branch key and site key with an HMAC of the key under that secret, so that a reader of the keys who holds no agent token cannot test a guess at a blanked literal. See [replace branch and site keys](redaction#replace-branch-and-site-keys). Startup fails in each of these cases:
 
 - Redaction is on and neither secret variable is set.
 - Both secret variables are set.

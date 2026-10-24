@@ -65,6 +65,7 @@ The collector has a fixed number of queues, 8 by default, and each queue has one
 - A restarted instance gets a new run ID but keeps its queue. Its order holds across the restart.
 - A worker sends one payload at a time. The collector has at most one request in flight per queue.
 - Instances that share a queue wait on each other. If the backend stalls on one instance's payload, only the other instances on that queue wait. Instances on other queues are not held up.
+- The queue follows the service name and instance ID the agent sends, so an agent with a valid token picks its own queue. A payload that the backend keeps answering with a retried status, or not at all, holds its queue's worker until its retry budget runs out.
 
 ### Retried statuses
 
