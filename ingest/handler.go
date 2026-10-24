@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	otherlodepb "buf.build/gen/go/otherlode/otherlode/protocolbuffers/go/otherlode/v1"
 
@@ -66,13 +67,18 @@ const (
 type payloadKind struct {
 	label string
 	name  string
+
+	// message describes the payload's message, and limit is the most
+	// elements it may hold.
+	message protoreflect.MessageDescriptor
+	limit   int
 }
 
 var (
-	deltaBatchKind     = payloadKind{label: "deltas", name: "delta batch"}
-	manifestKind       = payloadKind{label: "manifest", name: "manifest"}
-	staticBaselineKind = payloadKind{label: "static_baseline", name: "static baseline"}
-	classListingKind   = payloadKind{label: "class_listing", name: "class listing"}
+	deltaBatchKind     = payloadKind{label: "deltas", name: "delta batch", message: (&otherlodepb.DeltaBatch{}).ProtoReflect().Descriptor(), limit: MaxDeltaBatchElements}
+	manifestKind       = payloadKind{label: "manifest", name: "manifest", message: (&otherlodepb.ProbeManifest{}).ProtoReflect().Descriptor(), limit: MaxManifestElements}
+	staticBaselineKind = payloadKind{label: "static_baseline", name: "static baseline", message: (&otherlodepb.StaticBaseline{}).ProtoReflect().Descriptor(), limit: MaxStaticBaselineElements}
+	classListingKind   = payloadKind{label: "class_listing", name: "class listing", message: (&otherlodepb.ClassListing{}).ProtoReflect().Descriptor(), limit: MaxClassListingElements}
 )
 
 // PayloadLabel returns the metrics label for the payload type served at
@@ -129,12 +135,12 @@ type HandlerOption func(*Handler)
 // and passes to the sink at one time. A value of zero or less means no
 // cap, which is the default.
 //
-// Decoding a protobuf can take far more memory than the body: a 16 MiB
-// body of empty messages decodes to gigabytes. The decoded message also
-// stays alive until the sink returns. The cap bounds decode memory at
-// about n times the largest decode. A request reads its body before it
-// takes a slot, so bodies waiting for a slot are held as read, up to
-// 16 MiB each.
+// Decoding a protobuf can take far more memory than the body. The handler
+// refuses a body over its element limit before it decodes it. The decoded
+// message stays alive until the sink returns, so the cap bounds decode
+// memory at about n times the largest decode. A request reads its body
+// before it takes a slot, so bodies waiting for a slot are held as read,
+// up to 16 MiB each.
 //
 // A slow client holds no slot while it sends, and the cap counts only the
 // work that needs the memory. A request that finds no free slot waits for
@@ -191,13 +197,16 @@ func (h *Handler) handleClassListing(w http.ResponseWriter, r *http.Request) {
 	handle(h, w, r, classListingKind, validateClassListing, h.sink.AcceptClassListing)
 }
 
-// handle serves one ingest request. It reads the body, takes a decode
-// slot, decodes the body into a new T, validates it, passes it to
-// accept, and answers 202. It holds the slot until accept returns. T is
+// handle serves one ingest request. It reads the body, counts its
+// elements, takes a decode slot, decodes the body into a new T, validates
+// it, passes it to accept, and answers 202. It holds the slot until accept returns. T is
 // the pointer type of the payload message.
 func handle[T proto.Message](h *Handler, w http.ResponseWriter, r *http.Request, kind payloadKind, validate func(T) error, accept func(context.Context, T) error) {
 	body, ok := h.readRequest(w, r, kind)
 	if !ok {
+		return
+	}
+	if !h.withinLimit(w, body, kind) {
 		return
 	}
 	if !h.acquire(r.Context(), w, kind) {
@@ -389,6 +398,22 @@ func (h *Handler) readRequest(w http.ResponseWriter, r *http.Request, kind paylo
 		return nil, false
 	}
 	return body, true
+}
+
+// withinLimit counts the elements of body from the wire format, before
+// anything decodes it. It reports false after answering 413 "payload has
+// too many elements" and counting reason "too_many_elements", for a body
+// over the limit of its kind. A body that is not valid protobuf passes
+// unless the count passed the limit first, and unmarshal refuses it. The
+// log line never quotes the body.
+func (h *Handler) withinLimit(w http.ResponseWriter, body []byte, kind payloadKind) bool {
+	if _, err := countElements(body, kind.message, kind.limit); !errors.Is(err, errTooManyElements) {
+		return true
+	}
+	h.logger.Warn("refusing "+kind.name+" with too many elements", "limit", kind.limit, "bytes", len(body))
+	metrics.IngestRejected.Inc(kind.label, tooManyElementsReason)
+	http.Error(w, errTooManyElements.Error(), http.StatusRequestEntityTooLarge)
+	return false
 }
 
 // acquire waits for a free decode slot. Without a cap it returns true at

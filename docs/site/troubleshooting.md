@@ -146,7 +146,7 @@ This section covers what the collector answers. For what the agent logs and does
 
 The collector checks a request in this order. A path outside `/v1/otherlode/` gets a 404 or 405 at once. Inside it, the rate limit comes first, then the token, then the path, method, content type, size and body. So a request with a wrong token to a wrong path gets a 401, not a 404.
 
-The collector writes no log line for a 401, 404, 405, 413, 415 or 429. It does log a `WARN` or `ERROR` line for a 400 or a 503, as described below. The counter `otherlode_collector_ingest_rejected_total`, labelled by `payload` and `reason`, counts the rejections that reach the ingest handler. The 401 and the 429 have their own counters, `otherlode_collector_auth_rejected_total` and `otherlode_collector_rate_limited_total`.
+The collector writes no log line for a 401, 404, 405, 415 or 429, or for a 413 about body size. It does log a `WARN` or `ERROR` line for a 400, a 503 and a 413 about element count, as described below. The counter `otherlode_collector_ingest_rejected_total`, labelled by `payload` and `reason`, counts the rejections that reach the ingest handler. The 401 and the 429 have their own counters, `otherlode_collector_auth_rejected_total` and `otherlode_collector_rate_limited_total`.
 
 ### 401
 
@@ -177,7 +177,13 @@ The body is `Method Not Allowed`, with an `Allow: POST` header on the ingest pat
 
 ### 413
 
-The body is `request body too large`. The request body is over 16 MiB. The limit is fixed and no setting changes it. If the body text differs, the 413 comes from a proxy or gateway in front of the collector. Raise its request-size limit to at least 16 MiB. [Rate and memory limits](limits) explains the 16 MiB cap, and the agent's [data sent](/docs/agent/data-sent#chunk-caps) lists the caps that keep its payloads under it.
+The body is `request body too large` or `payload has too many elements`.
+
+`request body too large` means the request body is over 16 MiB. The limit is fixed and no setting changes it. [Rate and memory limits](limits) explains the 16 MiB cap, and the agent's [data sent](/docs/agent/data-sent#chunk-caps) lists the caps that keep its payloads under it.
+
+`payload has too many elements` means the payload holds more elements than the limit for its kind. The collector logs a `WARN` line such as `refusing manifest with too many elements`, with the `limit` and the body size in `bytes`. The counter `otherlode_collector_ingest_rejected_total{reason="too_many_elements"}` counts each one. The limits are fixed. [Rate and memory limits](limits#element-limit) lists them.
+
+If the body text is neither, the 413 comes from a proxy or gateway in front of the collector. Raise its request-size limit to at least 16 MiB.
 
 ### 415
 

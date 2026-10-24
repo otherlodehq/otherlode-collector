@@ -1,6 +1,6 @@
 ---
 title: Rate and memory limits
-description: The per-address rate limit, the client IP header, the IPv6 prefix, the 16 MiB body limit, the decode cap, and how to bound the collector's worst-case memory.
+description: The per-address rate limit, the client IP header, the IPv6 prefix, the 16 MiB body limit, the element limit, the decode cap, and how to bound the collector's worst-case memory.
 order: 70
 ---
 
@@ -71,7 +71,7 @@ Every 10 minutes the collector also drops addresses that sent nothing for 10 min
 
 ## Request size and content
 
-The collector reads the whole body before it decodes anything. These checks run first.
+The collector reads the whole body and counts its elements before it decodes anything. These checks run first.
 
 | Condition | Status | Metric reason |
 |---|---|---|
@@ -79,8 +79,26 @@ The collector reads the whole body before it decodes anything. These checks run 
 | `Content-Encoding` names anything but `identity`. The collector does not decompress. | 415 | `content_type` |
 | Body is larger than 16 MiB. | 413 | `too_large` |
 | The body cannot be read to the end. | 400 | `read` |
+| The body holds more elements than the limit for its payload. | 413 | `too_many_elements` |
 
 The 16 MiB limit is fixed. It protects the collector's memory from a bad or hostile sender. The agent does not retry a 413 within a send. See [after a failed send](/docs/agent/data-sent#after-a-failed-send) for what it does next.
+
+### Element limit
+
+An element is an embedded message or one entry of a repeated field. The collector counts them at every depth. A call edge inside a branch site inside a probe location counts three times. The resource counts as one. A repeated number counts once for each value. A field the collector does not know is not counted.
+
+| Payload | Most elements |
+|---|---|
+| Delta batch | 500,000 |
+| Manifest | 100,000 |
+| Static baseline chunk | 200,000 |
+| Class listing chunk | 100,000 |
+
+A payload over its limit gets status 413 and the body `payload has too many elements`. The limits are fixed and no setting changes them. The collector logs a `WARN` line and counts the request under reason `too_many_elements`. The line never quotes the body.
+
+The count reads the wire format and allocates nothing for the elements. It runs before the request asks for a decode slot. A body that is not valid protobuf gets a 400 from the decode, unless the count passes the limit first.
+
+At these limits, Otherlode's server measured at most about 230 MiB for one payload, with the decode and its own write included. The agent's chunks stay far below these limits. A single class with more elements than a limit cannot be sent.
 
 The metric is `otherlode_collector_ingest_rejected_total` with the labels `payload` and `reason`.
 
@@ -99,11 +117,11 @@ A 16 MiB body has to arrive within the 10-second read timeout. A client on a slo
 
 ## Decode cap
 
-Decoding a payload can take far more memory than the body. A 16 MiB body of empty messages decodes to gigabytes. The decoded message also stays in memory until the collector hands it on.
+Decoding a payload can take far more memory than the body. The [element limit](#element-limit) bounds one decode. Otherlode's server measured about 230 MiB at the limits. The decoded message also stays in memory until the collector hands it on.
 
 `OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES` caps how many requests the collector decodes at one time. It defaults to the number of CPUs the Go runtime uses, because decoding is CPU-bound and more parallel decodes add memory but no speed. The value must be an integer above 0. Anything else stops the collector at startup. You cannot turn the cap off.
 
-A request reads its body before it asks for a slot. A slow client therefore holds no slot while it uploads. A request that finds no free slot waits up to 5 seconds, then gets a 503 with `Retry-After: 1`. The collector counts it under reason `busy`. It also logs a warning, at most one a minute:
+A request reads its body and counts its elements before it asks for a slot. A slow client therefore holds no slot while it uploads. A request that finds no free slot waits up to 5 seconds, then gets a 503 with `Retry-After: 1`. The collector counts it under reason `busy`. It also logs a warning, at most one a minute:
 
 ```text
 {"time":"...","level":"WARN","msg":"refusing delta batch: no decode slot came free","wait":"5s","max_concurrent_decodes":4,"unlogged_busy_refusals":17}
@@ -117,7 +135,7 @@ The cap does not limit how many requests wait. Each waiting request holds its bo
 
 Three parts add up.
 
-- **Decoding.** The decode cap times the memory of the largest decode.
+- **Decoding.** The decode cap times the memory of the largest decode. Otherlode's server measured about 230 MiB for the largest payload at the element limits.
 - **Waiting bodies.** The number of requests waiting for a slot, times 16 MiB each.
 - **Forwarding queues.** The number of shards times the larger of the queue byte limit and the largest payload.
 

@@ -77,13 +77,14 @@ The `reason` label on `ingest_rejected_total` takes these values:
 | `content_type` | `415` | The `Content-Type` is not `application/x-protobuf`, or a `Content-Encoding` other than `identity` is set |
 | `too_large` | `413` | The body is over 16 MiB |
 | `read` | `400` | The body could not be read |
+| `too_many_elements` | `413` | The payload holds more elements than the limit for its kind |
 | `malformed` | `400` | The body is not valid protobuf |
 | `invalid` | `400` | The body decoded but failed validation |
 | `sink` | `503` | The collector could not take the payload. With forwarding on, this is a full queue or a shutdown in progress. The response carries `Retry-After: 5` |
 | `busy` | `503` | No decode slot came free within 5 seconds. The response carries `Retry-After: 1` |
 | `canceled` | none | The client disconnected while it waited for a decode slot |
 
-A `401` or `429` never reaches the ingest counters. They count in `auth_rejected_total` and `rate_limited_total` only. For the limits behind `too_large`, `busy` and `rate_limited_total`, see [rate and memory limits](limits).
+A `401` or `429` never reaches the ingest counters. They count in `auth_rejected_total` and `rate_limited_total` only. For the limits behind `too_large`, `too_many_elements`, `busy` and `rate_limited_total`, see [rate and memory limits](limits).
 
 ### Forwarding counters
 
@@ -176,6 +177,7 @@ Without `OTHERLODE_COLLECTOR_FORWARD_URL`, the collector logs every payload it r
 | `WARN` | `token file re-read failed; keeping the last good value` | A token file re-read failed, with `file` and `error` |
 | `WARN` | `dropping payload: ` followed by a reason | The forwarder dropped a payload. The line names the namespace, service, instance and path, and adds `backend_error` when the backend's response names an error code |
 | `WARN` | `dropped fields this collector does not know; ...` | Redaction dropped unknown fields. It logs once per run |
+| `WARN` | `refusing delta batch with too many elements`, or the same with `manifest`, `static baseline` or `class listing` | A payload held more elements than the limit for its kind and got `413`. The line has the `limit` and the body size in `bytes` |
 | `WARN` | `refusing delta batch: no decode slot came free`, or the same with `manifest`, `static baseline` or `class listing` | A request waited 5 seconds for a decode slot and got `503`. At most one line a minute. `unlogged_busy_refusals` counts the refusals since the previous line that got no line of their own |
 | `WARN` | `agent environment does not match the collector's configured environment` | The first payload of a service that names a given environment other than the collector's. Later payloads of that service with that environment log at `DEBUG` |
 | `WARN` | `agent namespace does not match the collector's configured namespace` | The same, for the service namespace |

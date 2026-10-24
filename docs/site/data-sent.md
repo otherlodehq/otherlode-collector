@@ -44,6 +44,7 @@ The collector checks each request in this order. A request that fails a check ge
 | The `Content-Type` is not `application/x-protobuf`, with or without parameters, or a `Content-Encoding` other than `identity` is present | `415` |
 | The body is larger than 16 MiB | `413` |
 | The body cannot be read | `400` |
+| The body holds more elements than the limit for its payload. See [rate and memory limits](limits#element-limit) | `413` |
 | No decode slot comes free within 5 seconds. See [rate and memory limits](limits) | `503` |
 | The body is not valid protobuf | `400` |
 | The resource is missing | `400` |
@@ -54,7 +55,7 @@ The collector checks each request in this order. A request that fails a check ge
 | A class listing chunk has no `listed_at`, a `chunk_count` below 1, or a `chunk_index` that is negative or not below `chunk_count` | `400` |
 | The forwarder cannot take the payload because its queue is full or the collector is shutting down. See [forwarding](forwarding) | `503` |
 
-The checks look only at identity fields and chunk numbers. They do not read the code names, counts or conditions in a payload.
+The checks read only identity fields and chunk numbers, and count elements. They do not read the code names, counts or conditions in a payload.
 
 ## What the collector changes
 
@@ -138,6 +139,7 @@ The collector writes JSON lines to standard output. At the default `info` level,
 | `dropping payload: ...` | `namespace`, `service`, `instance`, `path`, `error`, and `backend_error` when the backend named an error code | The forwarder gave up on a payload. See [forwarding](forwarding) for the reasons. The error is the backend's status or the HTTP client's error, which can include the forward URL. `backend_error` is the `error` field of the backend's JSON response, cut to 64 bytes |
 | `agent environment does not match the collector's configured environment` | `namespace`, `service`, `instance`, `run`, `payload`, `agent_environment`, `collector_environment`, `action` | The agent named another environment than `OTHERLODE_COLLECTOR_ENVIRONMENT`. A `WARN` the first time a service sends that environment, and `DEBUG` after that |
 | `agent namespace does not match the collector's configured namespace` | `service`, `instance`, `run`, `payload`, `agent_namespace`, `collector_namespace`, `action` | The agent named another namespace than `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE`. A `WARN` the first time a service sends that namespace, and `DEBUG` after that |
+| `refusing delta batch with too many elements`, or the same with `manifest`, `static baseline` or `class listing` | `limit`, `bytes` | The body held more elements than the limit for its payload and got `413`. See [rate and memory limits](limits#element-limit) |
 | `refusing delta batch: no decode slot came free`, or the same with `manifest`, `static baseline` or `class listing` | `wait`, `max_concurrent_decodes`, `unlogged_busy_refusals` | A request waited 5 seconds for a decode slot and got `503`. At most one line a minute |
 | `dropped fields this collector does not know; its bindings are older than the agent's, so the server withholds findings from this run; upgrade to the latest collector` | `namespace`, `service`, `instance`, `run`, `agent_version`, `payload` | A blanking setting is on and a payload lost an unknown field. One line for each run |
 | `forward URL uses plain http; the backend auth token is sent unencrypted` | `url` | At startup, when the forward URL starts with `http://` and a forward key is set |

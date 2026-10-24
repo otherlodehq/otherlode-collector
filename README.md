@@ -354,7 +354,7 @@ wildcard), exiting 0 or 1, and never through a proxy. The image's
 | Counter | Labels | Meaning |
 | --- | --- | --- |
 | `otherlode_collector_ingest_accepted_total` | `payload` | Decoded, valid, handed to the sink |
-| `otherlode_collector_ingest_rejected_total` | `payload`, `reason` | Turned away before or by the sink: `content_type` (also a `Content-Encoding` other than `identity`, answered `415`), `too_large`, `read`, `malformed`, `invalid`, `sink` (the sink refused the payload; the response was `503` with `Retry-After: 5`), `canceled` (the client went away while the request waited for a decode slot), `busy` (no decode slot came free within 5 seconds; the response was `503`) |
+| `otherlode_collector_ingest_rejected_total` | `payload`, `reason` | Turned away before or by the sink: `content_type` (also a `Content-Encoding` other than `identity`, answered `415`), `too_large`, `read`, `malformed`, `invalid`, `sink` (the sink refused the payload; the response was `503` with `Retry-After: 5`), `canceled` (the client went away while the request waited for a decode slot), `busy` (no decode slot came free within 5 seconds; the response was `503`), `too_many_elements` (the body held more elements than its payload's limit; the response was `413`) |
 | `otherlode_collector_auth_rejected_total` | | 401 responses |
 | `otherlode_collector_token_reload_failures_total` | `file` | A token file re-read that failed or found no usable token, so the last good value stayed; `file` is `auth` (`OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE`) or `forward` (`OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE`) |
 | `otherlode_collector_rate_limited_total` | | 429 responses |
@@ -483,9 +483,11 @@ one end survives the relay and decodes identically on the other.
 
 ### Resource limits
 
-Decoding a protobuf can take much more memory than the request body: a
-16 MiB body of tiny messages can decode to gigabytes. Set `GOMEMLIMIT` and
-a container memory limit, and keep authentication on.
+Decoding a protobuf can take much more memory than the request body. The
+handler counts a body's elements before it decodes the body and refuses
+one over its payload's limit with a 413. At those limits the hosted
+server measured at most about 230 MiB for one decode. Set `GOMEMLIMIT` and a container memory limit, and keep
+authentication on.
 
 `OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES` caps how many requests are
 decoded and handed to the sink at one time. The default is the number of
@@ -502,7 +504,7 @@ queue is also bounded by bytes: `OTHERLODE_COLLECTOR_FORWARD_QUEUE_BYTES`
 in-flight payloads. A shard over budget refuses new payloads with `503`,
 except when it holds nothing, so one payload larger than the budget can
 still pass through an idle shard. The worst case is roughly the decode
-cap times the largest decode, plus the bodies waiting for a slot (up to
+cap times the largest decode (the hosted server measured about 230 MiB), plus the bodies waiting for a slot (up to
 16 MiB each, bounded by open connections), plus the shard count times the
 larger of the queue byte budget and the largest payload.
 
