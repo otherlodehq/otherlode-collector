@@ -14,3 +14,8 @@ the section being read.
 - The collector accepts the agent's class listing at `/v1/otherlode/class-listing`, stamps it, strips its unknown fields while redaction is on, and forwards it like a static baseline.
 - `ingest.Sink` has an `AcceptClassListing` method. A Go backend that implements `Sink` must add it.
 - The bindings know `StaticBaseline.include_rules` and `ResourceAttributes.flush_interval_seconds`, so a redacting collector keeps both fields and no longer marks a payload `fields_stripped` for them.
+- `ingest.MaxResourceValueBytes` is the longest identity value, in bytes, that the handler accepts.
+
+### Changed
+
+- The collector rejects a payload with a 400 when `service_name`, `service_version`, `service_instance_id`, `environment`, `run_id`, `service_namespace` or `agent_version` is longer than 1024 bytes. Startup fails when `OTHERLODE_COLLECTOR_ENVIRONMENT` or `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE` is longer than 1024 bytes after trimming.

@@ -28,6 +28,7 @@ import (
 
 	"golang.org/x/time/rate"
 
+	"github.com/otherlodehq/otherlode-collector/ingest"
 	"github.com/otherlodehq/otherlode-collector/internal/auth"
 	"github.com/otherlodehq/otherlode-collector/internal/forward"
 	"github.com/otherlodehq/otherlode-collector/internal/processor"
@@ -533,7 +534,9 @@ func positiveDurationEnv(getenv func(string) string, name string) (time.Duration
 // OTHERLODE_COLLECTOR_ENVIRONMENT_ACTION. It trims space around both. A
 // value that is blank after trimming turns the processor off. An action
 // with no value is an error: the operator meant to label payloads, and
-// starting without the label would hide that mistake. A value that is not valid UTF-8 is an
+// starting without the label would hide that mistake. A value longer than
+// ingest.MaxResourceValueBytes is an error, since the ingest handler rejects
+// that environment from an agent too. A value that is not valid UTF-8 is an
 // error, since a payload that carries it cannot be encoded for forwarding.
 func resolveEnvironment(valueRaw, actionRaw string) (processor.EnvironmentConfig, error) {
 	value := strings.TrimSpace(valueRaw)
@@ -556,6 +559,10 @@ func resolveEnvironment(valueRaw, actionRaw string) (processor.EnvironmentConfig
 		return processor.EnvironmentConfig{}, nil
 	}
 
+	if len(value) > ingest.MaxResourceValueBytes {
+		return processor.EnvironmentConfig{}, fmt.Errorf("OTHERLODE_COLLECTOR_ENVIRONMENT is %d bytes, over the %d-byte limit", len(value), ingest.MaxResourceValueBytes)
+	}
+
 	return processor.EnvironmentConfig{Value: value, Action: action}, nil
 }
 
@@ -565,8 +572,9 @@ func resolveEnvironment(valueRaw, actionRaw string) (processor.EnvironmentConfig
 // both. A value that is blank after trimming turns the processor off, so
 // each agent's namespace passes through unchanged. An action with no value
 // is an error: the operator meant to set a namespace, and starting without
-// it would hide that mistake. A value of "." or ".." is an error, since the ingest
-// handler rejects that namespace from an agent too. So is a value that is
+// it would hide that mistake. A value of "." or ".." is an error, since
+// the ingest handler rejects that namespace from an agent too. So is a
+// value longer than ingest.MaxResourceValueBytes. So is a value that is
 // not valid UTF-8, since a payload that carries it cannot be encoded for
 // forwarding.
 func resolveNamespace(valueRaw, actionRaw string) (processor.NamespaceConfig, error) {
@@ -591,6 +599,10 @@ func resolveNamespace(valueRaw, actionRaw string) (processor.NamespaceConfig, er
 	}
 	if value == "." || value == ".." {
 		return processor.NamespaceConfig{}, fmt.Errorf("OTHERLODE_COLLECTOR_SERVICE_NAMESPACE is %q, which no URL path can name", value)
+	}
+
+	if len(value) > ingest.MaxResourceValueBytes {
+		return processor.NamespaceConfig{}, fmt.Errorf("OTHERLODE_COLLECTOR_SERVICE_NAMESPACE is %d bytes, over the %d-byte limit", len(value), ingest.MaxResourceValueBytes)
 	}
 
 	return processor.NamespaceConfig{Value: value, Action: action}, nil

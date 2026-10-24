@@ -125,6 +125,7 @@ The collector checks both settings before it listens. Any error here stops it wi
 | An action other than `insert` or `upsert` | `OTHERLODE_COLLECTOR_ENVIRONMENT_ACTION: invalid action "x": must be "insert" or "upsert"` |
 | An action with no value | `OTHERLODE_COLLECTOR_ENVIRONMENT_ACTION is set but OTHERLODE_COLLECTOR_ENVIRONMENT is empty; set OTHERLODE_COLLECTOR_ENVIRONMENT or unset OTHERLODE_COLLECTOR_ENVIRONMENT_ACTION` |
 | A namespace of `.` or `..` | `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE is ".", which no URL path can name` |
+| A value over 1024 bytes | `OTHERLODE_COLLECTOR_ENVIRONMENT is 5000 bytes, over the 1024-byte limit` or `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE is 5000 bytes, over the 1024-byte limit` |
 
 The namespace variables give the same messages with the `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE` names. The collector trims the action, so `upsert ` with a trailing space is `upsert`. An action made of only spaces counts as not set.
 

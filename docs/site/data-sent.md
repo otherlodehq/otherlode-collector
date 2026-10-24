@@ -46,7 +46,9 @@ The collector checks each request in this order. A request that fails a check ge
 | The body cannot be read | `400` |
 | No decode slot comes free within 5 seconds. See [rate and memory limits](limits) | `503` |
 | The body is not valid protobuf | `400` |
-| The resource is missing, or `service_name` is blank, or `service_instance_id` or `run_id` is empty | `400` |
+| The resource is missing | `400` |
+| `service_name`, `service_version`, `service_instance_id`, `environment`, `run_id`, `service_namespace` or `agent_version` is longer than 1024 bytes | `400` |
+| `service_name` is blank, or `service_instance_id` or `run_id` is empty | `400` |
 | `service_name` or `service_namespace` is `.` or `..` | `400` |
 | A static baseline chunk has no `scanned_at`, a `chunk_count` below 1, or a `chunk_index` that is negative or not below `chunk_count` | `400` |
 | A class listing chunk has no `listed_at`, a `chunk_count` below 1, or a `chunk_index` that is negative or not below `chunk_count` | `400` |

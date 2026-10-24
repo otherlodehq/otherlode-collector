@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/time/rate"
 
+	"github.com/otherlodehq/otherlode-collector/ingest"
 	"github.com/otherlodehq/otherlode-collector/internal/auth"
 	"github.com/otherlodehq/otherlode-collector/internal/forward"
 	"github.com/otherlodehq/otherlode-collector/internal/processor"
@@ -653,6 +654,14 @@ func TestResolveEnvironment(t *testing.T) {
 			value:   "pr\xffod",
 			wantErr: true,
 		},
+		"value at the byte limit": {
+			value: strings.Repeat("e", ingest.MaxResourceValueBytes),
+			want:  processor.EnvironmentConfig{Value: strings.Repeat("e", ingest.MaxResourceValueBytes), Action: processor.Insert},
+		},
+		"value over the byte limit": {
+			value:   strings.Repeat("e", ingest.MaxResourceValueBytes+1),
+			wantErr: true,
+		},
 	}
 
 	for name, tt := range tests {
@@ -743,6 +752,14 @@ func TestResolveNamespace(t *testing.T) {
 		},
 		"value that is not valid UTF-8": {
 			value:   "te\xc3am",
+			wantErr: true,
+		},
+		"value at the byte limit": {
+			value: strings.Repeat("n", ingest.MaxResourceValueBytes),
+			want:  processor.NamespaceConfig{Value: strings.Repeat("n", ingest.MaxResourceValueBytes), Action: processor.Insert},
+		},
+		"value over the byte limit": {
+			value:   strings.Repeat("n", ingest.MaxResourceValueBytes+1),
 			wantErr: true,
 		},
 	}

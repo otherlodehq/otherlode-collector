@@ -121,9 +121,9 @@ These settings stamp one environment name and one service namespace on every pay
 
 | Variable | Default | Accepted values | If the value is invalid |
 |---|---|---|---|
-| `OTHERLODE_COLLECTOR_ENVIRONMENT` | None, so the collector leaves the agent's environment alone | Any text. The collector trims spaces. A value that is empty after trimming turns stamping off | Startup fails if the text is not valid UTF-8 |
+| `OTHERLODE_COLLECTOR_ENVIRONMENT` | None, so the collector leaves the agent's environment alone | Any text up to 1024 bytes after trimming. The collector trims spaces. A value that is empty after trimming turns stamping off | Startup fails if the text is not valid UTF-8 or is over 1024 bytes |
 | `OTHERLODE_COLLECTOR_ENVIRONMENT_ACTION` | `insert` | `insert` or `upsert`, in any letter case. The collector trims spaces. A value that is empty after trimming counts as not set | Startup fails. A set action with no environment also fails |
-| `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE` | None, so each agent's namespace passes through | Any text except `.` and `..`. The collector trims spaces. A value that is empty after trimming turns stamping off | Startup fails for `.`, `..` or text that is not valid UTF-8 |
+| `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE` | None, so each agent's namespace passes through | Any text up to 1024 bytes after trimming, except `.` and `..`. The collector trims spaces. A value that is empty after trimming turns stamping off | Startup fails for `.`, `..`, text that is not valid UTF-8 or text over 1024 bytes |
 | `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE_ACTION` | `insert` | `insert` or `upsert`, in any letter case. The collector trims spaces. A value that is empty after trimming counts as not set | Startup fails. A set action with no namespace also fails |
 
 `insert` fills in a missing value and keeps the agent's own. `upsert` always writes the collector's value.

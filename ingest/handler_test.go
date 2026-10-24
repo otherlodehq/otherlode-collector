@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -832,6 +833,121 @@ func TestHandleClassListing_ValidPayload_ReachesSink(t *testing.T) {
 	}
 	if !proto.Equal(sink.listings[0], listing) {
 		t.Errorf("sink received %v, want %v", sink.listings[0], listing)
+	}
+}
+
+func TestHandler_ResourceValueLength_LimitedForEveryPayload(t *testing.T) {
+	fields := map[string]func(*otherlodepb.ResourceAttributes, string){
+		"service_name":        (*otherlodepb.ResourceAttributes).SetServiceName,
+		"service_version":     (*otherlodepb.ResourceAttributes).SetServiceVersion,
+		"service_instance_id": (*otherlodepb.ResourceAttributes).SetServiceInstanceId,
+		"environment":         (*otherlodepb.ResourceAttributes).SetEnvironment,
+		"run_id":              (*otherlodepb.ResourceAttributes).SetRunId,
+		"service_namespace":   (*otherlodepb.ResourceAttributes).SetServiceNamespace,
+		"agent_version":       (*otherlodepb.ResourceAttributes).SetAgentVersion,
+	}
+	resourceWith := func(set func(*otherlodepb.ResourceAttributes, string), value string) *otherlodepb.ResourceAttributes {
+		res := &otherlodepb.ResourceAttributes{ServiceName: "demo-service", ServiceInstanceId: "instance-1", RunId: "run-1"}
+		set(res, value)
+		return res
+	}
+	for field, set := range fields {
+		for _, tc := range []struct {
+			name     string
+			size     int
+			accepted bool
+		}{
+			{"at the limit", MaxResourceValueBytes, true},
+			{"over the limit", MaxResourceValueBytes + 1, false},
+		} {
+			value := strings.Repeat("x", tc.size)
+			res := resourceWith(set, value)
+			for path, msg := range map[string]proto.Message{
+				DeltaBatchPath:     &otherlodepb.DeltaBatch{Resource: res},
+				ManifestPath:       &otherlodepb.ProbeManifest{Resource: res},
+				StaticBaselinePath: &otherlodepb.StaticBaseline{Resource: res, ScannedAt: 1700000000, ChunkCount: 1},
+				ClassListingPath:   &otherlodepb.ClassListing{Resource: res, ListedAt: 1700000000, ChunkCount: 1},
+			} {
+				t.Run(field+" "+tc.name+" "+path, func(t *testing.T) {
+					sink := &fakeSink{}
+					server := newTestServer(sink)
+					defer server.Close()
+
+					resp := postProto(t, server.URL+path, msg)
+					defer resp.Body.Close()
+					body, err := io.ReadAll(resp.Body)
+					if err != nil {
+						t.Fatalf("read body: %v", err)
+					}
+					n := len(sink.deltaBatches) + len(sink.manifests) + len(sink.baselines) + len(sink.listings)
+					if tc.accepted {
+						if resp.StatusCode != http.StatusAccepted {
+							t.Fatalf("status = %d, want %d; body = %q", resp.StatusCode, http.StatusAccepted, body)
+						}
+						if n != 1 {
+							t.Fatalf("sink received %d payloads, want 1", n)
+						}
+						return
+					}
+					if resp.StatusCode != http.StatusBadRequest {
+						t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+					}
+					want := fmt.Sprintf("resource.%s is %d bytes, over the 1024-byte limit", field, tc.size)
+					if !strings.Contains(string(body), want) {
+						t.Errorf("body = %q, want it to contain %q", body, want)
+					}
+					if strings.Contains(string(body), "xxxx") {
+						t.Errorf("body quotes the long value")
+					}
+					if n != 0 {
+						t.Fatalf("sink received %d payloads, want 0", n)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestHandler_ResourceValueLength_CountsBytesAsSent(t *testing.T) {
+	res := &otherlodepb.ResourceAttributes{ServiceName: strings.Repeat(" ", MaxResourceValueBytes) + "svc", ServiceInstanceId: "instance-1", RunId: "run-1"}
+	sink := &fakeSink{}
+	server := newTestServer(sink)
+	defer server.Close()
+
+	resp := postProto(t, server.URL+DeltaBatchPath, &otherlodepb.DeltaBatch{Resource: res})
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusBadRequest)
+	}
+	if want := "resource.service_name is 1027 bytes"; !strings.Contains(string(body), want) {
+		t.Errorf("body = %q, want it to contain %q", body, want)
+	}
+}
+
+func TestHandler_ResourceValueLength_CountsBytesNotRunes(t *testing.T) {
+	for _, tc := range []struct {
+		runes    int
+		accepted bool
+	}{
+		{MaxResourceValueBytes / 2, true},
+		{MaxResourceValueBytes/2 + 1, false},
+	} {
+		res := &otherlodepb.ResourceAttributes{ServiceName: strings.Repeat("é", tc.runes), ServiceInstanceId: "instance-1", RunId: "run-1"}
+		server := newTestServer(&fakeSink{})
+		resp := postProto(t, server.URL+DeltaBatchPath, &otherlodepb.DeltaBatch{Resource: res})
+		resp.Body.Close()
+		server.Close()
+		want := http.StatusAccepted
+		if !tc.accepted {
+			want = http.StatusBadRequest
+		}
+		if resp.StatusCode != want {
+			t.Errorf("%d two-byte runes: status = %d, want %d", tc.runes, resp.StatusCode, want)
+		}
 	}
 }
 

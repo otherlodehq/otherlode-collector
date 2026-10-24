@@ -226,9 +226,18 @@ func newMessage[T proto.Message]() T {
 	return zero.ProtoReflect().New().Interface().(T)
 }
 
+// MaxResourceValueBytes is the longest value, in bytes, that a payload's
+// resource may carry in service_name, service_version,
+// service_instance_id, environment, run_id, service_namespace or
+// agent_version. The handler rejects a longer value.
+const MaxResourceValueBytes = 1024
+
 // validateResource checks the identity a Sink needs: a service name that
-// is not blank, an instance ID and a run ID. It rejects a service name
-// or namespace of "." or ".." (see isDotSegment). class_id and
+// is not blank, an instance ID and a run ID. It rejects a value longer
+// than MaxResourceValueBytes in any of the seven identity strings. It
+// measures the value as sent, before any trimming, and never quotes it.
+// It rejects a service name or namespace of "." or ".." (see
+// isDotSegment). class_id and
 // cumulative totals mean something only within one run of one instance,
 // so the run ID is required. The agent makes a fresh run ID per process,
 // so a restarted instance with a pinned instance ID still names a
@@ -236,6 +245,19 @@ func newMessage[T proto.Message]() T {
 func validateResource(res *otherlodepb.ResourceAttributes) error {
 	if res == nil {
 		return errors.New("missing resource")
+	}
+	for _, f := range []struct{ name, value string }{
+		{"service_name", res.GetServiceName()},
+		{"service_version", res.GetServiceVersion()},
+		{"service_instance_id", res.GetServiceInstanceId()},
+		{"environment", res.GetEnvironment()},
+		{"run_id", res.GetRunId()},
+		{"service_namespace", res.GetServiceNamespace()},
+		{"agent_version", res.GetAgentVersion()},
+	} {
+		if len(f.value) > MaxResourceValueBytes {
+			return fmt.Errorf("resource.%s is %d bytes, over the %d-byte limit", f.name, len(f.value), MaxResourceValueBytes)
+		}
 	}
 	name := strings.TrimSpace(res.GetServiceName())
 	if name == "" {
