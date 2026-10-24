@@ -4,8 +4,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"golang.org/x/time/rate"
 )
@@ -330,5 +332,87 @@ func TestLimiter_EvictedClientStartsWithAFullBucket(t *testing.T) {
 
 	if rec := doRequest(handler, "10.0.0.1:1234"); rec.Code != http.StatusOK {
 		t.Fatalf("status after eviction = %d, want %d (a new bucket starts full)", rec.Code, http.StatusOK)
+	}
+}
+
+func TestLimiter_NonIPHeader_ShortValueKeysOnText(t *testing.T) {
+	l := New(rate.Limit(0.001), 1, WithClientIPHeader("X-Forwarded-For"))
+	defer l.Stop()
+	handler, _ := newTestHandler(l)
+
+	if rec := doRequestWithHeader(handler, "10.0.0.1:1", "X-Forwarded-For", "client-a"); rec.Code != http.StatusOK {
+		t.Fatalf("first status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if rec := doRequestWithHeader(handler, "10.0.0.1:1", "X-Forwarded-For", "client-b"); rec.Code != http.StatusOK {
+		t.Fatalf("other text status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if rec := doRequestWithHeader(handler, "10.0.0.1:1", "X-Forwarded-For", "client-a"); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("same text status = %d, want %d", rec.Code, http.StatusTooManyRequests)
+	}
+	if got := l.normalizeIP("client-a"); got != "client-a" {
+		t.Fatalf("key = %q, want the text itself", got)
+	}
+}
+
+func TestLimiter_NonIPHeader_LongValueKeyIsBounded(t *testing.T) {
+	l := New(rate.Limit(1), 1)
+	defer l.Stop()
+
+	key := l.normalizeIP(strings.Repeat("x", 4096))
+	if !strings.HasPrefix(key, "sha256:") || len(key) != 71 {
+		t.Fatalf("key = %q, want sha256: and 64 hex digits", key)
+	}
+}
+
+func TestLimiter_NonIPHeader_KeySharesNoMemory(t *testing.T) {
+	l := New(rate.Limit(1), 1)
+	defer l.Stop()
+
+	header := strings.Repeat("y", 4096)
+	for _, s := range []string{header[100:120], header[100:200]} {
+		key := l.normalizeIP(s)
+		start := uintptr(unsafe.Pointer(unsafe.StringData(header)))
+		p := uintptr(unsafe.Pointer(unsafe.StringData(key)))
+		if p >= start && p < start+uintptr(len(header)) {
+			t.Errorf("key for %q points into the request header", s)
+		}
+	}
+}
+
+func TestLimiter_NonIPHeader_LongValuesKeyByFullValue(t *testing.T) {
+	l := New(rate.Limit(0.001), 1, WithClientIPHeader("X-Forwarded-For"))
+	defer l.Stop()
+	handler, _ := newTestHandler(l)
+
+	base := strings.Repeat("a", 3000)
+	one := base + "1"
+	two := base + "2"
+
+	if rec := doRequestWithHeader(handler, "10.0.0.1:1", "X-Forwarded-For", one); rec.Code != http.StatusOK {
+		t.Fatalf("first long value status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if rec := doRequestWithHeader(handler, "10.0.0.1:1", "X-Forwarded-For", two); rec.Code != http.StatusOK {
+		t.Fatalf("different long value status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if rec := doRequestWithHeader(handler, "10.0.0.1:1", "X-Forwarded-For", one); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("repeated long value status = %d, want %d", rec.Code, http.StatusTooManyRequests)
+	}
+}
+
+func TestLimiter_NonIPHeader_LimitBoundary(t *testing.T) {
+	l := New(rate.Limit(1), 1)
+	defer l.Stop()
+
+	at := strings.Repeat("y", maxTextKey)
+	over := strings.Repeat("y", maxTextKey+1)
+	if got := l.normalizeIP(at); got != at {
+		t.Fatalf("%d-byte value key = %q, want the text itself", maxTextKey, got)
+	}
+	got := l.normalizeIP(over)
+	if got == over || len(got) <= maxTextKey {
+		t.Fatalf("%d-byte value key = %q, want a digest key longer than %d", maxTextKey+1, got, maxTextKey)
+	}
+	if got != l.normalizeIP(over) {
+		t.Fatal("same long value gave different keys")
 	}
 }

@@ -4,6 +4,8 @@ package ratelimit
 
 import (
 	"container/list"
+	"crypto/sha256"
+	"encoding/hex"
 	"math"
 	"net"
 	"net/http"
@@ -31,6 +33,10 @@ const defaultStaleAfter = 10 * time.Minute
 // clients stay near the front of the list. A flood of new keys pushes out
 // idle clients first, and never locks out a new one.
 const defaultMaxVisitors = 100_000
+
+// maxTextKey is the longest value, in bytes, that keys on its own text.
+// A longer value that is not an IP keys on a digest of the value.
+const maxTextKey = 64
 
 // DefaultIPv6Prefix keys each IPv6 address on its own.
 const DefaultIPv6Prefix = 128
@@ -246,11 +252,14 @@ func (l *Limiter) clientIP(r *http.Request) string {
 
 // normalizeIP returns the bucket key for s. IPv4 and IPv4-mapped IPv6
 // addresses key on the IPv4 address. IPv6 addresses key on their first
-// ipv6Prefix bits. A value that is not an IP keys on itself.
+// ipv6Prefix bits. A value that is not an IP keys on a copy of itself when it
+// is at most maxTextKey bytes long. A longer one keys on "sha256:" and the hex
+// SHA-256 of the value, which is 71 bytes. No short value can match that key.
+// Either key shares no memory with s.
 func (l *Limiter) normalizeIP(s string) string {
 	addr, err := netip.ParseAddr(s)
 	if err != nil {
-		return s
+		return textKey(s)
 	}
 	addr = addr.WithZone("").Unmap()
 	if addr.Is4() {
@@ -258,9 +267,18 @@ func (l *Limiter) normalizeIP(s string) string {
 	}
 	prefix, err := addr.Prefix(l.ipv6Prefix)
 	if err != nil {
-		return s
+		return textKey(s)
 	}
 	return prefix.String()
+}
+
+// textKey returns the bucket key for a value that is not an IP.
+func textKey(s string) string {
+	if len(s) <= maxTextKey {
+		return strings.Clone(s)
+	}
+	sum := sha256.Sum256([]byte(s))
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 // lastHeaderValue returns the last non-empty comma-separated entry of v.
