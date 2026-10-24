@@ -19,3 +19,5 @@ Nothing reads the collector's version but its startup log, and a newer collector
 
 - Tags are permanent once the Go proxy has seen them; a bad release is withdrawn with `retract`, never moved.
 - An agent release that changed the schema waits for a collector release carrying its bindings; the agent's release script checks it (agent ADR 0063).
+
+Amended 2026-10-24 in a grilling session after a security audit: the image job and the docs job run in a `release` environment whose deployment rule allows only `v*` tags, as the agent's publish job does. The docs token is a secret of that environment, so a workflow on another ref cannot read it. A workflow on any ref can still ask for `packages: write` and `id-token: write` on its own token, so the environment does not bind the image push. `docs/site/deploy.md` therefore shows how to verify an image's build provenance with `gh attestation verify`, pinned to `release.yml` as the signer workflow and to a `v*` tag as the source ref. A personal access token for the push was rejected: it would put a long-lived secret where the workflow's own token serves.
