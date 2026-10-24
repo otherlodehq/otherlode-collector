@@ -124,6 +124,18 @@ To send what the collector receives on to Otherlode, set `OTHERLODE_COLLECTOR_FO
 
 Run the latest collector. [How the collector works](how-it-works) explains why. Each release is tagged `X.Y.Z`, `X.Y` and `latest`. A tag such as `0.1` follows the patch releases of that minor version. `latest` follows every release.
 
+### Check where an image was built
+
+Every release image carries a build provenance attestation from the release workflow. To check that an image came from a release tag, run `gh attestation verify`. Use the `X.Y.Z` tag of the release you run, and its `vX.Y.Z` tag in the identity:
+
+```bash
+gh attestation verify oci://ghcr.io/otherlodehq/otherlode-collector:0.1.0 \
+  --repo otherlodehq/otherlode-collector \
+  --cert-identity https://github.com/otherlodehq/otherlode-collector/.github/workflows/release.yml@refs/tags/v0.1.0
+```
+
+The command fails for an image that another workflow or another ref built. It needs the GitHub CLI signed in to any GitHub account (`gh auth login`).
+
 ## Next steps
 
 - [Configuration](configuration) lists every setting.

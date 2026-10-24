@@ -64,6 +64,7 @@ jobs:
     name: image
     needs: [guard, test]
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: read
       packages: write
@@ -164,13 +165,14 @@ jobs:
           gh release create "$TAG" --verify-tag --title "otherlode-collector $version" --notes-file release-notes.md
 
   # Opens a pull request on otherlode.dev that copies docs/site/ into its
-  # /docs (otherlode.dev ADR 0001). It does nothing until the repository
-  # secret OTHERLODE_DEV_DOCS_TOKEN exists. Scope the token to
-  # otherlode.dev alone. Only this job reads it.
+  # /docs (otherlode.dev ADR 0001). It does nothing until the release
+  # environment's secret OTHERLODE_DEV_DOCS_TOKEN exists. Scope the token
+  # to otherlode.dev alone, and keep it out of the repository secrets.
   docs:
     name: sync docs to otherlode.dev
     needs: github-release
     runs-on: ubuntu-latest
+    environment: release
     concurrency:
       group: docs-sync
       cancel-in-progress: false
