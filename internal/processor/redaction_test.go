@@ -795,6 +795,32 @@ func TestRedaction_On_ModuleKindAndPendingCountsFieldsKept(t *testing.T) {
 	}
 }
 
+// The bindings know a delta batch's flush_complete (agent ADR 0077), so
+// redaction keeps it and does not mark the batch stripped.
+func TestRedaction_On_FlushCompleteKept(t *testing.T) {
+	next := &recordingSink{}
+	r := NewRedaction(next, allLiterals(), nil)
+
+	batch := &otherlodepb.DeltaBatch{
+		Resource:      resourceFor("run-1"),
+		Deltas:        []*otherlodepb.ProbeDelta{{ClassId: 7, HitsTotal: 3}},
+		FinalFlush:    true,
+		FlushComplete: true,
+	}
+
+	if err := r.AcceptDeltaBatch(context.Background(), batch); err != nil {
+		t.Fatalf("accept delta batch: %v", err)
+	}
+
+	got := next.deltaBatches[0]
+	if got.GetResource().GetFieldsStripped() {
+		t.Error("fields_stripped set on a delta batch whose fields the bindings know")
+	}
+	if !got.GetFlushComplete() || !got.GetFinalFlush() {
+		t.Errorf("flush_complete %v, final_flush %v, want both true", got.GetFlushComplete(), got.GetFinalFlush())
+	}
+}
+
 // Class names are not string literals, so redaction keeps every name and
 // the include rules, even with every literal redacted.
 func TestRedaction_On_ClassListingNamesAndRulesKept(t *testing.T) {
