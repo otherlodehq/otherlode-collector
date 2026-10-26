@@ -66,7 +66,7 @@ The code shows what happens in each direction.
 
 - **A newer collector, an older agent.** The older agent's payload decodes as before. A field the agent does not send is absent, which protobuf reads as unset. Nothing is stripped and nothing is flagged.
 - **An older collector, a newer agent, blanking off.** The collector decodes the payload and forwards it with the new fields intact. It changes nothing it does not know.
-- **An older collector, a newer agent, blanking on.** The collector drops the fields it does not know, sets `fields_stripped` on the payload and logs one WARN per run. The server stores the run and makes no claim from it, because a dropped field may be one the server judges by. See [a run from an older collector makes no claim](/docs/server/how-it-works#a-run-from-an-older-collector-makes-no-claim).
+- **An older collector, a newer agent, blanking on.** The collector drops the fields it does not know, sets `fields_stripped` on the payload and logs one WARN per run. Otherlode stores the run and makes no claim from it, because a dropped field may be one it judges by. See [a run from an older collector makes no claim](/docs/server/how-it-works#a-run-from-an-older-collector-makes-no-claim).
 
 The code gives no promise beyond that. Upgrading the collector fixes the third case on the next run. See [redaction](redaction) for the log line and the fix.
 

@@ -98,7 +98,7 @@ A payload over its limit gets status 413 and the body `payload has too many elem
 
 The count reads the wire format and allocates nothing for the elements. It runs before the request asks for a decode slot. A body that is not valid protobuf gets a 400 from the decode, unless the count passes the limit first.
 
-At these limits, Otherlode's server measured at most about 230 MiB for one payload, with the decode and its own write included. The agent's chunks stay far below these limits. A single class with more elements than a limit cannot be sent.
+At these limits, Otherlode's ingest used at most about 230 MiB for one payload, with the decode and its own write included. The agent's chunks stay far below these limits. A single class with more elements than a limit cannot be sent.
 
 The metric is `otherlode_collector_ingest_rejected_total` with the labels `payload` and `reason`.
 
@@ -117,7 +117,7 @@ A 16 MiB body has to arrive within the 10-second read timeout. A client on a slo
 
 ## Decode cap
 
-Decoding a payload can take far more memory than the body. The [element limit](#element-limit) bounds one decode. Otherlode's server measured about 230 MiB at the limits. The decoded message also stays in memory until the collector hands it on.
+Decoding a payload can take far more memory than the body. The [element limit](#element-limit) bounds one decode. Otherlode's ingest used about 230 MiB at the limits. The decoded message also stays in memory until the collector hands it on.
 
 `OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES` caps how many requests the collector decodes at one time. It defaults to the number of CPUs the Go runtime uses, because decoding is CPU-bound and more parallel decodes add memory but no speed. The value must be an integer above 0. Anything else stops the collector at startup. You cannot turn the cap off.
 
@@ -135,7 +135,7 @@ The cap does not limit how many requests wait. Each waiting request holds its bo
 
 Three parts add up.
 
-- **Decoding.** The decode cap times the memory of the largest decode. Otherlode's server measured about 230 MiB for the largest payload at the element limits.
+- **Decoding.** The decode cap times the memory of the largest decode. Otherlode's ingest used about 230 MiB for the largest payload at the element limits.
 - **Waiting bodies.** The number of requests waiting for a slot, times 16 MiB each.
 - **Forwarding queues.** The number of shards times the larger of the queue byte limit and the largest payload.
 

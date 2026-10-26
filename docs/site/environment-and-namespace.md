@@ -8,7 +8,7 @@ The collector can write an environment and a service namespace onto every payloa
 
 Each setting has a second variable that decides what happens when the agent already named a value. The default is `insert`, which keeps the agent's value. The other choice is `upsert`, which replaces it.
 
-For the options on the agent's side, see [service identity](/docs/agent/configuration#service-identity). For how the server uses the environment, and what a run with none looks like, see [scope and environments](/docs/server/scope). The server's [connect page](/docs/server/connect#name-the-environment) has a short version of the environment setting. This page is the full one.
+For the options on the agent's side, see [service identity](/docs/agent/configuration#service-identity). For how Otherlode uses the environment, and what a run with none looks like, see [scope and environments](/docs/server/scope). Otherlode's [connect page](/docs/server/connect#name-the-environment) has a short version of the environment setting. This page is the full one.
 
 ## What the settings do
 
@@ -46,7 +46,7 @@ The environment and the namespace do not compare quite the same way.
 | Letter case | Ignored | Counts as a difference |
 | An agent value of only spaces | Counts as nothing, so the collector writes its value | Counts as nothing, so the collector writes its value |
 
-The collector compares environments the way the server does. The server trims and lowercases an environment name, so `Prod`, ` prod ` and `prod` are one environment there, and none of them is a mismatch here. Under `insert` the agent's `Prod` stays, and the server reads it as `prod`. Under `upsert` the collector writes its own `prod`.
+The collector compares environments the way Otherlode does. Otherlode trims and lowercases an environment name, so `Prod`, ` prod ` and `prod` are one environment there, and none of them is a mismatch here. Under `insert` the agent's `Prod` stays, and Otherlode reads it as `prod`. Under `upsert` the collector writes its own `prod`.
 
 When the namespaces match after trimming, the collector leaves the agent's text as it was, under both actions. An agent that sends ` team-a ` keeps those spaces.
 
@@ -67,7 +67,7 @@ OTHERLODE_COLLECTOR_ENVIRONMENT_ACTION=upsert
 
 Use `upsert` when the collector's value must win for every agent behind it, for example when a shared agent configuration sets the same `environment` for every deployment. Use `insert` when some agents should name their own.
 
-The server fixes a run's environment from the first payload it receives for that run. Restart the agents after you change the collector's environment, so new runs start in the new one. [Scope and environments](/docs/server/scope#how-a-run-gets-its-environment) has the detail.
+Otherlode fixes a run's environment from the first payload it receives for that run. Restart the agents after you change the collector's environment, so new runs start in the new one. [Scope and environments](/docs/server/scope#how-a-run-gets-its-environment) has the detail.
 
 ## Give one team's agents a namespace
 
@@ -111,7 +111,7 @@ An agent with `testRun` on and no environment of its own reports the environment
 - Under `insert`, the run keeps `test`. The collector counts each of its payloads as an environment mismatch.
 - Under `upsert`, the collector overwrites `test` with its own value, and counts each payload as a mismatch.
 
-Under `upsert`, the run no longer reports `test` as its environment, so the environment does not mark it as a test run. The `test_run` flag still does. It travels with every payload, and the collector never changes it. The server reads that flag to keep the run out of every finding about production.
+Under `upsert`, the run no longer reports `test` as its environment, so the environment does not mark it as a test run. The `test_run` flag still does. It travels with every payload, and the collector never changes it. Otherlode reads that flag to keep the run out of every finding about production.
 
 To avoid the mismatch counts, point the test JVM at a collector with no environment set. If you use one collector for both, expect the counter to rise with every test-run payload and read it with that in mind.
 
@@ -134,5 +134,5 @@ The namespace variables give the same messages with the `OTHERLODE_COLLECTOR_SER
 - [Configuration](configuration) lists every setting.
 - [Redaction](redaction) covers the other processor on the path.
 - [Monitoring](monitoring) covers the metrics endpoint.
-- [Scope and environments](/docs/server/scope) explains how the server uses the environment.
+- [Scope and environments](/docs/server/scope) explains how Otherlode uses the environment.
 - [Test runs](/docs/agent/test-runs) covers the agent's side of a test run.

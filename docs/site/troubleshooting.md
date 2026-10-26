@@ -63,7 +63,7 @@ When `OTHERLODE_COLLECTOR_FORWARD_URL` is set, it must be an `http` or `https` U
 | `forward URL must not contain a query` | Remove everything from `?`. |
 | `forward URL must not contain a fragment` | Remove everything from `#`. |
 
-The URL to use for Otherlode is on the server's [connect page](/docs/server/connect). [Forwarding](forwarding) describes what the collector does after it accepts a payload.
+The URL to use for Otherlode is on Otherlode's [connect page](/docs/server/connect). [Forwarding](forwarding) describes what the collector does after it accepts a payload.
 
 ### The forward key settings are wrong
 
@@ -225,7 +225,7 @@ A 503 means the collector did not take a valid payload. The agent keeps its coun
 
 | Sign | Cause and fix |
 |---|---|
-| `ERROR` line `sink rejected delta batch` with `error` `forward: shard queue is full (service "checkout" instance "3f1c9a")`, `Retry-After: 5`, empty response body | The queue for that instance is full, by count or by bytes, because Otherlode is slow or refusing. Check the `WARN` lines in the next section. If the backend is healthy, raise `OTHERLODE_COLLECTOR_FORWARD_QUEUE_SIZE`, `OTHERLODE_COLLECTOR_FORWARD_QUEUE_BYTES` or `OTHERLODE_COLLECTOR_FORWARD_SHARDS`. [Forwarding](forwarding) explains the queues. |
+| `ERROR` line `sink rejected delta batch` with `error` `forward: shard queue is full (service "checkout" instance "3f1c9a")`, `Retry-After: 5`, empty response body | The queue for that instance is full, by count or by bytes, because Otherlode is slow or refusing. Check the `WARN` lines in the next section. If Otherlode is healthy, raise `OTHERLODE_COLLECTOR_FORWARD_QUEUE_SIZE`, `OTHERLODE_COLLECTOR_FORWARD_QUEUE_BYTES` or `OTHERLODE_COLLECTOR_FORWARD_SHARDS`. [Forwarding](forwarding) explains the queues. |
 | `ERROR` line `sink rejected delta batch` with `error` `forward: sink is shutting down (service "checkout" instance "3f1c9a")`, `Retry-After: 5` | The collector is stopping, for example during a rollout. This is expected and clears when the new collector is up. |
 | `WARN` line `refusing delta batch: no decode slot came free`, `Retry-After: 1`, empty body | No decode slot came free within 5 seconds. Too many large requests arrived at once. The collector logs at most one such line a minute, and its `unlogged_busy_refusals` field counts the refusals since the last line that got no line of their own. The counter `otherlode_collector_ingest_rejected_total{reason="busy"}` counts every one. Raise `OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES` or give the collector more CPU and memory. [Rate and memory limits](limits) has the trade-off. |
 
@@ -249,7 +249,7 @@ The `service`, `instance` and `path` fields say which payload. The `msg` gives t
 | `dropping payload: shutdown drain attempt failed` | The final attempt during shutdown failed. Read the `error` field. |
 | `dropping payload: marshal failed` | The collector could not re-encode the payload. This should not happen. Keep the line and report it. |
 
-The agent already had its 202 for a dropped payload, so it does not send that payload again. A probe in a dropped delta batch reaches Otherlode again only when its count changes. [How the collector works](how-it-works) explains why. [Forwarding](forwarding) covers the retry rules and the tuning variables. For what Otherlode's ingest answers and why, see the server's [dropped payload entries](/docs/server/troubleshooting#the-collector-logs-a-dropped-payload).
+The agent already had its 202 for a dropped payload, so it does not send that payload again. A probe in a dropped delta batch reaches Otherlode again only when its count changes. [How the collector works](how-it-works) explains why. [Forwarding](forwarding) covers the retry rules and the tuning variables. For what Otherlode's ingest answers and why, see Otherlode's [dropped payload entries](/docs/server/troubleshooting#the-collector-logs-a-dropped-payload).
 
 One more `WARN` shows at startup and is not a drop.
 
@@ -270,7 +270,7 @@ The tenant has Otherlode require redaction, and this collector's payloads do not
 - `redaction_required` means the payload had no header. This collector has redaction off. Turn it on and give it the tenant's secret.
 - `redaction_secret_mismatch` means the header holds another fingerprint. This collector's secret differs from the tenant's. Compare the `secret_fingerprint` in its startup line with another collector's, and set the same secret.
 
-Every payload from such a collector is dropped until you fix it and restart it. [Let Otherlode refuse payloads that were not blanked](redaction#let-otherlode-refuse-payloads-that-were-not-blanked) covers the header. Any other `403` comes from the key. See the server's [backend returned 403](/docs/server/troubleshooting#backend-returned-403).
+Every payload from such a collector is dropped until you fix it and restart it. [Let Otherlode refuse payloads that were not blanked](redaction#let-otherlode-refuse-payloads-that-were-not-blanked) covers the header. Any other `403` comes from the key. See Otherlode's [backend returned 403](/docs/server/troubleshooting#backend-returned-403).
 
 ## The collector warns that it dropped fields it does not know
 
@@ -278,7 +278,7 @@ Every payload from such a collector is dropped until you fix it and restart it. 
 {"time":"...","level":"WARN","msg":"dropped fields this collector does not know; its bindings are older than the agent's, so the server withholds findings from this run; upgrade to the latest collector","namespace":"...","service":"...","instance":"...","run":"...","agent_version":"...","payload":"..."}
 ```
 
-It appears once for each run, and only while blanking is on. The agent sent a field that this collector release predates. While blanking is on, the collector removes fields it does not know and marks the run with `fields_stripped`. The line says the server then withholds findings for that run.
+It appears once for each run, and only while blanking is on. The agent sent a field that this collector release predates. While blanking is on, the collector removes fields it does not know and marks the run with `fields_stripped`. The line says Otherlode then withholds findings for that run.
 
 Run the latest collector image. Pull the new tag and restart. [Blank out string literals](redaction) explains the stripping and the mark. The counter `otherlode_collector_fields_stripped_total` counts affected payloads.
 
@@ -345,4 +345,4 @@ The probe reads `OTHERLODE_COLLECTOR_ADDR` and checks that address. An empty or 
 - [Forwarding](forwarding) for queues, retries and shutdown.
 - [Rate and memory limits](limits) for the limits behind 413, 429 and the busy 503.
 - [Health checks, metrics and logs](monitoring) for the counters and what to alert on.
-- [Troubleshooting the agent](/docs/agent/troubleshooting) and [troubleshooting the server](/docs/server/troubleshooting) for the other two ends.
+- [Troubleshooting the agent](/docs/agent/troubleshooting) and [troubleshooting Otherlode](/docs/server/troubleshooting) for the other two ends.

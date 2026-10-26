@@ -110,7 +110,7 @@ The `error` field ends with the status. When the backend answers with a JSON bod
 {"time":"...","level":"WARN","msg":"dropping payload: permanent failure","namespace":"","service":"checkout","instance":"3f1c9a","path":"/v1/otherlode/deltas","error":"backend returned 403 Forbidden","backend_error":"redaction_secret_mismatch"}
 ```
 
-A `403` with `redaction_required` or `redaction_secret_mismatch` means the tenant requires redaction and this collector does not match. [Troubleshooting](troubleshooting#403-with-redaction_required-or-redaction_secret_mismatch) has the fix. For what else Otherlode's ingest answers and what to fix, see [troubleshooting on the server](/docs/server/troubleshooting#the-collector-logs-a-dropped-payload).
+A `403` with `redaction_required` or `redaction_secret_mismatch` means the tenant requires redaction and this collector does not match. [Troubleshooting](troubleshooting#403-with-redaction_required-or-redaction_secret_mismatch) has the fix. For what else Otherlode's ingest answers and what to fix, see [Otherlode's troubleshooting](/docs/server/troubleshooting#the-collector-logs-a-dropped-payload).
 
 ## When the queue is full
 

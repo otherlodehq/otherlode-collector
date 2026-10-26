@@ -93,7 +93,7 @@ The collector logs one warning for each run, with the first payload that loses a
 {"time":"...","level":"WARN","msg":"dropped fields this collector does not know; its bindings are older than the agent's, so the server withholds findings from this run; upgrade to the latest collector","namespace":"...","service":"...","instance":"...","run":"...","agent_version":"...","payload":"..."}
 ```
 
-A dropped field can be one that the server judges by. The server stores a marked run and shows it, but counts it in no finding. See [a run from an older collector makes no claim](/docs/server/how-it-works#a-run-from-an-older-collector-makes-no-claim).
+A dropped field can be one that Otherlode judges by. It stores a marked run and shows it, but counts it in no finding. See [a run from an older collector makes no claim](/docs/server/how-it-works#a-run-from-an-older-collector-makes-no-claim).
 
 To fix it, run the latest collector. With both settings off, the collector drops nothing and marks nothing.
 

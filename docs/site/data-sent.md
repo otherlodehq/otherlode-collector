@@ -114,9 +114,9 @@ Go's HTTP client, which the collector uses, adds these headers on its own.
 | `User-Agent` | `Go-http-client/1.1`, or `Go-http-client/2.0` when the connection uses HTTP/2 |
 | `Accept-Encoding` | `gzip` |
 
-The `User-Agent` does not name the collector or its version. Over `https`, the client uses HTTP/2 when the server offers it. If `HTTPS_PROXY` or `HTTP_PROXY` applies to the forward URL, the request goes through that proxy. See [forwarding](forwarding).
+The `User-Agent` does not name the collector or its version. Over `https`, the client uses HTTP/2 when the backend offers it. If `HTTPS_PROXY` or `HTTP_PROXY` applies to the forward URL, the request goes through that proxy. See [forwarding](forwarding).
 
-The server at the forward URL also sees the address the connection comes from, as it does for any HTTP request. That is the address of the collector, or of your proxy or NAT gateway.
+The backend at the forward URL also sees the address the connection comes from, as it does for any HTTP request. That is the address of the collector, or of your proxy or NAT gateway.
 
 ### What the collector never adds
 
