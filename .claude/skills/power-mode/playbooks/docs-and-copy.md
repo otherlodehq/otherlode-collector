@@ -2,9 +2,12 @@
 
 **Every sentence true of the shipped code. Luke approves customer copy.**
 
-1. Read the code the page describes. Check each claim against it. When the
-   code is wrong rather than the page, route it to Bug fix. If the right
-   behaviour is a design change, grill it per Design.
+1. Read the code the page describes. Check each claim against it. Then
+   run every command, step and check the page tells a reader to do, and
+   compare what you see with what the page promises. Where a step cannot
+   run as written, run its nearest local stand-in and name the substitute.
+   When the code is wrong rather than the page, route it to Bug fix. If
+   the right behaviour is a design change, grill it per Design.
 2. Write the change yourself, since prose skips the review loop unless
    Luke asks for one. Show marketing copy and READMEs before you commit,
    and for a rewrite across many pages, show one page as a sample first.
@@ -20,5 +23,5 @@
    customer.
 6. Wrap-up.
 
-**Reply:** the copy or a link to it, and which claims you checked against
-which code.
+**Reply:** the copy or a link to it, which claims you checked against
+which code, and which steps you ran, with each substitute.

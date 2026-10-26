@@ -36,6 +36,13 @@ A change that breaks one of these needs an ADR first.
   that restores documented behaviour, or an internal change needs none.
 - **Docs voice and style.** Customer docs follow the `copy-style` skill's
   `docs.md`.
+- **Run what a doc tells a reader to do.** A change to a how-to or a
+  technical doc is done only after you run every command, step and check
+  it describes and see the result it promises: the output, the log line,
+  the page. When a step cannot run as written, such as a host or a release
+  that does not exist yet, run the nearest local stand-in and name each
+  substitute in the reply. Where the result differs, fix the doc. Reading
+  the code is not enough.
 - Run `gofmt -l .`, `go vet ./...` and `go test ./...` before committing.
 - **No session ids or links in commit messages.** A commit message never
   carries a `Claude-Session` line, a session link or a session id.
