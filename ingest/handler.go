@@ -243,8 +243,8 @@ const MaxResourceValueBytes = 1024
 
 // validateResource checks the identity a Sink needs: a service name that
 // is not blank, an instance ID and a run ID. It rejects a value longer
-// than MaxResourceValueBytes in any of the seven identity strings. It
-// measures the value as sent, before any trimming, and never quotes it.
+// than MaxResourceValueBytes, or one that holds a NUL byte, in any of the
+// seven identity strings. It measures the value as sent, before any trimming, and never quotes it.
 // It rejects a service name or namespace of "." or ".." (see
 // isDotSegment). class_id and
 // cumulative totals mean something only within one run of one instance,
@@ -266,6 +266,9 @@ func validateResource(res *otherlodepb.ResourceAttributes) error {
 	} {
 		if len(f.value) > MaxResourceValueBytes {
 			return fmt.Errorf("resource.%s is %d bytes, over the %d-byte limit", f.name, len(f.value), MaxResourceValueBytes)
+		}
+		if strings.IndexByte(f.value, 0) >= 0 {
+			return fmt.Errorf("resource.%s holds a NUL byte", f.name)
 		}
 	}
 	name := strings.TrimSpace(res.GetServiceName())
@@ -300,9 +303,43 @@ func isDotSegment(v string) bool {
 // validateDeltaBatch checks the resource a Sink needs to attribute the
 // batch. The agent always sends it, even on an empty heartbeat batch,
 // so a batch without it is a broken or foreign sender, not a quiet
-// instance.
+// instance. It also rejects a first-seen or first-loaded time outside
+// the range of MaxTimestampMillis.
 func validateDeltaBatch(batch *otherlodepb.DeltaBatch) error {
-	return validateResource(batch.GetResource())
+	if err := validateResource(batch.GetResource()); err != nil {
+		return err
+	}
+	for i, d := range batch.GetDeltas() {
+		if !timestampInRange(d.GetFirstSeenAt()) {
+			return timestampError("deltas", i, "first_seen_at")
+		}
+	}
+	for i, d := range batch.GetEndpointDeltas() {
+		if !timestampInRange(d.GetFirstSeenAt()) {
+			return timestampError("endpoint_deltas", i, "first_seen_at")
+		}
+	}
+	for i, d := range batch.GetDependencyDeltas() {
+		if !timestampInRange(d.GetFirstLoadedAt()) {
+			return timestampError("dependency_deltas", i, "first_loaded_at")
+		}
+	}
+	return nil
+}
+
+// MaxTimestampMillis is the latest time, in milliseconds since the epoch,
+// that a payload's timestamp may hold: the end of the year 9999. The
+// earliest is 0, the start of 1970.
+const MaxTimestampMillis = 253402300799999
+
+// timestampInRange reports whether ms is from 0 to MaxTimestampMillis.
+func timestampInRange(ms int64) bool {
+	return ms >= 0 && ms <= MaxTimestampMillis
+}
+
+// timestampError names the field at list[index].field, never its value.
+func timestampError(list string, index int, field string) error {
+	return fmt.Errorf("%s[%d].%s is out of range", list, index, field)
 }
 
 // validateManifest checks that the manifest's resource names the
@@ -310,8 +347,48 @@ func validateDeltaBatch(batch *otherlodepb.DeltaBatch) error {
 // run in load order, so the same class_id can mean a different class in
 // two instances of the same service, or in two runs of one instance. A
 // backend that keys on less than all three would misattribute probes.
+// It also rejects a timestamp outside the range of MaxTimestampMillis, and
+// a class that failed to initialize with no reason.
 func validateManifest(manifest *otherlodepb.ProbeManifest) error {
-	return validateResource(manifest.GetResource())
+	if err := validateResource(manifest.GetResource()); err != nil {
+		return err
+	}
+	for i, c := range manifest.GetUnreportedClasses() {
+		if !timestampInRange(c.GetFirstSeenUnreportedAt()) {
+			return timestampError("unreported_classes", i, "first_seen_unreported_at")
+		}
+	}
+	for i, c := range manifest.GetFailedClasses() {
+		if !timestampInRange(c.GetWithheldAt()) {
+			return timestampError("failed_classes", i, "withheld_at")
+		}
+	}
+	for i, c := range manifest.GetClassesFailedToInitialize() {
+		if !timestampInRange(c.GetObservedAt()) {
+			return timestampError("classes_failed_to_initialize", i, "observed_at")
+		}
+	}
+	for i, c := range manifest.GetSkippedClasses() {
+		if !timestampInRange(c.GetSkippedAt()) {
+			return timestampError("skipped_classes", i, "skipped_at")
+		}
+	}
+	for i, m := range manifest.GetDisabledEndpointModules() {
+		if !timestampInRange(m.GetDisabledAt()) {
+			return timestampError("disabled_endpoint_modules", i, "disabled_at")
+		}
+	}
+	for i, m := range manifest.GetFrameworkMarkers() {
+		if !timestampInRange(m.GetSeenAt()) {
+			return timestampError("framework_markers", i, "seen_at")
+		}
+	}
+	for i, c := range manifest.GetClassesFailedToInitialize() {
+		if c.GetReason() == otherlodepb.InitializationFailure_INITIALIZATION_FAILURE_UNSPECIFIED {
+			return fmt.Errorf("classes_failed_to_initialize[%d].reason is not set", i)
+		}
+	}
+	return nil
 }
 
 // validateStaticBaseline checks the fields a backend cannot do without:

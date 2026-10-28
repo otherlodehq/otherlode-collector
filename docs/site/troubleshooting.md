@@ -214,6 +214,9 @@ The collector says `manifest`, `static baseline` or `class listing` in place of 
 | `resource.service_name is ".", which no URL path can name` | The name is `.` or `..`. Rename the service. The same rule applies to `resource.service_namespace`. |
 | `resource.service_instance_id is 5000 bytes, over the 1024-byte limit` | An identity value is longer than 1024 bytes. The message names the field, which is one of `service_name`, `service_version`, `service_instance_id`, `environment`, `run_id`, `service_namespace` or `agent_version`. Shorten the value in the agent. The agent makes `run_id` and `agent_version` itself, so a long one means something other than an Otherlode agent sent it. |
 | `resource.service_instance_id is empty` or `resource.run_id is empty` | The agent sent no instance or run identity. Run a supported agent. |
+| `resource.service_name holds a NUL byte` | An identity value holds a NUL character. The message names the field, as above. The agent skips such a value from its configuration, so something other than an Otherlode agent sent it. |
+| `deltas[3].first_seen_at is out of range` | A time in a delta batch or manifest is before 1970 or after the year 9999. The message names the list, the entry and the field. The agent takes these times from the host's clock, so check that the clock is set. |
+| `classes_failed_to_initialize[0].reason is not set` | A manifest names a class that failed to initialize with no reason. Something other than an Otherlode agent sent it. |
 | `scanned_at is not set`, `chunk_count must be at least 1`, `chunk_index is negative` or `chunk_index is out of range for chunk_count` | A static baseline chunk is malformed. Something other than an Otherlode agent sent it. |
 | `listed_at is not set`, `chunk_count must be at least 1`, `chunk_index is negative` or `chunk_index is out of range for chunk_count` | A class listing chunk is malformed. Something other than an Otherlode agent sent it. |
 

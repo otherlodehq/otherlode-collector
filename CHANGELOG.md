@@ -19,5 +19,6 @@ the section being read.
 
 ### Changed
 
+- The collector rejects a payload with a 400 when a resource string holds a NUL byte, when a time field in a delta batch or manifest is outside 0 to 253402300799999 milliseconds, or when a class that failed to initialize has no reason. `ingest.MaxTimestampMillis` is the upper bound.
 - The collector rejects a payload with a 400 when `service_name`, `service_version`, `service_instance_id`, `environment`, `run_id`, `service_namespace` or `agent_version` is longer than 1024 bytes. Startup fails when `OTHERLODE_COLLECTOR_ENVIRONMENT` or `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE` is longer than 1024 bytes after trimming.
 - The handler counts a body's elements before it decodes it. It answers 413 `payload has too many elements` for a payload over the limit for its kind, and counts it under reason `too_many_elements`.

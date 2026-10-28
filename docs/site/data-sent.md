@@ -49,13 +49,16 @@ The collector checks each request in this order. A request that fails a check ge
 | The body is not valid protobuf | `400` |
 | The resource is missing | `400` |
 | `service_name`, `service_version`, `service_instance_id`, `environment`, `run_id`, `service_namespace` or `agent_version` is longer than 1024 bytes | `400` |
+| `service_name`, `service_version`, `service_instance_id`, `environment`, `run_id`, `service_namespace` or `agent_version` holds a NUL byte | `400` |
 | `service_name` is blank, or `service_instance_id` or `run_id` is empty | `400` |
 | `service_name` or `service_namespace` is `.` or `..` | `400` |
 | A static baseline chunk has no `scanned_at`, a `chunk_count` below 1, or a `chunk_index` that is negative or not below `chunk_count` | `400` |
 | A class listing chunk has no `listed_at`, a `chunk_count` below 1, or a `chunk_index` that is negative or not below `chunk_count` | `400` |
+| A delta batch or manifest holds a time field outside 0 to 253402300799999 milliseconds since the epoch, which is the start of 1970 to the end of the year 9999. The fields are `first_seen_at` and `first_loaded_at` in a delta batch, and `first_seen_unreported_at`, `withheld_at`, `observed_at`, `skipped_at`, `disabled_at` and `seen_at` in a manifest. A time of 0 means not set and passes | `400` |
+| A manifest lists a class that failed to initialize with no `reason` | `400` |
 | The forwarder cannot take the payload because its queue is full or the collector is shutting down. See [forwarding](forwarding) | `503` |
 
-The checks read only identity fields and chunk numbers, and count elements. They do not read the code names, counts or conditions in a payload.
+The checks read only identity fields, time fields, chunk numbers and the reason a class failed to initialize, and count elements. They do not read the code names, counts or conditions in a payload.
 
 ## What the collector changes
 
