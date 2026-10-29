@@ -7,6 +7,7 @@ import (
 
 	otherlodepb "buf.build/gen/go/otherlode/otherlode/protocolbuffers/go/otherlode/v1"
 
+	"github.com/otherlodehq/otherlode-collector/ingest"
 	"github.com/otherlodehq/otherlode-collector/metrics"
 )
 
@@ -31,16 +32,16 @@ func sendEach(t *testing.T, ns *Namespace, newRes func() *otherlodepb.ResourceAt
 	manifest := &otherlodepb.ProbeManifest{Resource: newRes()}
 	baseline := &otherlodepb.StaticBaseline{Resource: newRes()}
 	listing := &otherlodepb.ClassListing{Resource: newRes()}
-	if err := ns.AcceptDeltaBatch(context.Background(), batch); err != nil {
+	if _, err := ns.AcceptDeltaBatch(context.Background(), batch); err != nil {
 		t.Fatalf("deltas: unexpected error: %v", err)
 	}
-	if err := ns.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := ns.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("manifest: unexpected error: %v", err)
 	}
-	if err := ns.AcceptStaticBaseline(context.Background(), baseline); err != nil {
+	if _, err := ns.AcceptStaticBaseline(context.Background(), baseline); err != nil {
 		t.Fatalf("static_baseline: unexpected error: %v", err)
 	}
-	if err := ns.AcceptClassListing(context.Background(), listing); err != nil {
+	if _, err := ns.AcceptClassListing(context.Background(), listing); err != nil {
 		t.Fatalf("class_listing: unexpected error: %v", err)
 	}
 	return map[string]*otherlodepb.ResourceAttributes{
@@ -67,10 +68,10 @@ func TestNamespace_EveryPayload_ReachesNextAsSamePointer(t *testing.T) {
 	manifest := &otherlodepb.ProbeManifest{Resource: resourceWithNamespace(nil)}
 	baseline := &otherlodepb.StaticBaseline{Resource: resourceWithNamespace(nil)}
 	listing := &otherlodepb.ClassListing{Resource: resourceWithNamespace(nil)}
-	_ = ns.AcceptDeltaBatch(context.Background(), batch)
-	_ = ns.AcceptManifest(context.Background(), manifest)
-	_ = ns.AcceptStaticBaseline(context.Background(), baseline)
-	_ = ns.AcceptClassListing(context.Background(), listing)
+	_, _ = ns.AcceptDeltaBatch(context.Background(), batch)
+	_, _ = ns.AcceptManifest(context.Background(), manifest)
+	_, _ = ns.AcceptStaticBaseline(context.Background(), baseline)
+	_, _ = ns.AcceptClassListing(context.Background(), listing)
 
 	if len(next.deltaBatches) != 1 || next.deltaBatches[0] != batch {
 		t.Fatalf("next did not receive the same batch pointer")
@@ -176,7 +177,7 @@ func TestNamespace_CaseDiffers_IsAMismatch(t *testing.T) {
 	ns := NewNamespace(&recordingSink{}, NamespaceConfig{Value: "team-a", Action: Upsert}, nil)
 
 	batch := &otherlodepb.DeltaBatch{Resource: resourceWithNamespace(ptr("Team-A"))}
-	if err := ns.AcceptDeltaBatch(context.Background(), batch); err != nil {
+	if _, err := ns.AcceptDeltaBatch(context.Background(), batch); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := batch.GetResource().GetServiceNamespace(); got != "team-a" {
@@ -192,7 +193,7 @@ func TestNamespace_MismatchNotCountedAsEnvironmentMismatch(t *testing.T) {
 	ns := NewNamespace(&recordingSink{}, NamespaceConfig{Value: "team-a"}, nil)
 
 	batch := &otherlodepb.DeltaBatch{Resource: resourceWithNamespace(ptr("team-b"))}
-	if err := ns.AcceptDeltaBatch(context.Background(), batch); err != nil {
+	if _, err := ns.AcceptDeltaBatch(context.Background(), batch); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if d := metrics.EnvironmentMismatch.Value("deltas") - before; d != 0 {
@@ -205,7 +206,7 @@ func TestNamespace_NilResource_NoPanicReachesNext(t *testing.T) {
 	ns := NewNamespace(next, NamespaceConfig{Value: "team-a"}, nil)
 
 	batch := &otherlodepb.DeltaBatch{}
-	if err := ns.AcceptDeltaBatch(context.Background(), batch); err != nil {
+	if _, err := ns.AcceptDeltaBatch(context.Background(), batch); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(next.deltaBatches) != 1 || next.deltaBatches[0] != batch {
@@ -217,21 +218,21 @@ func TestNamespace_NextError_Returned(t *testing.T) {
 	wantErr := errors.New("sink unavailable")
 	ns := NewNamespace(&recordingSink{err: wantErr}, NamespaceConfig{Value: "team-a"}, nil)
 
-	for name, accept := range map[string]func() error{
-		"deltas": func() error {
+	for name, accept := range map[string]func() ([]ingest.Notice, error){
+		"deltas": func() ([]ingest.Notice, error) {
 			return ns.AcceptDeltaBatch(context.Background(), &otherlodepb.DeltaBatch{Resource: resourceWithNamespace(nil)})
 		},
-		"manifest": func() error {
+		"manifest": func() ([]ingest.Notice, error) {
 			return ns.AcceptManifest(context.Background(), &otherlodepb.ProbeManifest{Resource: resourceWithNamespace(nil)})
 		},
-		"static_baseline": func() error {
+		"static_baseline": func() ([]ingest.Notice, error) {
 			return ns.AcceptStaticBaseline(context.Background(), &otherlodepb.StaticBaseline{Resource: resourceWithNamespace(nil)})
 		},
-		"class_listing": func() error {
+		"class_listing": func() ([]ingest.Notice, error) {
 			return ns.AcceptClassListing(context.Background(), &otherlodepb.ClassListing{Resource: resourceWithNamespace(nil)})
 		},
 	} {
-		if err := accept(); !errors.Is(err, wantErr) {
+		if _, err := accept(); !errors.Is(err, wantErr) {
 			t.Errorf("%s error = %v, want %v", name, err, wantErr)
 		}
 	}

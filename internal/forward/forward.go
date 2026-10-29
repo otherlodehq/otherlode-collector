@@ -118,7 +118,8 @@ type Config struct {
 	// 2xx from the target would count as delivered.
 	HTTPClient *http.Client
 
-	// Logger receives Warn logs for dropped payloads. Defaults to
+	// Logger receives Warn logs for dropped payloads and for the notices
+	// the backend sends with an accepted payload. Defaults to
 	// slog.Default().
 	Logger *slog.Logger
 
@@ -280,7 +281,9 @@ var ErrShuttingDown = errors.New("forward: sink is shutting down")
 // An Accept method returns an error when the payload's shard queue is
 // full by item count or by bytes, or the sink is shutting down. The
 // handler then answers 503, and the agent is never told that the
-// collector took data it did not queue.
+// collector took data it did not queue. An Accept method returns no
+// notices, since it answers before the backend does. The workers log the
+// notices the backend sends instead.
 type ForwardingSink struct {
 	cfg    Config
 	shards []*shard
@@ -290,6 +293,8 @@ type ForwardingSink struct {
 	// the shutdown budget.
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	noticeLog *noticeLog
 
 	// mu holds enqueue's shutdown check and its queue send together
 	// against Shutdown setting closed. An item that passed the check is
@@ -338,6 +343,8 @@ func NewForwardingSink(cfg Config) (*ForwardingSink, error) {
 		ctx:      ctx,
 		cancel:   cancel,
 		stopping: make(chan struct{}),
+
+		noticeLog: newNoticeLog(time.Now, maxNoticeKeys),
 	}
 	for i := range s.shards {
 		sh := &shard{queue: make(chan queuedItem, cfg.QueueSize)}
@@ -433,31 +440,31 @@ func (i instance) String() string {
 // service instance. It returns without waiting for delivery, and does not
 // use ctx: the request it comes from ends when the handler returns, long
 // before the queued item is delivered in the background.
-func (s *ForwardingSink) AcceptDeltaBatch(_ context.Context, batch *otherlodepb.DeltaBatch) error {
-	return s.marshalAndEnqueue(batch, instanceOf(batch.GetResource()), ingest.DeltaBatchPath)
+func (s *ForwardingSink) AcceptDeltaBatch(_ context.Context, batch *otherlodepb.DeltaBatch) ([]ingest.Notice, error) {
+	return nil, s.marshalAndEnqueue(batch, instanceOf(batch.GetResource()), ingest.DeltaBatchPath)
 }
 
 // AcceptManifest marshals manifest and queues it on the shard for its
 // service instance. It returns without waiting for delivery, and does not
 // use ctx: the request it comes from ends when the handler returns, long
 // before the queued item is delivered in the background.
-func (s *ForwardingSink) AcceptManifest(_ context.Context, manifest *otherlodepb.ProbeManifest) error {
-	return s.marshalAndEnqueue(manifest, instanceOf(manifest.GetResource()), ingest.ManifestPath)
+func (s *ForwardingSink) AcceptManifest(_ context.Context, manifest *otherlodepb.ProbeManifest) ([]ingest.Notice, error) {
+	return nil, s.marshalAndEnqueue(manifest, instanceOf(manifest.GetResource()), ingest.ManifestPath)
 }
 
 // AcceptStaticBaseline marshals baseline and queues it on the shard for
 // its service instance. It returns without waiting for delivery, and does
 // not use ctx: the request it comes from ends when the handler returns,
 // long before the queued item is delivered in the background.
-func (s *ForwardingSink) AcceptStaticBaseline(_ context.Context, baseline *otherlodepb.StaticBaseline) error {
-	return s.marshalAndEnqueue(baseline, instanceOf(baseline.GetResource()), ingest.StaticBaselinePath)
+func (s *ForwardingSink) AcceptStaticBaseline(_ context.Context, baseline *otherlodepb.StaticBaseline) ([]ingest.Notice, error) {
+	return nil, s.marshalAndEnqueue(baseline, instanceOf(baseline.GetResource()), ingest.StaticBaselinePath)
 }
 
 // AcceptClassListing marshals listing and queues it on the shard for its
 // service instance, like AcceptStaticBaseline. It returns without waiting
 // for delivery.
-func (s *ForwardingSink) AcceptClassListing(_ context.Context, listing *otherlodepb.ClassListing) error {
-	return s.marshalAndEnqueue(listing, instanceOf(listing.GetResource()), ingest.ClassListingPath)
+func (s *ForwardingSink) AcceptClassListing(_ context.Context, listing *otherlodepb.ClassListing) ([]ingest.Notice, error) {
+	return nil, s.marshalAndEnqueue(listing, instanceOf(listing.GetResource()), ingest.ClassListingPath)
 }
 
 // marshalAndEnqueue marshals msg and queues it for path. A marshal failure
@@ -656,6 +663,7 @@ func (s *ForwardingSink) attempt(ctx context.Context, item queuedItem) (retryabl
 	defer resp.Body.Close()
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBytes))
+		s.noticed(item, resp.Header.Values(ingest.NoticeHeader))
 		return false, 0, nil
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))

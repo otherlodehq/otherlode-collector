@@ -88,28 +88,28 @@ func NewEnvironment(next ingest.Sink, cfg EnvironmentConfig, logger *slog.Logger
 
 // AcceptDeltaBatch stamps the batch's resource with the configured
 // environment, then passes the batch to next.
-func (e *Environment) AcceptDeltaBatch(ctx context.Context, batch *otherlodepb.DeltaBatch) error {
+func (e *Environment) AcceptDeltaBatch(ctx context.Context, batch *otherlodepb.DeltaBatch) ([]ingest.Notice, error) {
 	e.stamp(batch.GetResource(), "deltas")
 	return e.next.AcceptDeltaBatch(ctx, batch)
 }
 
 // AcceptStaticBaseline stamps the baseline's resource with the
 // configured environment, then passes the baseline to next.
-func (e *Environment) AcceptStaticBaseline(ctx context.Context, baseline *otherlodepb.StaticBaseline) error {
+func (e *Environment) AcceptStaticBaseline(ctx context.Context, baseline *otherlodepb.StaticBaseline) ([]ingest.Notice, error) {
 	e.stamp(baseline.GetResource(), "static_baseline")
 	return e.next.AcceptStaticBaseline(ctx, baseline)
 }
 
 // AcceptClassListing stamps the listing's resource with the configured
 // environment, then passes the listing to next.
-func (e *Environment) AcceptClassListing(ctx context.Context, listing *otherlodepb.ClassListing) error {
+func (e *Environment) AcceptClassListing(ctx context.Context, listing *otherlodepb.ClassListing) ([]ingest.Notice, error) {
 	e.stamp(listing.GetResource(), "class_listing")
 	return e.next.AcceptClassListing(ctx, listing)
 }
 
 // AcceptManifest stamps the manifest's resource with the configured
 // environment, then passes the manifest to next.
-func (e *Environment) AcceptManifest(ctx context.Context, manifest *otherlodepb.ProbeManifest) error {
+func (e *Environment) AcceptManifest(ctx context.Context, manifest *otherlodepb.ProbeManifest) ([]ingest.Notice, error) {
 	e.stamp(manifest.GetResource(), "manifest")
 	return e.next.AcceptManifest(ctx, manifest)
 }

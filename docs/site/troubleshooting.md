@@ -1,6 +1,6 @@
 ---
 title: Troubleshooting
-description: Find the cause of a collector that will not start, an agent that gets a 401, 404, 405, 413, 415, 429, 400 or 503, a dropped payload, a 403 for redaction, branch history that starts over, the stripped-fields warning, a token rotation that did not apply, a shared rate limit or a failing healthcheck.
+description: Find the cause of a collector that will not start, an agent that gets a 401, 404, 405, 413, 415, 429, 400 or 503, a dropped payload, a 403 for redaction, a payload that Otherlode stores but does not track, branch history that starts over, the stripped-fields warning, a token rotation that did not apply, a shared rate limit or a failing healthcheck.
 order: 110
 ---
 
@@ -274,6 +274,31 @@ The tenant has Otherlode require redaction, and this collector's payloads do not
 - `redaction_secret_mismatch` means the header holds another fingerprint. This collector's secret differs from the tenant's. Compare the `secret_fingerprint` in its startup line with another collector's, and set the same secret.
 
 Every payload from such a collector is dropped until you fix it and restart it. [Let Otherlode refuse payloads that were not blanked](redaction#let-otherlode-refuse-payloads-that-were-not-blanked) covers the header. Any other `403` comes from the key. See Otherlode's [backend returned 403](/docs/server/troubleshooting#backend-returned-403).
+
+## Otherlode stores a payload but does not track it
+
+Otherlode answers a payload with a 2xx status, so the collector counts it as delivered. When Otherlode stores the payload and does not judge it, the response carries an `Otherlode-Notice` header, and the collector logs a `WARN` line for it.
+
+```text
+{"time":"2026-10-29T08:28:22.418Z","level":"WARN","msg":"backend stores the service's payloads but does not track the service, because the tenant's plan tracks no more services","notice":"service-over-cap","namespace":"","service":"checkout"}
+```
+
+The `notice` field names the notice. The `namespace` and `service` fields say whose payload it was. The collector logs a line at most once an hour for each notice, namespace and service, so a service that stays in this state logs once an hour. It remembers 10,000 of these at a time. Past that, a service it has no room for logs a line for every payload, so the lines repeat rather than stop. It counts every notice in `otherlode_collector_forward_notices_total`, labelled `notice`.
+
+| `notice` | `msg` | Meaning and fix |
+|---|---|---|
+| `service-over-cap` | `backend stores the service's payloads but does not track the service, because the tenant's plan tracks no more services` | The tenant already has as many tracked services as its plan allows, and this service is not one of them. Otherlode keeps what the service sends and makes no findings for it. The plan and the services it tracks are set in Otherlode, not in the collector, so changing a collector setting does not clear the line. Otherlode's [scope](/docs/server/scope) page says how a service gets tracked. |
+| `environment-not-tracked` | `backend stores the environment's payloads but does not track the environment, because the service already watches as many environments as its cap allows` | The service already has as many tracked environments as its cap allows, and this payload's environment is not one of them. Otherlode keeps what that environment sends and makes no findings for it. Otherlode's [scope](/docs/server/scope) page says how an environment gets tracked. |
+
+A notice that this collector does not know logs this line instead:
+
+```text
+{"time":"2026-10-29T08:28:43.069Z","level":"WARN","msg":"backend sent a notice this collector does not know","notice":"quota-soon","namespace":"","service":"checkout"}
+```
+
+The `notice` field shows the value when it is 1 to 64 lowercase letters and hyphens. Any other value shows as `"notice":"unknown"`. The counter labels both as `unknown`. Run the latest collector image, because a newer Otherlode can send a notice that an older collector has no name for.
+
+None of these lines means the collector dropped something. `forward_dropped_total` stays where it was. [Health checks, metrics and logs](monitoring) lists the counter.
 
 ## The collector warns that it dropped fields it does not know
 

@@ -28,44 +28,44 @@ type fakeSink struct {
 	listings     []*otherlodepb.ClassListing
 }
 
-func (f *fakeSink) AcceptDeltaBatch(_ context.Context, batch *otherlodepb.DeltaBatch) error {
+func (f *fakeSink) AcceptDeltaBatch(_ context.Context, batch *otherlodepb.DeltaBatch) ([]Notice, error) {
 	f.deltaBatches = append(f.deltaBatches, batch)
-	return nil
+	return nil, nil
 }
 
-func (f *fakeSink) AcceptManifest(_ context.Context, manifest *otherlodepb.ProbeManifest) error {
+func (f *fakeSink) AcceptManifest(_ context.Context, manifest *otherlodepb.ProbeManifest) ([]Notice, error) {
 	f.manifests = append(f.manifests, manifest)
-	return nil
+	return nil, nil
 }
 
-func (f *fakeSink) AcceptStaticBaseline(_ context.Context, baseline *otherlodepb.StaticBaseline) error {
+func (f *fakeSink) AcceptStaticBaseline(_ context.Context, baseline *otherlodepb.StaticBaseline) ([]Notice, error) {
 	f.baselines = append(f.baselines, baseline)
-	return nil
+	return nil, nil
 }
 
-func (f *fakeSink) AcceptClassListing(_ context.Context, listing *otherlodepb.ClassListing) error {
+func (f *fakeSink) AcceptClassListing(_ context.Context, listing *otherlodepb.ClassListing) ([]Notice, error) {
 	f.listings = append(f.listings, listing)
-	return nil
+	return nil, nil
 }
 
 // failingSink refuses every payload, standing in for a backend that could
 // not take the write (a database outage, for example).
 type failingSink struct{}
 
-func (failingSink) AcceptDeltaBatch(context.Context, *otherlodepb.DeltaBatch) error {
-	return errors.New("sink unavailable")
+func (failingSink) AcceptDeltaBatch(context.Context, *otherlodepb.DeltaBatch) ([]Notice, error) {
+	return nil, errors.New("sink unavailable")
 }
 
-func (failingSink) AcceptManifest(context.Context, *otherlodepb.ProbeManifest) error {
-	return errors.New("sink unavailable")
+func (failingSink) AcceptManifest(context.Context, *otherlodepb.ProbeManifest) ([]Notice, error) {
+	return nil, errors.New("sink unavailable")
 }
 
-func (failingSink) AcceptStaticBaseline(context.Context, *otherlodepb.StaticBaseline) error {
-	return errors.New("sink unavailable")
+func (failingSink) AcceptStaticBaseline(context.Context, *otherlodepb.StaticBaseline) ([]Notice, error) {
+	return nil, errors.New("sink unavailable")
 }
 
-func (failingSink) AcceptClassListing(context.Context, *otherlodepb.ClassListing) error {
-	return errors.New("sink unavailable")
+func (failingSink) AcceptClassListing(context.Context, *otherlodepb.ClassListing) ([]Notice, error) {
+	return nil, errors.New("sink unavailable")
 }
 
 // ctxKey avoids collisions with any key another package might set on the
@@ -88,24 +88,24 @@ func (s ctxCheckSink) checkContext(ctx context.Context) {
 	}
 }
 
-func (s ctxCheckSink) AcceptDeltaBatch(ctx context.Context, _ *otherlodepb.DeltaBatch) error {
+func (s ctxCheckSink) AcceptDeltaBatch(ctx context.Context, _ *otherlodepb.DeltaBatch) ([]Notice, error) {
 	s.checkContext(ctx)
-	return nil
+	return nil, nil
 }
 
-func (s ctxCheckSink) AcceptManifest(ctx context.Context, _ *otherlodepb.ProbeManifest) error {
+func (s ctxCheckSink) AcceptManifest(ctx context.Context, _ *otherlodepb.ProbeManifest) ([]Notice, error) {
 	s.checkContext(ctx)
-	return nil
+	return nil, nil
 }
 
-func (s ctxCheckSink) AcceptStaticBaseline(ctx context.Context, _ *otherlodepb.StaticBaseline) error {
+func (s ctxCheckSink) AcceptStaticBaseline(ctx context.Context, _ *otherlodepb.StaticBaseline) ([]Notice, error) {
 	s.checkContext(ctx)
-	return nil
+	return nil, nil
 }
 
-func (s ctxCheckSink) AcceptClassListing(ctx context.Context, _ *otherlodepb.ClassListing) error {
+func (s ctxCheckSink) AcceptClassListing(ctx context.Context, _ *otherlodepb.ClassListing) ([]Notice, error) {
 	s.checkContext(ctx)
-	return nil
+	return nil, nil
 }
 
 func newTestServer(sink Sink) *httptest.Server {
@@ -1251,7 +1251,7 @@ func newGateSink() *gateSink {
 	return &gateSink{entered: make(chan struct{}, 16), gate: make(chan struct{})}
 }
 
-func (g *gateSink) AcceptManifest(context.Context, *otherlodepb.ProbeManifest) error {
+func (g *gateSink) AcceptManifest(context.Context, *otherlodepb.ProbeManifest) ([]Notice, error) {
 	g.calls.Add(1)
 	n := g.active.Add(1)
 	for {
@@ -1263,7 +1263,7 @@ func (g *gateSink) AcceptManifest(context.Context, *otherlodepb.ProbeManifest) e
 	g.entered <- struct{}{}
 	<-g.gate
 	g.active.Add(-1)
-	return nil
+	return nil, nil
 }
 
 func manifestRequest(ctx context.Context, t *testing.T) *http.Request {

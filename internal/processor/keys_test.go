@@ -55,11 +55,11 @@ func TestRedaction_ReKeys_EqualStayEqualAndDifferentStayDifferent(t *testing.T) 
 			{ClassName: "com.example.Pricing", Kind: otherlodepb.ProbeKind_BRANCH, BranchKey: ptr(b)},
 		},
 	}
-	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	baseline := baselineWith(keyedSite("site-a"))
-	if err := r.AcceptStaticBaseline(context.Background(), baseline); err != nil {
+	if _, err := r.AcceptStaticBaseline(context.Background(), baseline); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -100,7 +100,7 @@ func TestRedaction_ReKeys_GuessAtLiteralNoLongerConfirmed(t *testing.T) {
 		Resource: resourceFor("run-1"),
 		Probes:   []*otherlodepb.ProbeLocation{{ClassName: "com.example.Pricing", Kind: otherlodepb.ProbeKind_BRANCH, BranchKey: ptr(plain)}},
 	}
-	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -136,7 +136,7 @@ func TestRedaction_EmptyAndUnsetKeys_StayAsSent(t *testing.T) {
 			{Kind: otherlodepb.ProbeKind_METHOD, BranchSites: []*otherlodepb.BranchSite{keyedSite(""), {}}},
 		},
 	}
-	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -194,10 +194,10 @@ func TestRedaction_HashCodeCaseKeys_ClearedInManifestAndBaseline(t *testing.T) {
 
 	next := &recordingSink{}
 	r := NewRedaction(next, allLiterals(), nil)
-	if err := r.AcceptManifest(context.Background(), manifestWith(hashSwitchMethod()...)); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifestWith(hashSwitchMethod()...)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if err := r.AcceptStaticBaseline(context.Background(), baselineWith(hashSwitchMethod()...)); err != nil {
+	if _, err := r.AcceptStaticBaseline(context.Background(), baselineWith(hashSwitchMethod()...)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -228,7 +228,7 @@ func TestRedaction_HashCodeCaseKeys_ClearedInManifestAndBaseline(t *testing.T) {
 func TestRedaction_HashCodeCaseKeys_KeptWhenLiteralNotRedacted(t *testing.T) {
 	next := &recordingSink{}
 	r := NewRedaction(next, blocked(t, "^ENABLE_"), nil)
-	if err := r.AcceptManifest(context.Background(), manifestWith(hashSwitchMethod()...)); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifestWith(hashSwitchMethod()...)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -253,7 +253,7 @@ func TestRedaction_HashCodeCaseKeys_OnlyClearedInTheLiteralsMethod(t *testing.T)
 			{MethodName: "checks", BranchSites: sites[1:3]},
 		},
 	}
-	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -295,10 +295,10 @@ func TestRedaction_MarkedHashCodeSwitch_CaseKeysClearedWithoutLiterals(t *testin
 
 	next := &recordingSink{}
 	r := NewRedaction(next, allLiterals(), nil)
-	if err := r.AcceptManifest(context.Background(), manifestWith(markedHashSwitchMethod()...)); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifestWith(markedHashSwitchMethod()...)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if err := r.AcceptStaticBaseline(context.Background(), baselineWith(markedHashSwitchMethod()...)); err != nil {
+	if _, err := r.AcceptStaticBaseline(context.Background(), baselineWith(markedHashSwitchMethod()...)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -335,7 +335,7 @@ func TestRedaction_MarkedHashCodeSwitch_CaseKeysClearedWithoutLiterals(t *testin
 func TestRedaction_MarkedHashCodeSwitch_ClearedWhenNoLiteralIsBlocked(t *testing.T) {
 	next := &recordingSink{}
 	r := NewRedaction(next, blocked(t, "^NO_SUCH_LITERAL$"), nil)
-	if err := r.AcceptManifest(context.Background(), manifestWith(markedHashSwitchMethod()...)); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifestWith(markedHashSwitchMethod()...)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -362,7 +362,7 @@ func TestRedaction_MarkedAndUnmarkedMethods_EachRuleApplies(t *testing.T) {
 			{MethodName: "newer", BranchSites: markedHashSwitchMethod()},
 		},
 	}
-	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 

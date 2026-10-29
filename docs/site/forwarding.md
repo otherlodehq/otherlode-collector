@@ -142,6 +142,7 @@ Each outcome increments these counters on `/metrics`. The `payload` label is `de
 |---|---|
 | Backend accepted the payload | `otherlode_collector_forward_delivered_total` |
 | A wait ended and the collector retried | `otherlode_collector_forward_retries_total` |
+| Backend accepted the payload and sent a notice | `otherlode_collector_forward_notices_total` with `notice` of `service-over-cap`, `environment-not-tracked` or `unknown`, and a `WARN` line at most once an hour for each notice, namespace and service |
 | Dropped after the 202 | `otherlode_collector_forward_dropped_total` with `reason` of `permanent`, `retry_exhausted`, `shutdown_deadline`, `shutdown_attempt_failed` or `marshal` |
 | Refused with 503 | `otherlode_collector_forward_refused_total` with `reason` of `queue_full` or `shutting_down`, and `otherlode_collector_ingest_rejected_total` with `reason` `sink` |
 

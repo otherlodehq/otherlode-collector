@@ -25,7 +25,7 @@ func NewLogSink(logger *slog.Logger) *LogSink {
 // AcceptDeltaBatch logs the batch's identity and the size of each list
 // it carries, and the time its run's counts have been pending since when
 // there are pending counts. It never fails.
-func (s *LogSink) AcceptDeltaBatch(_ context.Context, batch *otherlodepb.DeltaBatch) error {
+func (s *LogSink) AcceptDeltaBatch(_ context.Context, batch *otherlodepb.DeltaBatch) ([]Notice, error) {
 	attrs := []any{
 		"namespace", batch.GetResource().GetServiceNamespace(),
 		"service", batch.GetResource().GetServiceName(),
@@ -42,13 +42,13 @@ func (s *LogSink) AcceptDeltaBatch(_ context.Context, batch *otherlodepb.DeltaBa
 		attrs = append(attrs, "counts_pending_since", since)
 	}
 	s.logger.Info("received delta batch", attrs...)
-	return nil
+	return nil, nil
 }
 
 // AcceptManifest logs the manifest's identity and the size of each list
 // it carries, and the time its run's counts have been pending since when
 // there are pending counts. It never fails.
-func (s *LogSink) AcceptManifest(_ context.Context, manifest *otherlodepb.ProbeManifest) error {
+func (s *LogSink) AcceptManifest(_ context.Context, manifest *otherlodepb.ProbeManifest) ([]Notice, error) {
 	attrs := []any{
 		"namespace", manifest.GetResource().GetServiceNamespace(),
 		"service", manifest.GetResource().GetServiceName(),
@@ -76,12 +76,12 @@ func (s *LogSink) AcceptManifest(_ context.Context, manifest *otherlodepb.ProbeM
 		attrs = append(attrs, "counts_pending_since", since)
 	}
 	s.logger.Info("received probe manifest", attrs...)
-	return nil
+	return nil, nil
 }
 
 // AcceptStaticBaseline logs the baseline's identity, its chunk position
 // and the size of each list it carries. It never fails.
-func (s *LogSink) AcceptStaticBaseline(_ context.Context, baseline *otherlodepb.StaticBaseline) error {
+func (s *LogSink) AcceptStaticBaseline(_ context.Context, baseline *otherlodepb.StaticBaseline) ([]Notice, error) {
 	s.logger.Info("received static baseline",
 		"namespace", baseline.GetResource().GetServiceNamespace(),
 		"service", baseline.GetResource().GetServiceName(),
@@ -99,12 +99,12 @@ func (s *LogSink) AcceptStaticBaseline(_ context.Context, baseline *otherlodepb.
 		"unreadable_classes", len(baseline.GetUnreadableClasses()),
 		"unprobed_classes", len(baseline.GetUnprobedClasses()),
 	)
-	return nil
+	return nil, nil
 }
 
 // AcceptClassListing logs the listing's identity, its chunk position and
 // the number of class names it carries. It never fails.
-func (s *LogSink) AcceptClassListing(_ context.Context, listing *otherlodepb.ClassListing) error {
+func (s *LogSink) AcceptClassListing(_ context.Context, listing *otherlodepb.ClassListing) ([]Notice, error) {
 	s.logger.Info("received class listing",
 		"namespace", listing.GetResource().GetServiceNamespace(),
 		"service", listing.GetResource().GetServiceName(),
@@ -118,7 +118,7 @@ func (s *LogSink) AcceptClassListing(_ context.Context, listing *otherlodepb.Cla
 		"chunk_count", listing.GetChunkCount(),
 		"class_names", len(listing.GetClassNames()),
 	)
-	return nil
+	return nil, nil
 }
 
 func callEdgeCount(probes []*otherlodepb.ProbeLocation) int {

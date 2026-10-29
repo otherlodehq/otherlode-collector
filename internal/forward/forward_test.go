@@ -108,7 +108,7 @@ func TestForwardingSink_Manifest_RelayedToBackendPath(t *testing.T) {
 	sink := mustNewSink(t, cfg)
 	defer sink.Shutdown(context.Background())
 
-	if err := sink.AcceptManifest(context.Background(), manifestWithService("demo-service")); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifestWithService("demo-service")); err != nil {
 		t.Fatalf("AcceptManifest: %v", err)
 	}
 
@@ -147,7 +147,7 @@ func TestForwardingSink_DeltaBatch_RelayedToBackendPath(t *testing.T) {
 	sink := mustNewSink(t, testConfig(backend.URL))
 	defer sink.Shutdown(context.Background())
 
-	if err := sink.AcceptDeltaBatch(context.Background(), &otherlodepb.DeltaBatch{
+	if _, err := sink.AcceptDeltaBatch(context.Background(), &otherlodepb.DeltaBatch{
 		Resource: &otherlodepb.ResourceAttributes{ServiceName: "demo-service", ServiceInstanceId: "instance-1", RunId: "run-1"},
 	}); err != nil {
 		t.Fatalf("AcceptDeltaBatch: %v", err)
@@ -182,7 +182,7 @@ func TestForwardingSink_StaticBaseline_RelayedToBackendPath(t *testing.T) {
 		ChunkIndex: 1,
 		ChunkCount: 2,
 	}
-	if err := sink.AcceptStaticBaseline(context.Background(), sent); err != nil {
+	if _, err := sink.AcceptStaticBaseline(context.Background(), sent); err != nil {
 		t.Fatalf("AcceptStaticBaseline: %v", err)
 	}
 
@@ -228,7 +228,7 @@ func TestForwardingSink_ClassListing_RelayedToBackendPath(t *testing.T) {
 		ChunkIndex:   1,
 		ChunkCount:   2,
 	}
-	if err := sink.AcceptClassListing(context.Background(), sent); err != nil {
+	if _, err := sink.AcceptClassListing(context.Background(), sent); err != nil {
 		t.Fatalf("AcceptClassListing: %v", err)
 	}
 
@@ -265,7 +265,7 @@ func TestForwardingSink_RetryableStatus_RetriesThenSucceeds(t *testing.T) {
 	sink := mustNewSink(t, testConfig(backend.URL))
 	defer sink.Shutdown(context.Background())
 
-	if err := sink.AcceptManifest(context.Background(), manifestWithService("demo-service")); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifestWithService("demo-service")); err != nil {
 		t.Fatalf("AcceptManifest: %v", err)
 	}
 
@@ -288,7 +288,7 @@ func TestForwardingSink_PermanentStatus_DroppedWithoutRetry(t *testing.T) {
 	sink := mustNewSink(t, testConfig(backend.URL))
 	defer sink.Shutdown(context.Background())
 
-	if err := sink.AcceptManifest(context.Background(), manifestWithService("demo-service")); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifestWithService("demo-service")); err != nil {
 		t.Fatalf("AcceptManifest: %v", err)
 	}
 
@@ -311,7 +311,7 @@ func TestForwardingSink_RetryBudgetExhausted_StopsRetrying(t *testing.T) {
 	sink := mustNewSink(t, testConfig(backend.URL))
 	defer sink.Shutdown(context.Background())
 
-	if err := sink.AcceptManifest(context.Background(), manifestWithService("demo-service")); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifestWithService("demo-service")); err != nil {
 		t.Fatalf("AcceptManifest: %v", err)
 	}
 
@@ -358,7 +358,7 @@ func TestForwardingSink_QueueFull_RefusesNewestWithoutBlocking(t *testing.T) {
 	// waits until the handler holds item 1. Before that, item 1 can still
 	// sit in the queue, and item 2 is refused in its place.
 	var errs [3]error
-	errs[0] = sink.AcceptManifest(context.Background(), manifestWithService("svc"))
+	_, errs[0] = sink.AcceptManifest(context.Background(), manifestWithService("svc"))
 	select {
 	case <-entered:
 	case <-time.After(time.Second):
@@ -366,8 +366,8 @@ func TestForwardingSink_QueueFull_RefusesNewestWithoutBlocking(t *testing.T) {
 	}
 	done := make(chan struct{})
 	go func() {
-		errs[1] = sink.AcceptManifest(context.Background(), manifestWithService("svc"))
-		errs[2] = sink.AcceptManifest(context.Background(), manifestWithService("svc"))
+		_, errs[1] = sink.AcceptManifest(context.Background(), manifestWithService("svc"))
+		_, errs[2] = sink.AcceptManifest(context.Background(), manifestWithService("svc"))
 		close(done)
 	}()
 
@@ -428,7 +428,7 @@ func TestForwardingSink_RunIdChange_KeepsInstanceOnItsShard(t *testing.T) {
 		return &otherlodepb.ResourceAttributes{ServiceName: "svc", ServiceInstanceId: "instance-1", RunId: runID}
 	}
 
-	if err := sink.AcceptDeltaBatch(context.Background(), &otherlodepb.DeltaBatch{Resource: resource("run-a")}); err != nil {
+	if _, err := sink.AcceptDeltaBatch(context.Background(), &otherlodepb.DeltaBatch{Resource: resource("run-a")}); err != nil {
 		t.Fatalf("delta batch: unexpected error: %v", err)
 	}
 	select {
@@ -436,11 +436,11 @@ func TestForwardingSink_RunIdChange_KeepsInstanceOnItsShard(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("backend never received the delta batch")
 	}
-	if err := sink.AcceptManifest(context.Background(), &otherlodepb.ProbeManifest{Resource: resource("run-b")}); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), &otherlodepb.ProbeManifest{Resource: resource("run-b")}); err != nil {
 		t.Fatalf("manifest: unexpected error: %v", err)
 	}
 	baseline := &otherlodepb.StaticBaseline{Resource: resource("run-c"), ScannedAt: 1700000000, ChunkCount: 1}
-	if err := sink.AcceptStaticBaseline(context.Background(), baseline); !errors.Is(err, ErrQueueFull) {
+	if _, err := sink.AcceptStaticBaseline(context.Background(), baseline); !errors.Is(err, ErrQueueFull) {
 		t.Fatalf("static baseline error = %v, want it to wrap ErrQueueFull (all three runs share one shard)", err)
 	}
 }
@@ -478,10 +478,10 @@ func TestForwardingSink_DifferentShards_OneStuckDoesNotBlockAnother(t *testing.T
 		sink.Shutdown(ctx)
 	})
 
-	if err := sink.AcceptManifest(context.Background(), manifestWithService(keyA)); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifestWithService(keyA)); err != nil {
 		t.Fatalf("AcceptManifest: %v", err)
 	}
-	if err := sink.AcceptManifest(context.Background(), manifestWithService(keyB)); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifestWithService(keyB)); err != nil {
 		t.Fatalf("AcceptManifest: %v", err)
 	}
 
@@ -506,15 +506,15 @@ func TestForwardingSink_Shutdown_DrainsQueueWithOneAttemptEach(t *testing.T) {
 	sink := mustNewSink(t, cfg)
 
 	// The worker picks svc-1 up and blocks in the handler.
-	if err := sink.AcceptManifest(context.Background(), manifestWithService("svc-1")); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifestWithService("svc-1")); err != nil {
 		t.Fatalf("AcceptManifest: %v", err)
 	}
 	waitFor(t, time.Second, func() bool { return attempts.Load() == 1 })
 	// svc-2 and svc-3 sit queued behind it.
-	if err := sink.AcceptManifest(context.Background(), manifestWithService("svc-2")); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifestWithService("svc-2")); err != nil {
 		t.Fatalf("AcceptManifest: %v", err)
 	}
-	if err := sink.AcceptManifest(context.Background(), manifestWithService("svc-3")); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifestWithService("svc-3")); err != nil {
 		t.Fatalf("AcceptManifest: %v", err)
 	}
 
@@ -596,7 +596,7 @@ func TestForwardingSink_Shutdown_DrainsShardsInParallel(t *testing.T) {
 	// The first item per shard is held by its worker, blocked in the
 	// backend. The second item per shard waits in the queue.
 	for _, svc := range []string{svcA, svcB} {
-		if err := sink.AcceptManifest(context.Background(), manifestWithService(svc)); err != nil {
+		if _, err := sink.AcceptManifest(context.Background(), manifestWithService(svc)); err != nil {
 			t.Fatalf("AcceptManifest %s: %v", svc, err)
 		}
 	}
@@ -606,7 +606,7 @@ func TestForwardingSink_Shutdown_DrainsShardsInParallel(t *testing.T) {
 		return a && b
 	})
 	for _, svc := range []string{svcA, svcB} {
-		if err := sink.AcceptManifest(context.Background(), manifestWithService(svc)); err != nil {
+		if _, err := sink.AcceptManifest(context.Background(), manifestWithService(svc)); err != nil {
 			t.Fatalf("AcceptManifest %s: %v", svc, err)
 		}
 	}
@@ -681,7 +681,7 @@ func TestForwardingSink_Shutdown_CancelsInFlightAttemptAtDeadline(t *testing.T) 
 	cfg.RequestTimeout = time.Hour // only the shutdown deadline may end the attempt
 	sink := mustNewSink(t, cfg)
 
-	if err := sink.AcceptManifest(context.Background(), manifestWithService("svc")); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifestWithService("svc")); err != nil {
 		t.Fatalf("AcceptManifest: %v", err)
 	}
 	select {
@@ -723,7 +723,7 @@ func TestForwardingSink_Redirect_IsPermanentFailure(t *testing.T) {
 	deliveredBefore := metrics.ForwardDelivered.Value("manifest")
 	droppedBefore := metrics.ForwardDropped.Value("manifest", "permanent")
 
-	if err := sink.AcceptManifest(context.Background(), manifestWithService("svc")); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifestWithService("svc")); err != nil {
 		t.Fatalf("AcceptManifest: %v", err)
 	}
 	waitFor(t, time.Second, func() bool { return metrics.ForwardDropped.Value("manifest", "permanent") == droppedBefore+1 })
@@ -812,7 +812,7 @@ func TestForwardingSink_TrailingSlashURL_PostsToCleanPath(t *testing.T) {
 	sink := mustNewSink(t, testConfig(backend.URL+"/"))
 	defer sink.Shutdown(context.Background())
 
-	if err := sink.AcceptManifest(context.Background(), manifestWithService("svc")); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifestWithService("svc")); err != nil {
 		t.Fatalf("AcceptManifest: %v", err)
 	}
 	waitFor(t, time.Second, received.Load)
@@ -843,7 +843,7 @@ func TestForwardingSink_RetryAfterHeader_DelaysNextAttempt(t *testing.T) {
 	sink := mustNewSink(t, cfg)
 	defer sink.Shutdown(context.Background())
 
-	if err := sink.AcceptManifest(context.Background(), manifestWithService("svc")); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifestWithService("svc")); err != nil {
 		t.Fatalf("AcceptManifest: %v", err)
 	}
 	waitFor(t, 3*time.Second, func() bool { return attempts.Load() == 2 })
@@ -868,7 +868,7 @@ func TestForwardingSink_DropLog_NamesTheService(t *testing.T) {
 
 	resource := &otherlodepb.ResourceAttributes{ServiceName: "demo-service", ServiceInstanceId: "instance-1", RunId: "run-1"}
 	resource.SetServiceNamespace("team-a")
-	if err := sink.AcceptDeltaBatch(context.Background(), &otherlodepb.DeltaBatch{Resource: resource}); err != nil {
+	if _, err := sink.AcceptDeltaBatch(context.Background(), &otherlodepb.DeltaBatch{Resource: resource}); err != nil {
 		t.Fatalf("AcceptDeltaBatch: %v", err)
 	}
 	sink.Shutdown(context.Background())
@@ -994,7 +994,7 @@ func TestForwardingSink_LargeResponseBody_DoesNotBlockDelivery(t *testing.T) {
 	defer backend.Close()
 
 	sink := mustNewSink(t, testConfig(backend.URL))
-	if err := sink.AcceptManifest(context.Background(), manifestWithService("svc")); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifestWithService("svc")); err != nil {
 		t.Fatalf("AcceptManifest: %v", err)
 	}
 	waitFor(t, time.Second, received.Load)
@@ -1030,7 +1030,7 @@ func TestForwardingSink_AcceptAfterShutdown_RefusedWithoutBlocking(t *testing.T)
 	var acceptErr error
 	done := make(chan struct{})
 	go func() {
-		acceptErr = sink.AcceptManifest(context.Background(), manifestWithService("svc"))
+		_, acceptErr = sink.AcceptManifest(context.Background(), manifestWithService("svc"))
 		close(done)
 	}()
 	select {
@@ -1079,7 +1079,7 @@ func TestForwardingSink_Shutdown_DuringRetryWait_FinalAttemptSucceeds(t *testing
 	sink := mustNewSink(t, retryWaitConfig(backend.URL))
 	deliveredBefore := metrics.ForwardDelivered.Value("manifest")
 
-	if err := sink.AcceptManifest(context.Background(), manifestWithService("svc")); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifestWithService("svc")); err != nil {
 		t.Fatalf("AcceptManifest: %v", err)
 	}
 	waitFor(t, time.Second, func() bool { return attempts.Load() == 1 })
@@ -1107,7 +1107,7 @@ func TestForwardingSink_Shutdown_DuringRetryWait_FinalAttemptAlsoFails(t *testin
 	sink := mustNewSink(t, retryWaitConfig(backend.URL))
 	droppedBefore := metrics.ForwardDropped.Value("manifest", "shutdown_attempt_failed")
 
-	if err := sink.AcceptManifest(context.Background(), manifestWithService("svc")); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifestWithService("svc")); err != nil {
 		t.Fatalf("AcceptManifest: %v", err)
 	}
 	waitFor(t, time.Second, func() bool { return attempts.Load() == 1 })
@@ -1149,7 +1149,7 @@ func TestForwardingSink_AcceptRacingShutdown_AcceptedPayloadIsDelivered(t *testi
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	if err := sink.AcceptManifest(context.Background(), manifestWithService("svc")); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifestWithService("svc")); err != nil {
 		t.Fatalf("AcceptManifest = %v, want nil: it passed the shutdown check before Shutdown began", err)
 	}
 	<-shutdownDone
@@ -1183,7 +1183,7 @@ func TestForwardingSink_AuthTokenChanges_NextRequestSendsNewKey(t *testing.T) {
 	sink := mustNewSink(t, cfg)
 	defer sink.Shutdown(context.Background())
 
-	if err := sink.AcceptManifest(context.Background(), manifestWithService("demo-service")); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifestWithService("demo-service")); err != nil {
 		t.Fatalf("AcceptManifest: %v", err)
 	}
 	if got := <-auths; got != "Bearer old-key" {
@@ -1191,7 +1191,7 @@ func TestForwardingSink_AuthTokenChanges_NextRequestSendsNewKey(t *testing.T) {
 	}
 
 	token.v.Store("new-key")
-	if err := sink.AcceptManifest(context.Background(), manifestWithService("demo-service")); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifestWithService("demo-service")); err != nil {
 		t.Fatalf("AcceptManifest: %v", err)
 	}
 	if got := <-auths; got != "Bearer new-key" {
@@ -1217,7 +1217,7 @@ func TestForwardingSink_EmptyAuthToken_SendsNoHeader(t *testing.T) {
 			sink := mustNewSink(t, cfg)
 			defer sink.Shutdown(context.Background())
 
-			if err := sink.AcceptManifest(context.Background(), manifestWithService("demo-service")); err != nil {
+			if _, err := sink.AcceptManifest(context.Background(), manifestWithService("demo-service")); err != nil {
 				t.Fatalf("AcceptManifest: %v", err)
 			}
 			if got := <-auths; len(got) != 0 {
@@ -1309,12 +1309,12 @@ func TestForwardingSink_QueueBytes_RefusesItemOverBudgetUntilWorkerFinishes(t *t
 	refusedBefore := metrics.ForwardRefused.Value("manifest", "queue_full")
 	droppedBefore := droppedTotal("manifest")
 
-	if err := sink.AcceptManifest(context.Background(), item); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), item); err != nil {
 		t.Fatalf("first Accept: %v", err)
 	}
 	waitEntered(t, entered)
 
-	err := sink.AcceptManifest(context.Background(), item)
+	_, err := sink.AcceptManifest(context.Background(), item)
 	if !errors.Is(err, ErrQueueFull) {
 		t.Fatalf("second Accept error = %v, want it to wrap ErrQueueFull while the first is in flight", err)
 	}
@@ -1327,7 +1327,7 @@ func TestForwardingSink_QueueBytes_RefusesItemOverBudgetUntilWorkerFinishes(t *t
 
 	release()
 	waitFor(t, time.Second, func() bool { return sink.shards[0].heldBytes() == 0 })
-	if err := sink.AcceptManifest(context.Background(), item); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), item); err != nil {
 		t.Fatalf("Accept after the worker finished: %v", err)
 	}
 	if got := droppedTotal("manifest"); got != droppedBefore {
@@ -1350,17 +1350,17 @@ func TestForwardingSink_QueueBytes_OversizedItemPassesThroughIdleShard(t *testin
 		sink.Shutdown(ctx)
 	})
 
-	if err := sink.AcceptManifest(context.Background(), item); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), item); err != nil {
 		t.Fatalf("oversized item on an idle shard: %v", err)
 	}
 	waitEntered(t, entered)
-	if err := sink.AcceptManifest(context.Background(), item); !errors.Is(err, ErrQueueFull) {
+	if _, err := sink.AcceptManifest(context.Background(), item); !errors.Is(err, ErrQueueFull) {
 		t.Fatalf("second oversized item error = %v, want it to wrap ErrQueueFull while the shard is busy", err)
 	}
 
 	release()
 	waitFor(t, time.Second, func() bool { return sink.shards[0].heldBytes() == 0 })
-	if err := sink.AcceptManifest(context.Background(), item); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), item); err != nil {
 		t.Fatalf("oversized item after the shard went idle: %v", err)
 	}
 }
@@ -1388,7 +1388,7 @@ func TestForwardingSink_QueueBytes_ConcurrentEnqueuesNeverPassBudget(t *testing.
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := sink.AcceptManifest(context.Background(), item); err == nil {
+			if _, err := sink.AcceptManifest(context.Background(), item); err == nil {
 				accepted.Add(1)
 			} else if !errors.Is(err, ErrQueueFull) {
 				t.Errorf("unexpected error: %v", err)
@@ -1416,7 +1416,7 @@ func TestForwardingSink_QueueBytes_ReturnToZeroAfterShutdown(t *testing.T) {
 	t.Cleanup(release)
 
 	for range 3 {
-		if err := sink.AcceptManifest(context.Background(), item); err != nil {
+		if _, err := sink.AcceptManifest(context.Background(), item); err != nil {
 			t.Fatalf("Accept: %v", err)
 		}
 	}
@@ -1436,16 +1436,16 @@ func TestForwardingSink_QueueBytes_ReturnToZeroAfterShutdown(t *testing.T) {
 func sendEveryKind(t *testing.T, sink *ForwardingSink) {
 	t.Helper()
 	res := &otherlodepb.ResourceAttributes{ServiceName: "demo-service", ServiceInstanceId: "instance-1", RunId: "run-1"}
-	if err := sink.AcceptDeltaBatch(context.Background(), &otherlodepb.DeltaBatch{Resource: res}); err != nil {
+	if _, err := sink.AcceptDeltaBatch(context.Background(), &otherlodepb.DeltaBatch{Resource: res}); err != nil {
 		t.Fatalf("AcceptDeltaBatch: %v", err)
 	}
-	if err := sink.AcceptManifest(context.Background(), &otherlodepb.ProbeManifest{Resource: res}); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), &otherlodepb.ProbeManifest{Resource: res}); err != nil {
 		t.Fatalf("AcceptManifest: %v", err)
 	}
-	if err := sink.AcceptStaticBaseline(context.Background(), &otherlodepb.StaticBaseline{Resource: res}); err != nil {
+	if _, err := sink.AcceptStaticBaseline(context.Background(), &otherlodepb.StaticBaseline{Resource: res}); err != nil {
 		t.Fatalf("AcceptStaticBaseline: %v", err)
 	}
-	if err := sink.AcceptClassListing(context.Background(), &otherlodepb.ClassListing{Resource: res}); err != nil {
+	if _, err := sink.AcceptClassListing(context.Background(), &otherlodepb.ClassListing{Resource: res}); err != nil {
 		t.Fatalf("AcceptClassListing: %v", err)
 	}
 }
@@ -1518,7 +1518,7 @@ func dropLogFor(t *testing.T, status int, body string) string {
 	cfg.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
 	sink := mustNewSink(t, cfg)
 	defer sink.Shutdown(context.Background())
-	if err := sink.AcceptManifest(context.Background(), manifestWithService("demo-service")); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifestWithService("demo-service")); err != nil {
 		t.Fatalf("AcceptManifest: %v", err)
 	}
 	waitFor(t, time.Second, func() bool { return strings.Contains(logs.String(), "dropping payload") })

@@ -53,28 +53,28 @@ func NewNamespace(next ingest.Sink, cfg NamespaceConfig, logger *slog.Logger) *N
 
 // AcceptDeltaBatch stamps the batch's resource with the configured
 // namespace, then passes the batch to next.
-func (n *Namespace) AcceptDeltaBatch(ctx context.Context, batch *otherlodepb.DeltaBatch) error {
+func (n *Namespace) AcceptDeltaBatch(ctx context.Context, batch *otherlodepb.DeltaBatch) ([]ingest.Notice, error) {
 	n.stamp(batch.GetResource(), "deltas")
 	return n.next.AcceptDeltaBatch(ctx, batch)
 }
 
 // AcceptManifest stamps the manifest's resource with the configured
 // namespace, then passes the manifest to next.
-func (n *Namespace) AcceptManifest(ctx context.Context, manifest *otherlodepb.ProbeManifest) error {
+func (n *Namespace) AcceptManifest(ctx context.Context, manifest *otherlodepb.ProbeManifest) ([]ingest.Notice, error) {
 	n.stamp(manifest.GetResource(), "manifest")
 	return n.next.AcceptManifest(ctx, manifest)
 }
 
 // AcceptStaticBaseline stamps the baseline's resource with the
 // configured namespace, then passes the baseline to next.
-func (n *Namespace) AcceptStaticBaseline(ctx context.Context, baseline *otherlodepb.StaticBaseline) error {
+func (n *Namespace) AcceptStaticBaseline(ctx context.Context, baseline *otherlodepb.StaticBaseline) ([]ingest.Notice, error) {
 	n.stamp(baseline.GetResource(), "static_baseline")
 	return n.next.AcceptStaticBaseline(ctx, baseline)
 }
 
 // AcceptClassListing stamps the listing's resource with the configured
 // namespace, then passes the listing to next.
-func (n *Namespace) AcceptClassListing(ctx context.Context, listing *otherlodepb.ClassListing) error {
+func (n *Namespace) AcceptClassListing(ctx context.Context, listing *otherlodepb.ClassListing) ([]ingest.Notice, error) {
 	n.stamp(listing.GetResource(), "class_listing")
 	return n.next.AcceptClassListing(ctx, listing)
 }

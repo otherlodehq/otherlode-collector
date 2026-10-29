@@ -96,6 +96,7 @@ These stay at 0 when `OTHERLODE_COLLECTOR_FORWARD_URL` is not set.
 | `otherlode_collector_forward_retries_total` | `payload` | The forwarder waited after a retryable failure and started another attempt |
 | `otherlode_collector_forward_dropped_total` | `payload`, `reason` | The collector gave up on a payload it had already accepted. See the reasons below |
 | `otherlode_collector_forward_refused_total` | `payload`, `reason` | The forwarder did not take a payload and the agent got `503`. See the reasons below |
+| `otherlode_collector_forward_notices_total` | `notice` | The backend answered a payload with a `2xx` status and an `Otherlode-Notice` header. It adds one for each header value |
 
 The `reason` label on `forward_dropped_total` takes these values:
 
@@ -106,6 +107,8 @@ The `reason` label on `forward_dropped_total` takes these values:
 | `retry_exhausted` | The retries ran out of time |
 | `shutdown_deadline` | The collector stopped before it could try the payload again |
 | `shutdown_attempt_failed` | The one attempt made during shutdown failed |
+
+The `notice` label on `forward_notices_total` is `service-over-cap`, `environment-not-tracked` or `unknown`. `unknown` stands for every other value, so a backend cannot add series. A notice does not mean a payload was lost, since the backend stored it. `service-over-cap` and `environment-not-tracked` mean the backend does not track the service or the environment. The collector does not know what an `unknown` notice means. See [Otherlode stores a payload but does not track it](troubleshooting#otherlode-stores-a-payload-but-does-not-track-it).
 
 The `reason` label on `forward_refused_total` is `queue_full` or `shutting_down`. A refused payload is still in the agent's hands, because the agent got a `503`. Each refusal also adds one to `ingest_rejected_total` with `reason="sink"`. The queue, the retry budget and the shutdown drain are in [forwarding](forwarding).
 
@@ -133,6 +136,7 @@ The mismatch counters go up whether the action is `insert` or `upsert`. An agent
 
 - **`forward_dropped_total`.** Alert on any increase. Every increment is a payload the agent was told arrived, and that never reached the backend. The `reason` tells you why.
 - **`forward_refused_total`.** A steady rise means the backend is slower than your agents, or the queue is too small. Nothing is lost while the agents keep retrying.
+- **`forward_notices_total`.** A rise in `service-over-cap` or `environment-not-tracked` means the backend stores payloads it does not track. Nothing is lost, but the service or environment gets no findings. Alert on it if you want to hear before a team asks why a service shows none.
 - **`token_reload_failures_total`.** Alert on any increase. A token file is broken and the collector is still on the tokens it last read.
 - **`fields_stripped_total`.** Alert on any increase. Your collector is older than your agents. Run the latest collector, as [troubleshooting](troubleshooting) describes.
 
@@ -176,6 +180,7 @@ Without `OTHERLODE_COLLECTOR_FORWARD_URL`, the collector logs every payload it r
 | `WARN` | `rejecting malformed delta batch`, `rejecting malformed manifest`, `rejecting malformed static baseline` or `rejecting malformed class listing` | A body was not valid protobuf |
 | `WARN` | `token file re-read failed; keeping the last good value` | A token file re-read failed, with `file` and `error` |
 | `WARN` | `dropping payload: ` followed by a reason | The forwarder dropped a payload. The line names the namespace, service, instance and path, and adds `backend_error` when the backend's response names an error code |
+| `WARN` | `backend stores the service's payloads but does not track the service, ...`, `backend stores the environment's payloads but does not track the environment, ...` or `backend sent a notice this collector does not know` | The backend accepted a payload and sent a notice with it. The line has the `notice`, `namespace` and `service`. At most one line an hour for each notice, namespace and service, while the collector remembers fewer than 10,000 of them |
 | `WARN` | `dropped fields this collector does not know; ...` | Redaction dropped unknown fields. It logs once per run |
 | `WARN` | `refusing delta batch with too many elements`, or the same with `manifest`, `static baseline` or `class listing` | A payload held more elements than the limit for its kind and got `413`. The line has the `limit` and the body size in `bytes` |
 | `WARN` | `refusing delta batch: no decode slot came free`, or the same with `manifest`, `static baseline` or `class listing` | A request waited 5 seconds for a decode slot and got `503`. At most one line a minute. `unlogged_busy_refusals` counts the refusals since the previous line that got no line of their own |

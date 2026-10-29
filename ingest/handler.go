@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -29,12 +30,14 @@ import (
 // ctx is the request's context, so middleware such as an auth or tenant
 // resolver can attach request scope for the sink to read back. A non-nil
 // error means the payload was not taken: the handler answers 503 with
-// "Retry-After: 5" and the sender is expected to retry.
+// "Retry-After: 5" and the sender is expected to retry. The handler then
+// ignores the notices. When the payload was taken, the handler sends each
+// notice in NoticeHeader on the 202. A sink with nothing to say returns nil.
 type Sink interface {
-	AcceptDeltaBatch(ctx context.Context, batch *otherlodepb.DeltaBatch) error
-	AcceptManifest(ctx context.Context, manifest *otherlodepb.ProbeManifest) error
-	AcceptStaticBaseline(ctx context.Context, baseline *otherlodepb.StaticBaseline) error
-	AcceptClassListing(ctx context.Context, listing *otherlodepb.ClassListing) error
+	AcceptDeltaBatch(ctx context.Context, batch *otherlodepb.DeltaBatch) ([]Notice, error)
+	AcceptManifest(ctx context.Context, manifest *otherlodepb.ProbeManifest) ([]Notice, error)
+	AcceptStaticBaseline(ctx context.Context, baseline *otherlodepb.StaticBaseline) ([]Notice, error)
+	AcceptClassListing(ctx context.Context, listing *otherlodepb.ClassListing) ([]Notice, error)
 }
 
 // maxBodyBytes caps a single request body. A static baseline chunk can
@@ -199,9 +202,10 @@ func (h *Handler) handleClassListing(w http.ResponseWriter, r *http.Request) {
 
 // handle serves one ingest request. It reads the body, counts its
 // elements, takes a decode slot, decodes the body into a new T, validates
-// it, passes it to accept, and answers 202. It holds the slot until accept returns. T is
+// it, passes it to accept, and answers 202 with one NoticeHeader value for
+// each notice accept returned. It holds the slot until accept returns. T is
 // the pointer type of the payload message.
-func handle[T proto.Message](h *Handler, w http.ResponseWriter, r *http.Request, kind payloadKind, validate func(T) error, accept func(context.Context, T) error) {
+func handle[T proto.Message](h *Handler, w http.ResponseWriter, r *http.Request, kind payloadKind, validate func(T) error, accept func(context.Context, T) ([]Notice, error)) {
 	body, ok := h.readRequest(w, r, kind)
 	if !ok {
 		return
@@ -221,12 +225,25 @@ func handle[T proto.Message](h *Handler, w http.ResponseWriter, r *http.Request,
 		h.reject(w, kind, err)
 		return
 	}
-	if err := accept(r.Context(), msg); err != nil {
+	notices, err := accept(r.Context(), msg)
+	if err != nil {
 		h.sinkFailed(w, kind, err)
 		return
 	}
 	metrics.IngestAccepted.Inc(kind.label)
+	writeNotices(w.Header(), notices)
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// writeNotices adds one NoticeHeader value to header for each distinct
+// notice, in the order given.
+func writeNotices(header http.Header, notices []Notice) {
+	for i, n := range notices {
+		if slices.Contains(notices[:i], n) {
+			continue
+		}
+		header.Add(NoticeHeader, string(n))
+	}
 }
 
 // newMessage returns a new, empty message of the type T points to.

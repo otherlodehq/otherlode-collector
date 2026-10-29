@@ -110,7 +110,7 @@ func NewRedaction(next ingest.Sink, cfg RedactionConfig, logger *slog.Logger) *R
 // AcceptDeltaBatch drops the batch's unknown fields, marks the batch if
 // it lost any, then passes it to next. A delta batch holds no condition
 // parts.
-func (r *Redaction) AcceptDeltaBatch(ctx context.Context, batch *otherlodepb.DeltaBatch) error {
+func (r *Redaction) AcceptDeltaBatch(ctx context.Context, batch *otherlodepb.DeltaBatch) ([]ingest.Notice, error) {
 	r.markStripped(batch.GetResource(), "deltas", dropUnknown(batch.ProtoReflect()))
 	return r.next.AcceptDeltaBatch(ctx, batch)
 }
@@ -120,7 +120,7 @@ func (r *Redaction) AcceptDeltaBatch(ctx context.Context, batch *otherlodepb.Del
 // away a redacted literal, drops unknown fields, marks the manifest if it
 // lost any, then passes it to next. Each probe's branch sites are one
 // method's sites.
-func (r *Redaction) AcceptManifest(ctx context.Context, manifest *otherlodepb.ProbeManifest) error {
+func (r *Redaction) AcceptManifest(ctx context.Context, manifest *otherlodepb.ProbeManifest) ([]ingest.Notice, error) {
 	keys := newRekeyer(r.cfg.Secret)
 	var c counts
 	for _, probe := range manifest.GetProbes() {
@@ -138,7 +138,7 @@ func (r *Redaction) AcceptManifest(ctx context.Context, manifest *otherlodepb.Pr
 // declared method, re-keys every site key, clears the case keys that give
 // away a redacted literal, drops unknown fields, marks the baseline if it
 // lost any, then passes it to next.
-func (r *Redaction) AcceptStaticBaseline(ctx context.Context, baseline *otherlodepb.StaticBaseline) error {
+func (r *Redaction) AcceptStaticBaseline(ctx context.Context, baseline *otherlodepb.StaticBaseline) ([]ingest.Notice, error) {
 	keys := newRekeyer(r.cfg.Secret)
 	var c counts
 	for _, class := range baseline.GetDeclaredClasses() {
@@ -154,7 +154,7 @@ func (r *Redaction) AcceptStaticBaseline(ctx context.Context, baseline *otherlod
 // AcceptClassListing keeps the listing's class names and include rules,
 // since class names are not string literals. It drops unknown fields,
 // marks the listing if it lost any, then passes it to next.
-func (r *Redaction) AcceptClassListing(ctx context.Context, listing *otherlodepb.ClassListing) error {
+func (r *Redaction) AcceptClassListing(ctx context.Context, listing *otherlodepb.ClassListing) ([]ingest.Notice, error) {
 	r.markStripped(listing.GetResource(), "class_listing", dropUnknown(listing.ProtoReflect()))
 	return r.next.AcceptClassListing(ctx, listing)
 }

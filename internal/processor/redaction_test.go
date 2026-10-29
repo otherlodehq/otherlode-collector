@@ -128,7 +128,7 @@ func TestRedaction_BlockedPatternMatchesLiteral_Replaced(t *testing.T) {
 		[]*otherlodepb.ConditionPart{code("System.getenv("), literal("ENABLE_LEGACY_DISCOUNT"), code(") == "), literal("true")},
 		nil,
 	))
-	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -147,7 +147,7 @@ func TestRedaction_NoPatternMatchesLiteral_Kept(t *testing.T) {
 		[]*otherlodepb.ConditionPart{code("mode == "), literal("fast")},
 		[]*otherlodepb.ConditionPart{literal("slow")},
 	))
-	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -164,7 +164,7 @@ func TestRedaction_CodeAndPlaceholderParts_NeverTouched(t *testing.T) {
 		[]*otherlodepb.ConditionPart{code("token.isEmpty() && "), placeholder("token"), code(" == "), literal("token-1")},
 		[]*otherlodepb.ConditionPart{code("Token.NONE")},
 	))
-	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -193,7 +193,7 @@ func TestRedaction_NonCodeKinds_TreatedAsLiterals(t *testing.T) {
 				},
 				[]*otherlodepb.ConditionPart{part(unknownKind, "secret-e")},
 			))
-			if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+			if _, err := r.AcceptManifest(context.Background(), manifest); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
@@ -216,7 +216,7 @@ func TestRedaction_BlockedPatternMatchesUnanchored(t *testing.T) {
 	r := NewRedaction(next, blocked(t, "[0-9]{4}"), nil)
 
 	baseline := baselineWith(site([]*otherlodepb.ConditionPart{literal("card 4111 1111")}, nil))
-	if err := r.AcceptStaticBaseline(context.Background(), baseline); err != nil {
+	if _, err := r.AcceptStaticBaseline(context.Background(), baseline); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -232,7 +232,7 @@ func TestRedaction_AllLiterals_ManifestConditionsAndCaseLabelsReplaced(t *testin
 		site([]*otherlodepb.ConditionPart{code("name == "), literal("alice")}, []*otherlodepb.ConditionPart{literal("bob")}),
 		site([]*otherlodepb.ConditionPart{code("x > 0")}, []*otherlodepb.ConditionPart{code("Color.RED")}),
 	)
-	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -251,7 +251,7 @@ func TestRedaction_AllLiterals_StaticBaselineConditionsAndCaseLabelsReplaced(t *
 		[]*otherlodepb.ConditionPart{code("System.getenv("), literal("MODE"), code(")")},
 		[]*otherlodepb.ConditionPart{literal("legacy")},
 	))
-	if err := r.AcceptStaticBaseline(context.Background(), baseline); err != nil {
+	if _, err := r.AcceptStaticBaseline(context.Background(), baseline); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -271,11 +271,11 @@ func TestRedaction_Counter_CountsReplacedPartsPerPayload(t *testing.T) {
 		[]*otherlodepb.ConditionPart{literal("secret-a"), code(" + "), literal("secret-b"), literal("public")},
 		[]*otherlodepb.ConditionPart{literal("top-secret")},
 	))
-	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	baseline := baselineWith(site([]*otherlodepb.ConditionPart{literal("secret-c"), code("secret")}, nil))
-	if err := r.AcceptStaticBaseline(context.Background(), baseline); err != nil {
+	if _, err := r.AcceptStaticBaseline(context.Background(), baseline); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -303,7 +303,7 @@ func TestRedaction_On_UnknownFieldsDroppedFromManifest(t *testing.T) {
 	manifest := manifestWith(s)
 	manifest.ProtoReflect().SetUnknown(unknownBytes())
 
-	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -329,7 +329,7 @@ func TestRedaction_On_UnknownFieldsDroppedFromStaticBaseline(t *testing.T) {
 	baseline := baselineWith(s)
 	baseline.ProtoReflect().SetUnknown(unknownBytes())
 
-	if err := r.AcceptStaticBaseline(context.Background(), baseline); err != nil {
+	if _, err := r.AcceptStaticBaseline(context.Background(), baseline); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -353,7 +353,7 @@ func TestRedaction_On_UnknownFieldsDroppedFromDeltaBatch(t *testing.T) {
 	batch.GetResource().ProtoReflect().SetUnknown(unknownBytes())
 	batch.ProtoReflect().SetUnknown(unknownBytes())
 
-	if err := r.AcceptDeltaBatch(context.Background(), batch); err != nil {
+	if _, err := r.AcceptDeltaBatch(context.Background(), batch); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -377,7 +377,7 @@ func TestRedaction_NextError_Returned(t *testing.T) {
 	next := &recordingSink{err: wantErr}
 	r := NewRedaction(next, allLiterals(), nil)
 
-	if err := r.AcceptManifest(context.Background(), manifestWith()); !errors.Is(err, wantErr) {
+	if _, err := r.AcceptManifest(context.Background(), manifestWith()); !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want %v", err, wantErr)
 	}
 }
@@ -417,7 +417,7 @@ func strippedCases() []strippedCase {
 			}
 			next := r.next.(*recordingSink)
 			batch := &otherlodepb.DeltaBatch{Resource: prep(run, flagged), Deltas: []*otherlodepb.ProbeDelta{delta}}
-			if err := r.AcceptDeltaBatch(context.Background(), batch); err != nil {
+			if _, err := r.AcceptDeltaBatch(context.Background(), batch); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			return next.deltaBatches[len(next.deltaBatches)-1].GetResource()
@@ -429,7 +429,7 @@ func strippedCases() []strippedCase {
 				m.GetProbes()[0].ProtoReflect().SetUnknown(unknownBytes())
 			}
 			next := r.next.(*recordingSink)
-			if err := r.AcceptManifest(context.Background(), m); err != nil {
+			if _, err := r.AcceptManifest(context.Background(), m); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			return next.manifests[len(next.manifests)-1].GetResource()
@@ -441,7 +441,7 @@ func strippedCases() []strippedCase {
 				b.GetDeclaredClasses()[0].GetMethods()[0].ProtoReflect().SetUnknown(unknownBytes())
 			}
 			next := r.next.(*recordingSink)
-			if err := r.AcceptStaticBaseline(context.Background(), b); err != nil {
+			if _, err := r.AcceptStaticBaseline(context.Background(), b); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			return next.baselines[len(next.baselines)-1].GetResource()
@@ -453,7 +453,7 @@ func strippedCases() []strippedCase {
 				l.GetIncludeRules().ProtoReflect().SetUnknown(unknownBytes())
 			}
 			next := r.next.(*recordingSink)
-			if err := r.AcceptClassListing(context.Background(), l); err != nil {
+			if _, err := r.AcceptClassListing(context.Background(), l); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			return next.listings[len(next.listings)-1].GetResource()
@@ -502,7 +502,7 @@ func TestRedaction_UnknownFieldAndNilResource_PassesWithoutPanic(t *testing.T) {
 	r := NewRedaction(next, allLiterals(), nil)
 	batch := &otherlodepb.DeltaBatch{}
 	batch.ProtoReflect().SetUnknown(unknownBytes())
-	if err := r.AcceptDeltaBatch(context.Background(), batch); err != nil {
+	if _, err := r.AcceptDeltaBatch(context.Background(), batch); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if batch.GetResource() != nil {
@@ -587,7 +587,7 @@ func TestRedaction_On_OutsideCallerAndFailedClassesKept(t *testing.T) {
 	}
 	manifest.FailedClasses = []*otherlodepb.FailedClass{{ClassName: "com.example.Broken", WithheldAt: 1700000000000}}
 
-	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -617,7 +617,7 @@ func TestRedaction_On_RegexTemplateKindKept(t *testing.T) {
 		{EndpointId: 1, Verb: "GET", RouteTemplate: "^/items/(\\d+)$", VerbatimTemplate: "^/items/(\\d+)$", TemplateKind: otherlodepb.EndpointTemplateKind_REGEX},
 	}
 
-	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("accept manifest: %v", err)
 	}
 
@@ -643,7 +643,7 @@ func TestRedaction_On_ServletPatternTemplateKindKept(t *testing.T) {
 		{EndpointId: 1, Verb: "GET", RouteTemplate: "*.do", VerbatimTemplate: "*.do", TemplateKind: otherlodepb.EndpointTemplateKind_SERVLET_PATTERN},
 	}
 
-	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("accept manifest: %v", err)
 	}
 
@@ -670,7 +670,7 @@ func TestRedaction_On_FrameworkMarkersKept(t *testing.T) {
 		{Id: "grpc-server", Classes: []string{"io.grpc.internal.ServerImpl$ServerListenerImpl"}, SeenAt: 42},
 	}
 
-	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("accept manifest: %v", err)
 	}
 
@@ -699,7 +699,7 @@ func TestRedaction_On_RoutesNotCountedModuleKindKept(t *testing.T) {
 		{Module: "micronaut", Reason: "no dispatch point", Kind: otherlodepb.DisabledEndpointModuleKind_ROUTES_NOT_COUNTED},
 	}
 
-	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("accept manifest: %v", err)
 	}
 
@@ -727,7 +727,7 @@ func TestRedaction_On_ConfiguredOffModuleKindKept(t *testing.T) {
 		{Module: "spring-webmvc", Reason: "switched off by configuration", Kind: otherlodepb.DisabledEndpointModuleKind_CONFIGURED_OFF},
 	}
 
-	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("accept manifest: %v", err)
 	}
 
@@ -765,10 +765,10 @@ func TestRedaction_On_ModuleKindAndPendingCountsFieldsKept(t *testing.T) {
 		CountsPendingSince: 1700000000000,
 	}
 
-	if err := r.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("accept manifest: %v", err)
 	}
-	if err := r.AcceptDeltaBatch(context.Background(), batch); err != nil {
+	if _, err := r.AcceptDeltaBatch(context.Background(), batch); err != nil {
 		t.Fatalf("accept delta batch: %v", err)
 	}
 
@@ -808,7 +808,7 @@ func TestRedaction_On_FlushCompleteKept(t *testing.T) {
 		FlushComplete: true,
 	}
 
-	if err := r.AcceptDeltaBatch(context.Background(), batch); err != nil {
+	if _, err := r.AcceptDeltaBatch(context.Background(), batch); err != nil {
 		t.Fatalf("accept delta batch: %v", err)
 	}
 
@@ -830,7 +830,7 @@ func TestRedaction_On_ClassListingNamesAndRulesKept(t *testing.T) {
 	names := []string{"com.example.Pricing", "com.example.Pricing$Inner", "com.example.web.Handler"}
 	listing := listingWith(names...)
 
-	if err := r.AcceptClassListing(context.Background(), listing); err != nil {
+	if _, err := r.AcceptClassListing(context.Background(), listing); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -862,7 +862,7 @@ func TestRedaction_On_UnknownFieldsDroppedFromClassListing(t *testing.T) {
 	listing.GetResource().ProtoReflect().SetUnknown(unknownBytes())
 	listing.GetIncludeRules().ProtoReflect().SetUnknown(unknownBytes())
 
-	if err := r.AcceptClassListing(context.Background(), listing); err != nil {
+	if _, err := r.AcceptClassListing(context.Background(), listing); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -913,7 +913,7 @@ func TestRedaction_On_ClassesFailedToInitializeKept(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if err := r.AcceptManifest(context.Background(), decoded); err != nil {
+	if _, err := r.AcceptManifest(context.Background(), decoded); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 

@@ -21,17 +21,17 @@ func TestLogSink_LogsTheTestRunFlagAndAgentVersion(t *testing.T) {
 	resource := &otherlodepb.ResourceAttributes{ServiceName: "svc", ServiceInstanceId: "unit-tests", RunId: "run-1", TestRun: true, AgentVersion: "1.2.3"}
 	ctx := context.Background()
 
-	if err := sink.AcceptDeltaBatch(ctx, &otherlodepb.DeltaBatch{Resource: resource}); err != nil {
+	if _, err := sink.AcceptDeltaBatch(ctx, &otherlodepb.DeltaBatch{Resource: resource}); err != nil {
 		t.Fatalf("accept delta batch: %v", err)
 	}
-	if err := sink.AcceptManifest(ctx, &otherlodepb.ProbeManifest{Resource: resource}); err != nil {
+	if _, err := sink.AcceptManifest(ctx, &otherlodepb.ProbeManifest{Resource: resource}); err != nil {
 		t.Fatalf("accept manifest: %v", err)
 	}
-	if err := sink.AcceptStaticBaseline(ctx, &otherlodepb.StaticBaseline{Resource: resource}); err != nil {
+	if _, err := sink.AcceptStaticBaseline(ctx, &otherlodepb.StaticBaseline{Resource: resource}); err != nil {
 		t.Fatalf("accept static baseline: %v", err)
 	}
 
-	if err := sink.AcceptClassListing(ctx, &otherlodepb.ClassListing{Resource: resource}); err != nil {
+	if _, err := sink.AcceptClassListing(ctx, &otherlodepb.ClassListing{Resource: resource}); err != nil {
 		t.Fatalf("accept class listing: %v", err)
 	}
 
@@ -63,7 +63,7 @@ func TestLogSink_LogsTheFrameworkMarkerCount(t *testing.T) {
 		FrameworkMarkers: []*otherlodepb.FrameworkMarker{{Id: "grpc-server"}, {Id: "armeria-server"}},
 	}
 
-	if err := sink.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("accept manifest: %v", err)
 	}
 
@@ -86,7 +86,7 @@ func TestLogSink_LogsTheFailedClassCount(t *testing.T) {
 		FailedClasses: []*otherlodepb.FailedClass{{ClassName: "com.example.A"}, {ClassName: "com.example.B"}},
 	}
 
-	if err := sink.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := sink.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("accept manifest: %v", err)
 	}
 
@@ -107,11 +107,11 @@ func TestLogSink_LogsCountsPendingSinceOnlyWhenSet(t *testing.T) {
 	ctx := context.Background()
 	const since = int64(1700000000000)
 
-	record := func(t *testing.T, accept func(*ingest.LogSink) error) map[string]any {
+	record := func(t *testing.T, accept func(*ingest.LogSink) ([]ingest.Notice, error)) map[string]any {
 		t.Helper()
 		var buf bytes.Buffer
 		sink := ingest.NewLogSink(slog.New(slog.NewJSONHandler(&buf, nil)))
-		if err := accept(sink); err != nil {
+		if _, err := accept(sink); err != nil {
 			t.Fatalf("accept: %v", err)
 		}
 		var rec map[string]any
@@ -123,15 +123,15 @@ func TestLogSink_LogsCountsPendingSinceOnlyWhenSet(t *testing.T) {
 
 	cases := []struct {
 		name   string
-		accept func(pending int64) func(*ingest.LogSink) error
+		accept func(pending int64) func(*ingest.LogSink) ([]ingest.Notice, error)
 	}{
-		{"delta batch", func(pending int64) func(*ingest.LogSink) error {
-			return func(s *ingest.LogSink) error {
+		{"delta batch", func(pending int64) func(*ingest.LogSink) ([]ingest.Notice, error) {
+			return func(s *ingest.LogSink) ([]ingest.Notice, error) {
 				return s.AcceptDeltaBatch(ctx, &otherlodepb.DeltaBatch{Resource: resource, CountsPendingSince: pending})
 			}
 		}},
-		{"manifest", func(pending int64) func(*ingest.LogSink) error {
-			return func(s *ingest.LogSink) error {
+		{"manifest", func(pending int64) func(*ingest.LogSink) ([]ingest.Notice, error) {
+			return func(s *ingest.LogSink) ([]ingest.Notice, error) {
 				return s.AcceptManifest(ctx, &otherlodepb.ProbeManifest{Resource: resource, CountsPendingSince: pending})
 			}
 		}},
@@ -163,7 +163,7 @@ func TestLogSink_ClassListing_LogsIdentityChunkAndNameCount(t *testing.T) {
 		ChunkCount: 3,
 	}
 
-	if err := sink.AcceptClassListing(context.Background(), listing); err != nil {
+	if _, err := sink.AcceptClassListing(context.Background(), listing); err != nil {
 		t.Fatalf("accept class listing: %v", err)
 	}
 

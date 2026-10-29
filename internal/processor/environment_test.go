@@ -7,6 +7,7 @@ import (
 
 	otherlodepb "buf.build/gen/go/otherlode/otherlode/protocolbuffers/go/otherlode/v1"
 
+	"github.com/otherlodehq/otherlode-collector/ingest"
 	"github.com/otherlodehq/otherlode-collector/metrics"
 )
 
@@ -18,26 +19,27 @@ type recordingSink struct {
 	baselines    []*otherlodepb.StaticBaseline
 	listings     []*otherlodepb.ClassListing
 	err          error
+	notices      []ingest.Notice
 }
 
-func (s *recordingSink) AcceptDeltaBatch(_ context.Context, batch *otherlodepb.DeltaBatch) error {
+func (s *recordingSink) AcceptDeltaBatch(_ context.Context, batch *otherlodepb.DeltaBatch) ([]ingest.Notice, error) {
 	s.deltaBatches = append(s.deltaBatches, batch)
-	return s.err
+	return s.notices, s.err
 }
 
-func (s *recordingSink) AcceptManifest(_ context.Context, manifest *otherlodepb.ProbeManifest) error {
+func (s *recordingSink) AcceptManifest(_ context.Context, manifest *otherlodepb.ProbeManifest) ([]ingest.Notice, error) {
 	s.manifests = append(s.manifests, manifest)
-	return s.err
+	return s.notices, s.err
 }
 
-func (s *recordingSink) AcceptStaticBaseline(_ context.Context, baseline *otherlodepb.StaticBaseline) error {
+func (s *recordingSink) AcceptStaticBaseline(_ context.Context, baseline *otherlodepb.StaticBaseline) ([]ingest.Notice, error) {
 	s.baselines = append(s.baselines, baseline)
-	return s.err
+	return s.notices, s.err
 }
 
-func (s *recordingSink) AcceptClassListing(_ context.Context, listing *otherlodepb.ClassListing) error {
+func (s *recordingSink) AcceptClassListing(_ context.Context, listing *otherlodepb.ClassListing) ([]ingest.Notice, error) {
 	s.listings = append(s.listings, listing)
-	return s.err
+	return s.notices, s.err
 }
 
 func TestEnvironment_AcceptDeltaBatch_AbsentEnvironment_Stamped(t *testing.T) {
@@ -45,7 +47,7 @@ func TestEnvironment_AcceptDeltaBatch_AbsentEnvironment_Stamped(t *testing.T) {
 	env := NewEnvironment(next, EnvironmentConfig{Value: "prod", Action: Insert}, nil)
 
 	batch := &otherlodepb.DeltaBatch{Resource: &otherlodepb.ResourceAttributes{ServiceName: "svc", ServiceInstanceId: "i1", RunId: "run-1"}}
-	if err := env.AcceptDeltaBatch(context.Background(), batch); err != nil {
+	if _, err := env.AcceptDeltaBatch(context.Background(), batch); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := batch.GetResource().GetEnvironment(); got != "prod" {
@@ -61,7 +63,7 @@ func TestEnvironment_AcceptStaticBaseline_AbsentEnvironment_Stamped(t *testing.T
 	env := NewEnvironment(next, EnvironmentConfig{Value: "prod", Action: Insert}, nil)
 
 	baseline := &otherlodepb.StaticBaseline{Resource: &otherlodepb.ResourceAttributes{ServiceName: "svc", ServiceInstanceId: "i1", RunId: "run-1"}}
-	if err := env.AcceptStaticBaseline(context.Background(), baseline); err != nil {
+	if _, err := env.AcceptStaticBaseline(context.Background(), baseline); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := baseline.GetResource().GetEnvironment(); got != "prod" {
@@ -77,7 +79,7 @@ func TestEnvironment_AcceptClassListing_AbsentEnvironment_Stamped(t *testing.T) 
 	env := NewEnvironment(next, EnvironmentConfig{Value: "prod", Action: Insert}, nil)
 
 	listing := &otherlodepb.ClassListing{Resource: &otherlodepb.ResourceAttributes{ServiceName: "svc", ServiceInstanceId: "i1", RunId: "run-1"}}
-	if err := env.AcceptClassListing(context.Background(), listing); err != nil {
+	if _, err := env.AcceptClassListing(context.Background(), listing); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := listing.GetResource().GetEnvironment(); got != "prod" {
@@ -96,7 +98,7 @@ func TestEnvironment_Insert_ExplicitEmptyEnvironment_Stamped(t *testing.T) {
 	res.SetEnvironment("")
 	batch := &otherlodepb.DeltaBatch{Resource: res}
 
-	if err := env.AcceptDeltaBatch(context.Background(), batch); err != nil {
+	if _, err := env.AcceptDeltaBatch(context.Background(), batch); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := batch.GetResource().GetEnvironment(); got != "prod" {
@@ -114,7 +116,7 @@ func TestEnvironment_Insert_DifferentAgentValue_KeptAndMismatchCounted(t *testin
 	res.SetEnvironment("uat")
 	batch := &otherlodepb.DeltaBatch{Resource: res}
 
-	if err := env.AcceptDeltaBatch(context.Background(), batch); err != nil {
+	if _, err := env.AcceptDeltaBatch(context.Background(), batch); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := batch.GetResource().GetEnvironment(); got != "uat" {
@@ -135,7 +137,7 @@ func TestEnvironment_Insert_DifferentAgentValue_StaticBaselineMismatchCounted(t 
 	res.SetEnvironment("uat")
 	baseline := &otherlodepb.StaticBaseline{Resource: res}
 
-	if err := env.AcceptStaticBaseline(context.Background(), baseline); err != nil {
+	if _, err := env.AcceptStaticBaseline(context.Background(), baseline); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := metrics.EnvironmentMismatch.Value("static_baseline") - before; got != 1 {
@@ -152,7 +154,7 @@ func TestEnvironment_Insert_DifferentAgentValue_ClassListingMismatchCounted(t *t
 	res.SetEnvironment("uat")
 	listing := &otherlodepb.ClassListing{Resource: res}
 
-	if err := env.AcceptClassListing(context.Background(), listing); err != nil {
+	if _, err := env.AcceptClassListing(context.Background(), listing); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := listing.GetResource().GetEnvironment(); got != "uat" {
@@ -175,7 +177,7 @@ func TestEnvironment_EqualValue_CounterUnchanged(t *testing.T) {
 			res.SetEnvironment("prod")
 			batch := &otherlodepb.DeltaBatch{Resource: res}
 
-			if err := env.AcceptDeltaBatch(context.Background(), batch); err != nil {
+			if _, err := env.AcceptDeltaBatch(context.Background(), batch); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if got := batch.GetResource().GetEnvironment(); got != "prod" {
@@ -202,7 +204,7 @@ func TestEnvironment_SameNameAsTheServerReadsIt_NoMismatch(t *testing.T) {
 			res.SetEnvironment(" Prod ")
 			batch := &otherlodepb.DeltaBatch{Resource: res}
 
-			if err := env.AcceptDeltaBatch(context.Background(), batch); err != nil {
+			if _, err := env.AcceptDeltaBatch(context.Background(), batch); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if got := batch.GetResource().GetEnvironment(); got != want {
@@ -223,7 +225,7 @@ func TestEnvironment_Insert_SpacesOnlyAgentValue_Stamped(t *testing.T) {
 	res.SetEnvironment("   ")
 	batch := &otherlodepb.DeltaBatch{Resource: res}
 
-	if err := env.AcceptDeltaBatch(context.Background(), batch); err != nil {
+	if _, err := env.AcceptDeltaBatch(context.Background(), batch); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := batch.GetResource().GetEnvironment(); got != "prod" {
@@ -244,7 +246,7 @@ func TestEnvironment_Upsert_DifferentAgentValue_OverwrittenAndMismatchCounted(t 
 	res.SetEnvironment("uat")
 	batch := &otherlodepb.DeltaBatch{Resource: res}
 
-	if err := env.AcceptDeltaBatch(context.Background(), batch); err != nil {
+	if _, err := env.AcceptDeltaBatch(context.Background(), batch); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := batch.GetResource().GetEnvironment(); got != "prod" {
@@ -260,7 +262,7 @@ func TestEnvironment_AcceptManifest_AbsentEnvironment_Stamped(t *testing.T) {
 	env := NewEnvironment(next, EnvironmentConfig{Value: "prod", Action: Insert}, nil)
 
 	manifest := &otherlodepb.ProbeManifest{Resource: &otherlodepb.ResourceAttributes{ServiceName: "svc", ServiceInstanceId: "i1", RunId: "run-1"}}
-	if err := env.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := env.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := manifest.GetResource().GetEnvironment(); got != "prod" {
@@ -280,7 +282,7 @@ func TestEnvironment_Upsert_ManifestMismatch_OverwrittenAndCounted(t *testing.T)
 	res.SetEnvironment("uat")
 	manifest := &otherlodepb.ProbeManifest{Resource: res}
 
-	if err := env.AcceptManifest(context.Background(), manifest); err != nil {
+	if _, err := env.AcceptManifest(context.Background(), manifest); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got := manifest.GetResource().GetEnvironment(); got != "prod" {
@@ -296,7 +298,7 @@ func TestEnvironment_NilResource_NoPanicReachesNext(t *testing.T) {
 	env := NewEnvironment(next, EnvironmentConfig{Value: "prod", Action: Insert}, nil)
 
 	batch := &otherlodepb.DeltaBatch{}
-	if err := env.AcceptDeltaBatch(context.Background(), batch); err != nil {
+	if _, err := env.AcceptDeltaBatch(context.Background(), batch); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(next.deltaBatches) != 1 || next.deltaBatches[0] != batch {
@@ -310,7 +312,7 @@ func TestEnvironment_NextError_Returned(t *testing.T) {
 	env := NewEnvironment(next, EnvironmentConfig{Value: "prod", Action: Insert}, nil)
 
 	batch := &otherlodepb.DeltaBatch{Resource: &otherlodepb.ResourceAttributes{ServiceName: "svc", ServiceInstanceId: "i1", RunId: "run-1"}}
-	if err := env.AcceptDeltaBatch(context.Background(), batch); !errors.Is(err, wantErr) {
+	if _, err := env.AcceptDeltaBatch(context.Background(), batch); !errors.Is(err, wantErr) {
 		t.Fatalf("error = %v, want %v", err, wantErr)
 	}
 }

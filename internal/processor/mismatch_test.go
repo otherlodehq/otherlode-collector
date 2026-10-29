@@ -59,7 +59,7 @@ func TestEnvironment_Mismatch_WarnsOncePerServiceAndValue(t *testing.T) {
 		mismatchResource("billing", "dev", ""),
 		mismatchResource("search", "uat", ""),
 	} {
-		if err := env.AcceptDeltaBatch(context.Background(), &otherlodepb.DeltaBatch{Resource: res}); err != nil {
+		if _, err := env.AcceptDeltaBatch(context.Background(), &otherlodepb.DeltaBatch{Resource: res}); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	}
@@ -81,7 +81,7 @@ func TestNamespace_Mismatch_WarnsOncePerServiceAndValue(t *testing.T) {
 		mismatchResource("billing", "", "Team-B"), // namespaces keep case
 		mismatchResource("search", "", "team-b"),
 	} {
-		if err := ns.AcceptDeltaBatch(context.Background(), &otherlodepb.DeltaBatch{Resource: res}); err != nil {
+		if _, err := ns.AcceptDeltaBatch(context.Background(), &otherlodepb.DeltaBatch{Resource: res}); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	}

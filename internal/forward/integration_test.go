@@ -29,32 +29,32 @@ type captureSink struct {
 	listings     []*otherlodepb.ClassListing
 }
 
-func (c *captureSink) AcceptDeltaBatch(_ context.Context, batch *otherlodepb.DeltaBatch) error {
+func (c *captureSink) AcceptDeltaBatch(_ context.Context, batch *otherlodepb.DeltaBatch) ([]ingest.Notice, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.deltaBatches = append(c.deltaBatches, batch)
-	return nil
+	return nil, nil
 }
 
-func (c *captureSink) AcceptManifest(_ context.Context, manifest *otherlodepb.ProbeManifest) error {
+func (c *captureSink) AcceptManifest(_ context.Context, manifest *otherlodepb.ProbeManifest) ([]ingest.Notice, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.manifests = append(c.manifests, manifest)
-	return nil
+	return nil, nil
 }
 
-func (c *captureSink) AcceptStaticBaseline(_ context.Context, baseline *otherlodepb.StaticBaseline) error {
+func (c *captureSink) AcceptStaticBaseline(_ context.Context, baseline *otherlodepb.StaticBaseline) ([]ingest.Notice, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.baselines = append(c.baselines, baseline)
-	return nil
+	return nil, nil
 }
 
-func (c *captureSink) AcceptClassListing(_ context.Context, listing *otherlodepb.ClassListing) error {
+func (c *captureSink) AcceptClassListing(_ context.Context, listing *otherlodepb.ClassListing) ([]ingest.Notice, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.listings = append(c.listings, listing)
-	return nil
+	return nil, nil
 }
 
 func (c *captureSink) listingCount() int {

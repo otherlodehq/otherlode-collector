@@ -52,6 +52,12 @@ var (
 	ForwardRefused = NewCounter("otherlode_collector_forward_refused_total",
 		"Payloads the forwarder did not take, answered 503 so the sender sends them again.", "payload", "reason")
 
+	// ForwardNotices counts the notices the backend sent with an accepted
+	// payload. Its "notice" is "service-over-cap", "environment-not-tracked"
+	// or "unknown", which stands for any other value.
+	ForwardNotices = NewCounter("otherlode_collector_forward_notices_total",
+		"Notices the backend sent with an accepted payload.", "notice")
+
 	// EnvironmentMismatch counts payloads whose agent-set environment
 	// differs from the collector's configured one. Its "payload" is
 	// "deltas", "manifest", "static_baseline" or "class_listing".
