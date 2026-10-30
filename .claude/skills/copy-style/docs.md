@@ -13,7 +13,6 @@ Read `technical-writing` and use it. Pick the Diátaxis mode for each page. Ours
 This guide adds the following.
 
 - **Second person, present tense.** "You set `staticBaselineEnabled`", not "the user should set". Say who does what.
-- **Contractions where they read better.** Simplified technical English sets the ceiling, which is a sentence with one reading, not the tone. See `technical-writing` "Vary the rhythm". Keep the full form in a warning ("do not") or where a definition needs precision.
 - **Every sentence is true of the code, and you checked it.** Read the code the page describes. If the code is wrong, that's a bug, so route it to a fix. Don't document the gap.
 - **Behaviour, never layout.** A page says what a feature does and how to use it. It doesn't say where a part sits, what a long name loses at a narrow width or what a phone shows. What a status colour or tooltip tells the reader is behaviour, so it stays.
 - **Plain facts, not hedges.** The agent reports observations, so say what it saw. Don't write "should", "may" or "typically" where the code is certain. Where it's conditional, state the condition.

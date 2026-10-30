@@ -8,7 +8,7 @@ Someone in the middle of a task. They opened the page to check a number, find a 
 
 ## Voice
 
-This is the tersest of the three guides. State the fact in as few words as the reader needs. Use contractions only where the full form reads stiff. A status colour and a number beat a sentence, so reach for a badge or a count first. The UI never explains or documents the product. `docs/site` does that, and the UI links to it.
+This is the tersest of the three guides. State the fact in as few words as the reader needs. A status colour and a number beat a sentence, so reach for a badge or a count first. The UI never explains or documents the product. `docs/site` does that, and the UI links to it.
 
 ## What a string may do
 
