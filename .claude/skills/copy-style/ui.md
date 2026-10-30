@@ -37,7 +37,6 @@ A confirmation may say what the action will do to the person's data or sessions,
 - **An empty state says what's missing**, in the product's own words. "No domain yet." "No service has reported yet." It doesn't say how to fill it.
 - **An error says what happened and what the person can do.** Name the thing, state the result and give the next step if there is one. "The Admin Portal could not be opened." "The domains could not be refreshed from WorkOS.", followed by the server's reason. Never "Oops" or "Something went wrong", and never blame the person.
 - **Names come from the server.** The browser renders the names the server sends and never decodes one. It may join names the server sent with fixed words, as in "`handleCheckout` in DemoServerMain.kt" or "first lambda in `main` at line 12" (ADR 0035, ADR 0036), and builds no other label. A string that needs a new name waits for the server to send it.
-- **Use the codebase's terms** from `CONTEXT.md`, and one name per thing.
 
 ## Before and after
 

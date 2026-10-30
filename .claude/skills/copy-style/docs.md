@@ -4,7 +4,7 @@ This guide covers the pages under `docs/site/` in the agent, collector and serve
 
 ## Who reads it
 
-An engineer who runs the agent or reads the server's findings. They're competent, they arrive from search or a link, and they want one answer. Write the page they came for and nothing around it.
+An engineer who runs the agent or reads the server's findings. They're competent, they arrive from search or a link, and they want one answer. Write the page they came for and nothing around it. Leave out what they'd work out for themselves or wouldn't miss.
 
 ## Follow technical-writing first
 
@@ -14,7 +14,7 @@ This guide adds the following.
 
 - **Second person, present tense.** "You set `staticBaselineEnabled`", not "the user should set". Say who does what.
 - **Every sentence is true of the code, and you checked it.** Read the code the page describes. If the code is wrong, that's a bug, so route it to a fix. Don't document the gap.
-- **Behaviour, never layout.** A page says what a feature does and how to use it. It doesn't say where a part sits, what a long name loses at a narrow width or what a phone shows. What a status colour or tooltip tells the reader is behaviour, so it stays.
+- **Write what the screen can't show.** A page says what a feature does and how to use it: what a status means, how a thing is judged, what a count includes, why something is missing. It leaves out what the screen already shows: where a part sits and how it looks, and a control that explains itself, such as a filter box, paging or a row that expands. Name a part so a reader can find it ("the tenant menu in the top bar"), and say what a colour or tooltip tells them. Quote a message a reader may search for. A how-to still ends with the check that it worked.
 - **Plain facts, not hedges.** The agent reports observations, so say what it saw. Don't write "should", "may" or "typically" where the code is certain. Where it's conditional, state the condition.
 - **Public links only.** A link to a repo points at a public one, since a private repo's path 404s for a customer. Link between pages by site path, such as `/docs/agent/classes#never-loaded`.
 
@@ -37,10 +37,10 @@ Stiff passive to easy.
 - Before: "Redaction is performed by the collector. String literals are removed from payloads prior to transmission, and fields that are not recognised are dropped."
 - After: "With blanking on, the collector blanks the literals your settings select and drops every field its bindings don't know before it forwards a payload. A payload that lost a field carries `fields_stripped`."
 
-Layout to behaviour.
+What the screen shows to what it can't.
 
-- Before: "A grey badge to the right of the instance name shows when the instance has sent no counts."
-- After: "An instance whose latest run hasn't delivered a delta batch shows **No counts received yet**."
+- Before: "**Last seen**: How long ago any production run of the service last reported, such as "3 days ago". The tooltip holds the exact UTC time. A service with no runs left reads "never"."
+- After: "**Last seen**: How long ago any production run of the service last reported. A service whose runs have all expired reads "never"."
 
 Hedged to a plain fact.
 
