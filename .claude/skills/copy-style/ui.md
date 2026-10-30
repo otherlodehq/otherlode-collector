@@ -19,7 +19,11 @@ This is the tersest of the three guides. State the fact in as few words as the r
 
 ## What a string may not do
 
-- Explain how the product works, such as how a status is judged or what a column means. A finding page's one-line definition in its header, and a badge's tooltip naming the fact behind it, are the exceptions: one sentence each, a fact, no how. Which existing tooltips explain too much is open under "UI copy that explains the product: to triage" in `otherlode-server/STATUS.md`.
+- Explain how the product works in general, such as how a status is judged or what a column means. There are three exceptions:
+  - A finding page's one-line definition in its header.
+  - A status's tooltip or second line, in one sentence. It names the fact behind the status, and it may add one clause on what that fact means for this item's findings: "No delta batch has arrived, so no zero-count claim rests on this run." The general mechanics stay in the docs: "the counts it has are kept and summed".
+  - A setting's second line. It may say what turning the setting on or off does to data, sign-in and who can do what: "When it is on, a person who signs in through SSO … gets a viewer at once." Setup steps and caveats stay in the docs: "You prove a domain with a DNS record".
+- Tell the person how to fix a problem. A tooltip names the problem, and the fix is on a docs page. A tooltip cannot hold a link, so a "Docs" link sits beside the badge.
 - Add a caution, banner or second line that teaches. If a person needs the background, link the docs page.
 - Describe the layout or tell the person where to look ("see the table below").
 - Soften or hedge ("Note that", "Please", "It looks like").
@@ -32,7 +36,7 @@ A confirmation may say what the action will do to the person's data or sessions,
 - **A label is a noun.** A button is a verb phrase that says what happens: "Set up SSO", "Verify a domain", "Stop enforcing SSO".
 - **An empty state says what's missing**, in the product's own words. "No domain yet." "No service has reported yet." It doesn't say how to fill it.
 - **An error says what happened and what the person can do.** Name the thing, state the result and give the next step if there is one. "The Admin Portal could not be opened." "The domains could not be refreshed from WorkOS.", followed by the server's reason. Never "Oops" or "Something went wrong", and never blame the person.
-- **Names come from the server.** The browser renders the names the server sends, and never decodes a name or builds a label of its own. A string that needs a new name waits for the server to send it.
+- **Names come from the server.** The browser renders the names the server sends and never decodes one. It may join names the server sent with fixed words, as in "`handleCheckout` in DemoServerMain.kt" or "first lambda in `main` at line 12" (ADR 0035, ADR 0036), and builds no other label. A string that needs a new name waits for the server to send it.
 - **Use the codebase's terms** from `CONTEXT.md`, and one name per thing.
 
 ## Before and after
