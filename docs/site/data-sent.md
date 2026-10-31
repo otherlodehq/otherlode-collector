@@ -59,7 +59,7 @@ The collector checks each request in this order. A request that fails a check ge
 | A manifest lists a dependency with no `identities` | `400` |
 | The forwarder cannot take the payload because its queue is full or the collector is shutting down. See [forwarding](forwarding) | `503` |
 
-The checks read only identity fields, time fields, chunk numbers and the reason a class failed to initialize, and count elements. They do not read the code names, counts or conditions in a payload.
+The checks read only identity fields, time fields, chunk numbers, the reason a class failed to initialize and whether a dependency has an identity, and count elements. They do not read the code names, counts or conditions in a payload.
 
 ## What the collector changes
 
