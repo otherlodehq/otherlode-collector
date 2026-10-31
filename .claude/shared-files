@@ -2,6 +2,7 @@
 # otherlode-agent is the source. Change a path there, then copy it out.
 .claude/shared-files
 .claude/check-shared.sh
+.claude/check-prose.sh
 .claude/settings.json
 .claude/skills/power-mode
 .claude/skills/nightwork

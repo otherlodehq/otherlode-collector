@@ -3,7 +3,7 @@
 The ingest/decode layer for the
 [Otherlode agent](https://github.com/otherlodehq/otherlode-agent)'s
 OTLP-style push export. Otherlode is a Java agent that instruments a
-running JVM to find dead code paths — endpoints, methods, and branches that are
+running JVM to find dead code paths: endpoints, methods, and branches that are
 reachable but never actually exercised. Each instrumented instance pushes
 periodic batches (hit counts, probe metadata) to a collector over HTTP.
 This repo is that collector: it decodes the wire payloads and hands them off
@@ -34,20 +34,20 @@ instance ID, environment, a run ID, and a flag that marks a test run. A service 
 namespace and name together. The agent makes a fresh random run ID for each process, so an
 instance restarted under a pinned instance ID still names a different run.
 
-- `POST /v1/otherlode/deltas` — a `DeltaBatch`: resource attributes plus
+- `POST /v1/otherlode/deltas`, a `DeltaBatch`: resource attributes plus
   per-probe hit totals, counted from the start of the process. A batch
   carries a probe only when its total changed since the last batch the
   collector confirmed. Sent every flush interval even when empty, as a
-  liveness heartbeat — an idle instance and a dead one both need to be
-  distinguishable from silence. It also carries endpoint hit totals, one
+  liveness heartbeat, so that an idle instance and a dead one can both be
+  told apart from silence. It also carries endpoint hit totals, one
   entry per HTTP endpoint a web framework has matched a request to.
-- `POST /v1/otherlode/manifest` — a `ProbeManifest`: resource attributes
+- `POST /v1/otherlode/manifest`, a `ProbeManifest`: resource attributes
   plus a map from probe IDs to their source location (class, method,
   line, branch index), sent incrementally so the collector only needs metadata for probes it hasn't already seen.
   It also carries the endpoints a web framework serves and any endpoint
   module that switched itself off after a linkage failure against a
   framework version it does not match.
-- `POST /v1/otherlode/static-baseline` — a `StaticBaseline`: an opt-in,
+- `POST /v1/otherlode/static-baseline`, a `StaticBaseline`: an opt-in,
   once-per-process static scan of a service instance's classes, sent as
   one or more chunks. Every chunk carries the same instance and
   `scanned_at`, so `(instance, scanned_at)` identifies one scan; a
@@ -59,7 +59,7 @@ instance restarted under a pinned instance ID still names a different run.
   `listed_at`, so a backend must hold every chunk (`chunk_index` of
   `chunk_count`) before it reads a class's absence from the listing.
 
-All four are protobuf over plain HTTP, not gRPC — the agent sends one batch per
+All four are protobuf over plain HTTP, not gRPC. The agent sends one batch per
 flush interval per instance, so gRPC's multiplexing advantage doesn't apply,
 and plain HTTP avoids shading grpc-java/Netty into every instrumented JVM.
 See the agent's own `CLAUDE.md` ("Transport", "Hit-data recording &
@@ -69,12 +69,12 @@ repo and is published to the Buf Schema Registry as
 
 ## Architecture
 
-- `buf.build/gen/go/otherlode/otherlode/protocolbuffers/go` — Go bindings
+- `buf.build/gen/go/otherlode/otherlode/protocolbuffers/go`: Go bindings
   for the Otherlode wire schema, generated remotely by the BSR and pulled in
   as an ordinary Go module dependency. The package to import is
   `buf.build/gen/go/otherlode/otherlode/protocolbuffers/go/otherlode/v1`.
   No local `.proto` copy or `protoc` step in this repo.
-- `ingest.Handler` — decodes the four payload types above and
+- `ingest.Handler`: decodes the four payload types above and
   hands each to a `Sink`. Rejects malformed bodies, and decoded ones
   whose resource lacks the service name, instance ID or run ID a backend
   needs to attribute them, with `400` before they reach the sink; accepts
@@ -84,7 +84,7 @@ repo and is published to the Buf Schema Registry as
   name or namespace that is `.` or `..`, are rejected the same way: a
   service is read at a URL path that holds both, and browsers drop dot
   segments even when they are escaped.
-- `ingest.Sink` — the seam a real backend implements. The
+- `ingest.Sink`: the seam a real backend implements. The
   collector has no storage of its own, so this interface is the entire
   contract between "decoded a payload" and "did something with it."
   Two implementations live here: `LogSink`, which only logs what it
@@ -93,7 +93,7 @@ repo and is published to the Buf Schema Registry as
   packages, not `internal`, so a backend written in Go can embed the same
   `Handler` and implement `Sink` itself; the rest of this repo stays
   internal.
-- `internal/forward` — `ForwardingSink` relays each decoded payload to a
+- `internal/forward`: `ForwardingSink` relays each decoded payload to a
   backend over the same protobuf-over-HTTP shape the collector accepts,
   the way an OTel Collector exporter re-sends OTLP downstream. Payloads
   are queued and sent by background workers, sharded by service
@@ -105,19 +105,19 @@ repo and is published to the Buf Schema Registry as
   `504`, and on transport errors that bring no response. A full
   shard queue refuses the payload with `503` instead of queuing it, so
   the agent sends it again.
-- `internal/processor` — sinks that wrap another sink, changing or
+- `internal/processor`: sinks that wrap another sink, changing or
   inspecting a decoded payload before passing it on: the role an OTel
   Collector processor plays. Three exist, `Environment`, `Namespace` and
   `Redaction`.
-- `internal/auth` — a shared-secret bearer-token check, wrapped around the
+- `internal/auth`: a shared-secret bearer-token check, wrapped around the
   ingest routes as HTTP middleware. Kept separate from `ingest.Handler` so
   the decode layer stays auth-agnostic.
-- `internal/ratelimit` — a per-client-IP token bucket, also wrapped around
+- `internal/ratelimit`: a per-client-IP token bucket, also wrapped around
   the ingest routes as HTTP middleware, checked before auth so a request
   flood is capped regardless of whether it carries a valid token.
-- `metrics` — a handful of counters served at `GET /metrics` in
+- `metrics`: a handful of counters served at `GET /metrics` in
   the Prometheus text format, with no client library dependency.
-- `cmd/otherlode-collector` — a minimal HTTP server wiring the sink into
+- `cmd/otherlode-collector`: a minimal HTTP server wiring the sink into
   the handler and listening on `:4319` (the port in the agent's default
   `exportUrl`, `http://localhost:4319`), overridable via
   `OTHERLODE_COLLECTOR_ADDR`.
@@ -233,7 +233,7 @@ working unauthenticated.
 The collector fails closed: if neither `OTHERLODE_COLLECTOR_AUTH_TOKEN` nor
 `OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE` is set, it
 refuses to start rather than running unauthenticated. To run without
-auth anyway (local development only — never for anything reachable
+auth anyway (local development only, never for anything reachable
 outside your machine), opt out explicitly:
 
 ```
@@ -763,4 +763,4 @@ it again with `GOPROXY=direct`.
 
 ## License
 
-Apache-2.0 — see [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE).
