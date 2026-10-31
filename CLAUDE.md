@@ -32,7 +32,13 @@ A change that breaks one of these needs an ADR first.
   master.** A reviewer that did not write the change reads the diff and
   the code it touches, without the author's reasoning, and looks for
   bugs. Fix or answer each blocking finding before the change lands. A
-  change to docs, `STATUS.md`, an ADR or a copy guide alone needs none.
+  change to docs, `STATUS.md`, an ADR or a copy guide alone needs none,
+  and nor does a code edit with no behaviour in it, such as a typo or a
+  rename inside one file.
+- **A skill's process for building code applies too.** When a loaded
+  skill prescribes how code is built and reviewed, such as `power-mode`'s
+  review loop, follow it. It adds to the review rule above and never
+  replaces it.
 - **Bindings follow the agent's schema.** A new wire field in the agent
   needs the bindings bumped here, or redaction strips it.
 - **Docs follow behaviour, not every code change.** A change that adds
