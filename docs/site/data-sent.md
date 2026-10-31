@@ -56,6 +56,7 @@ The collector checks each request in this order. A request that fails a check ge
 | A class listing chunk has no `listed_at`, a `chunk_count` below 1, or a `chunk_index` that is negative or not below `chunk_count` | `400` |
 | A delta batch or manifest holds a time field outside 0 to 253402300799999 milliseconds since the epoch, which is the start of 1970 to the end of the year 9999. The fields are `first_seen_at` and `first_loaded_at` in a delta batch, and `first_seen_unreported_at`, `withheld_at`, `observed_at`, `skipped_at`, `disabled_at` and `seen_at` in a manifest. A time of 0 means not set and passes | `400` |
 | A manifest lists a class that failed to initialize with no `reason` | `400` |
+| A manifest lists a dependency with no `identities` | `400` |
 | The forwarder cannot take the payload because its queue is full or the collector is shutting down. See [forwarding](forwarding) | `503` |
 
 The checks read only identity fields, time fields, chunk numbers and the reason a class failed to initialize, and count elements. They do not read the code names, counts or conditions in a payload.

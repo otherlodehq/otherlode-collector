@@ -217,6 +217,7 @@ The collector says `manifest`, `static baseline` or `class listing` in place of 
 | `resource.service_name holds a NUL byte` | An identity value holds a NUL character. The message names the field, as above. The agent skips such a value from its configuration, so something other than an Otherlode agent sent it. |
 | `deltas[3].first_seen_at is out of range` | A time in a delta batch or manifest is before 1970 or after the year 9999. The message names the list, the entry and the field. The agent takes these times from the host's clock, so check that the clock is set. |
 | `classes_failed_to_initialize[0].reason is not set` | A manifest names a class that failed to initialize with no reason. Something other than an Otherlode agent sent it. |
+| `dependencies[0].identities is empty` | A manifest lists a dependency with no identity. The agent gives every dependency at least one, so something other than an Otherlode agent sent it. |
 | `scanned_at is not set`, `chunk_count must be at least 1`, `chunk_index is negative` or `chunk_index is out of range for chunk_count` | A static baseline chunk is malformed. Something other than an Otherlode agent sent it. |
 | `listed_at is not set`, `chunk_count must be at least 1`, `chunk_index is negative` or `chunk_index is out of range for chunk_count` | A class listing chunk is malformed. Something other than an Otherlode agent sent it. |
 

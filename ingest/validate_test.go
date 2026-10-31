@@ -9,6 +9,8 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/otherlodehq/otherlode-collector/metrics"
+
 	otherlodepb "buf.build/gen/go/otherlode/otherlode/protocolbuffers/go/otherlode/v1"
 )
 
@@ -193,6 +195,50 @@ func TestHandleManifest_FailedToInitializeReason(t *testing.T) {
 			}
 			if want := "classes_failed_to_initialize[1].reason is not set"; !strings.Contains(body, want) {
 				t.Errorf("body = %q, want it to contain %q", body, want)
+			}
+		})
+	}
+}
+
+func TestHandleManifest_DependencyIdentities(t *testing.T) {
+	withIdentity := &otherlodepb.DependencyLocation{
+		DependencyId: 1,
+		Identities:   []*otherlodepb.DependencyIdentity{{ArtifactId: "guava"}},
+	}
+	for _, tc := range []struct {
+		name         string
+		dependencies []*otherlodepb.DependencyLocation
+		want         string
+	}{
+		{"all carry identities", []*otherlodepb.DependencyLocation{withIdentity, withIdentity}, ""},
+		{"none", nil, ""},
+		{"one has none", []*otherlodepb.DependencyLocation{withIdentity, {DependencyId: 2}}, "dependencies[1].identities is empty"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &otherlodepb.ProbeManifest{Resource: validResource(), Dependencies: tc.dependencies}
+			before := metrics.IngestRejected.Value("manifest", "invalid")
+			status, body, sink := post(t, ManifestPath, m)
+			rejected := metrics.IngestRejected.Value("manifest", "invalid") - before
+			if tc.want == "" {
+				if status != http.StatusAccepted {
+					t.Fatalf("status = %d, want 202; body = %q", status, body)
+				}
+				if rejected != 0 {
+					t.Errorf("invalid rejections = %v, want 0", rejected)
+				}
+				return
+			}
+			if status != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body = %q", status, body)
+			}
+			if rejected != 1 {
+				t.Errorf("invalid rejections = %v, want 1", rejected)
+			}
+			if !strings.Contains(body, tc.want) {
+				t.Errorf("body = %q, want it to contain %q", body, tc.want)
+			}
+			if got := len(sink.manifests); got != 0 {
+				t.Errorf("sink took %d manifests, want 0", got)
 			}
 		})
 	}

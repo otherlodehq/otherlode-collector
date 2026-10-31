@@ -364,8 +364,9 @@ func timestampError(list string, index int, field string) error {
 // run in load order, so the same class_id can mean a different class in
 // two instances of the same service, or in two runs of one instance. A
 // backend that keys on less than all three would misattribute probes.
-// It also rejects a timestamp outside the range of MaxTimestampMillis, and
-// a class that failed to initialize with no reason.
+// It also rejects a timestamp outside the range of MaxTimestampMillis, a
+// class that failed to initialize with no reason, and a dependency with no
+// identity.
 func validateManifest(manifest *otherlodepb.ProbeManifest) error {
 	if err := validateResource(manifest.GetResource()); err != nil {
 		return err
@@ -403,6 +404,11 @@ func validateManifest(manifest *otherlodepb.ProbeManifest) error {
 	for i, c := range manifest.GetClassesFailedToInitialize() {
 		if c.GetReason() == otherlodepb.InitializationFailure_INITIALIZATION_FAILURE_UNSPECIFIED {
 			return fmt.Errorf("classes_failed_to_initialize[%d].reason is not set", i)
+		}
+	}
+	for i, d := range manifest.GetDependencies() {
+		if len(d.GetIdentities()) == 0 {
+			return fmt.Errorf("dependencies[%d].identities is empty", i)
 		}
 	}
 	return nil
