@@ -28,6 +28,11 @@ A change that breaks one of these needs an ADR first.
 
 ## Rules for a change
 
+- **Every code change gets an independent review before it lands on
+  master.** A reviewer that did not write the change reads the diff and
+  the code it touches, without the author's reasoning, and looks for
+  bugs. Fix or answer each blocking finding before the change lands. A
+  change to docs, `STATUS.md`, an ADR or a copy guide alone needs none.
 - **Bindings follow the agent's schema.** A new wire field in the agent
   needs the bindings bumped here, or redaction strips it.
 - **Docs follow behaviour, not every code change.** A change that adds
