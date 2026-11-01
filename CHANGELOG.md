@@ -9,19 +9,22 @@ the section being read.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-01
+
+The first release of the Otherlode collector. It receives what Otherlode agents send, checks each payload, can redact it, and forwards it to Otherlode. It stores nothing. The docs are at https://otherlode.dev/docs.
+
 ### Added
 
-- The collector accepts the agent's class listing at `/v1/otherlode/class-listing`, stamps it, strips its unknown fields while redaction is on, and forwards it like a static baseline.
-- `ingest.Sink` has an `AcceptClassListing` method. A Go backend that implements `Sink` must add it.
-- The bindings know `StaticBaseline.include_rules` and `ResourceAttributes.flush_interval_seconds`, so a redacting collector keeps both fields and no longer marks a payload `fields_stripped` for them.
-- `ingest.MaxResourceValueBytes` is the longest identity value, in bytes, that the handler accepts.
-- `ingest.MaxDeltaBatchElements`, `MaxManifestElements`, `MaxStaticBaselineElements` and `MaxClassListingElements` are the most elements a payload of each kind may hold.
-- `ingest.Notice`, `ingest.NoticeServiceOverCap`, `ingest.NoticeEnvironmentNotTracked` and `ingest.NoticeHeader` name the notices a backend can send with an accepted payload. The forwarder logs a `WARN` line for each, at most once an hour for each notice and service, and counts them in `otherlode_collector_forward_notices_total`.
+- **The image**, `ghcr.io/otherlodehq/otherlode-collector`, tagged `0.1.0`, `0.1` and `latest`, for `linux/amd64` and `linux/arm64`. It runs as a non-root user on a distroless base and listens on port 4319. Each image carries a build provenance attestation, which `gh attestation verify` checks.
+- **Ingest** of the agent's four payloads, as protobuf over HTTP: delta batches, manifests, static baselines and class listings. The collector checks each payload's shape and size before it answers 202, so a malformed or oversized payload is refused here first.
+- **Agent tokens.** Each agent sends a bearer token. Set one or more tokens in `OTHERLODE_COLLECTOR_AUTH_TOKEN`, or in a file the collector reads again every 30 seconds, so you can rotate a token without a restart.
+- **Forwarding** to Otherlode with your ingest key, through 8 queues by default. A failed send is retried for up to 5 minutes, and a stop drains the queues for up to 10 seconds. Every payload the collector drops is logged and counted.
+- **Redaction.** The collector can blank the string literals in branch conditions and case labels, all of them or those a pattern matches. It can replace branch and site keys with keys made under a secret you set, and it clears the case keys that could give a literal away. With redaction on, it drops any field it does not know and marks the payload.
+- **Environment and namespace.** The collector can set the environment and the service namespace on each payload that has none, or on every payload.
+- **Limits.** A 16 MiB body cap, an element limit for each kind of payload, a request rate limit for each client address, and a cap on concurrent decodes.
+- **Monitoring.** `/healthz`, Prometheus counters at `/metrics`, a `healthcheck` subcommand for container health checks, and JSON logs.
+- **Configuration** through 28 `OTHERLODE_COLLECTOR_*` environment variables. A value the collector cannot use stops it at startup with a log line that names the variable.
+- **The `ingest` Go package**, the collector's own handler, for a Go backend that receives agent payloads itself. It implements `ingest.Sink`.
 
-### Changed
-
-- Each `ingest.Sink` method returns `([]ingest.Notice, error)`. The handler sends the notices of an accepted payload as `Otherlode-Notice` header values on the 202. A Go backend that implements `Sink` must change its signatures.
-- The collector rejects a payload with a 400 when a resource string holds a NUL byte, when a time field in a delta batch or manifest is outside 0 to 253402300799999 milliseconds, or when a class that failed to initialize has no reason. `ingest.MaxTimestampMillis` is the upper bound.
-- The collector rejects a payload with a 400 when `service_name`, `service_version`, `service_instance_id`, `environment`, `run_id`, `service_namespace` or `agent_version` is longer than 1024 bytes. Startup fails when `OTHERLODE_COLLECTOR_ENVIRONMENT` or `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE` is longer than 1024 bytes after trimming.
-- The collector rejects a manifest with a 400 when a dependency has no identities, such as `dependencies[1].identities is empty`, and counts it under reason `invalid`.
-- The handler counts a body's elements before it decodes it. It answers 413 `payload has too many elements` for a payload over the limit for its kind, and counts it under reason `too_many_elements`.
+[Unreleased]: https://github.com/otherlodehq/otherlode-collector/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/otherlodehq/otherlode-collector/releases/tag/v0.1.0
