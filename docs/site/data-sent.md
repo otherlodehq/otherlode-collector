@@ -71,7 +71,7 @@ If you set `OTHERLODE_COLLECTOR_ENVIRONMENT`, the collector writes that value in
 
 ### Blanked string literals
 
-If you set `OTHERLODE_COLLECTOR_REDACT_BLOCKED_VALUES` or `OTHERLODE_COLLECTOR_REDACT_ALL_LITERALS`, the collector replaces the text of string literals with `…`. It does this in the conditions of branch sites and in the case labels of their outcomes, in manifests and static baseline chunks. Delta batches hold no conditions. The collector blanks no other field. See [blank out string literals](redaction).
+While either blanking setting is on, the collector replaces the text of each string literal the settings select with `…`. It does this in the conditions of branch sites and in the case labels of their outcomes, in manifests and static baseline chunks. Delta batches hold no conditions. The collector blanks no other field. See [blank out string literals](redaction).
 
 ### Dropped unknown fields
 

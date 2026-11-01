@@ -54,8 +54,8 @@ const (
 )
 
 // Config configures a ForwardingSink. URL is required. Every other field
-// falls back to a default when left zero. The timeout and retry defaults
-// match the OTLP HTTP exporter.
+// falls back to a default when left zero. The retry defaults match the
+// OTLP HTTP exporter.
 type Config struct {
 	// URL is the backend's base URL, with an http or https scheme and a
 	// host. NewForwardingSink rejects a URL with a query, a fragment or

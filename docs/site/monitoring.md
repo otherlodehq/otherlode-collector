@@ -31,7 +31,7 @@ The probe gives up after 2 seconds. It never uses a proxy, so `HTTPS_PROXY`, `HT
 |---|---|
 | `0` | `/healthz` answered `200` |
 | `1` | The address is invalid, the request failed or timed out, or the status was not `200` |
-| `2` | You passed any argument other than `healthcheck`. The collector prints a usage line and does not start |
+| `2` | You passed any argument list other than `healthcheck` alone. The collector prints a usage line and does not start |
 
 The image runs the subcommand as its `HEALTHCHECK`:
 
@@ -59,7 +59,7 @@ The `payload` label takes one of four values, named for the path the agent poste
 | `static_baseline` | `/v1/otherlode/static-baseline` |
 | `class_listing` | `/v1/otherlode/class-listing` |
 
-Each counter counts payloads, and one request carries one payload.
+One request carries one payload.
 
 ### Ingest counters
 
@@ -88,7 +88,7 @@ A `401` or `429` never reaches the ingest counters. They count in `auth_rejected
 
 ### Forwarding counters
 
-These stay at 0 when `OTHERLODE_COLLECTOR_FORWARD_URL` is not set.
+These have no series when `OTHERLODE_COLLECTOR_FORWARD_URL` is not set.
 
 | Counter | Labels | Goes up when |
 |---|---|---|
@@ -118,7 +118,7 @@ The `reason` label on `forward_refused_total` is `queue_full` or `shutting_down`
 |---|---|---|
 | `otherlode_collector_token_reload_failures_total` | `file` | The collector re-read a token file every 30 seconds and the read failed or found no usable token. It keeps the last good value |
 
-`file` is `auth` for `OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE` and `forward` for `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE`. The `forward` series exists only when forwarding is on. See [set and rotate tokens](tokens).
+`file` is `auth` for `OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE` and `forward` for `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE`. The `forward` series exists only when `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE` is set. See [set and rotate tokens](tokens).
 
 ### Stamping and redaction counters
 

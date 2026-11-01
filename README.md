@@ -23,8 +23,8 @@ be worth open-sourcing on its own, independent of any particular backend.
 
 ```
 Otherlode agent  --POST protobuf-->  otherlode-collector  -->  Sink
-(JVM, pushes                         (this repo,                (real backend:
- every flush)                         decode only)               storage, aggregation)
+(JVM, pushes                         (this repo: decodes,       (real backend:
+ every flush)                         processes, forwards)       storage, aggregation)
 ```
 
 The agent's `HttpExporter` posts four payload types, matching
@@ -38,12 +38,12 @@ instance restarted under a pinned instance ID still names a different run.
   per-probe hit totals, counted from the start of the process. A batch
   carries a probe only when its total changed since the last batch the
   collector confirmed. Sent every flush interval even when empty, as a
-  liveness heartbeat, so that an idle instance and a dead one can both be
-  told apart from silence. It also carries endpoint hit totals, one
+  liveness heartbeat, so a backend can tell an idle instance from a dead
+  one. It also carries endpoint hit totals, one
   entry per HTTP endpoint a web framework has matched a request to.
 - `POST /v1/otherlode/manifest`, a `ProbeManifest`: resource attributes
   plus a map from probe IDs to their source location (class, method,
-  line, branch index), sent incrementally so the collector only needs metadata for probes it hasn't already seen.
+  line, branch index), sent incrementally: each class's entries go out once, so a manifest carries only probes the agent has not sent before.
   It also carries the endpoints a web framework serves and any endpoint
   module that switched itself off after a linkage failure against a
   framework version it does not match.
@@ -62,8 +62,8 @@ instance restarted under a pinned instance ID still names a different run.
 All four are protobuf over plain HTTP, not gRPC. The agent sends one batch per
 flush interval per instance, so gRPC's multiplexing advantage doesn't apply,
 and plain HTTP avoids shading grpc-java/Netty into every instrumented JVM.
-See the agent's own `CLAUDE.md` ("Transport", "Hit-data recording &
-export") for the full reasoning; the schema itself lives in the agent
+See the agent's [ADR 0009](https://github.com/otherlodehq/otherlode-agent/blob/master/docs/adr/0009-http-protobuf-not-grpc.md)
+for the full reasoning; the schema itself lives in the agent
 repo and is published to the Buf Schema Registry as
 [`buf.build/otherlode/otherlode`](https://buf.build/otherlode/otherlode).
 
@@ -191,7 +191,7 @@ both `OTHERLODE_COLLECTOR_AUTH_TOKEN` and
 `OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE` stops the collector at startup.
 
 ```
-# agents on the old key until the fleet has rolled
+# agents on the old token until the fleet has rolled
 old-token
 new-token
 ```
@@ -240,8 +240,8 @@ outside your machine), opt out explicitly:
 OTHERLODE_COLLECTOR_INSECURE_NO_AUTH=1 go run ./cmd/otherlode-collector
 ```
 
-`OTHERLODE_COLLECTOR_INSECURE_NO_AUTH` takes `1`, `t`, `true`, `0`, `f`
-or `false`, and `true` and `false` in upper or title case. Any other value
+`OTHERLODE_COLLECTOR_INSECURE_NO_AUTH` takes `1`, `t`, `T`, `true`, `TRUE`,
+`True`, `0`, `f`, `F`, `false`, `FALSE` or `False`. Any other value
 stops the collector at startup, even when a token is set.
 
 Or as a container. The same fail-closed rule applies, so the token (or
@@ -361,6 +361,7 @@ wildcard), exiting 0 or 1, and never through a proxy. The image's
 | `otherlode_collector_forward_delivered_total` | `payload` | Backend accepted the payload |
 | `otherlode_collector_forward_retries_total` | `payload` | Attempts made after a retryable failure |
 | `otherlode_collector_forward_dropped_total` | `payload`, `reason` | Discarded without delivery: `marshal`, `permanent`, `retry_exhausted`, `shutdown_deadline`, `shutdown_attempt_failed` |
+| `otherlode_collector_forward_notices_total` | `notice` | Notices the backend sent with an accepted payload: `service-over-cap`, `environment-not-tracked`, or `unknown` for any other value |
 | `otherlode_collector_forward_refused_total` | `payload`, `reason` | Not taken and answered `503` so the sender sends it again: `queue_full`, `shutting_down` |
 | `otherlode_collector_environment_mismatch_total` | `payload` | The agent's environment differed from the collector's configured one (see [Environment](#environment)); `payload` is `deltas`, `manifest`, `static_baseline`, or `class_listing` |
 | `otherlode_collector_namespace_mismatch_total` | `payload` | The agent's service namespace differed from the collector's configured one (see [Namespace](#namespace)); `payload` is `deltas`, `manifest`, `static_baseline`, or `class_listing` |
@@ -457,7 +458,7 @@ ASCII replaced by `?`. A 403 with `backend_error` set to
 wants redacted payloads, and this collector has redaction off or a
 different secret. See [Branch and site keys](#branch-and-site-keys).
 
-The request timeout and retry defaults match the OTLP HTTP exporter's.
+The retry defaults match the OpenTelemetry Collector's OTLP HTTP exporter.
 The shard count, queue size and queue byte budget are this collector's
 own. The defaults should rarely need changing. Each can be overridden;
 durations use Go syntax (`30s`, `5m`).
@@ -510,8 +511,10 @@ larger of the queue byte budget and the largest payload.
 
 ### Environment
 
-The agent sets `environment` on a payload only when its own `environment`
-option is set, so a payload can arrive with the field blank. UAT traffic
+The agent takes `environment` from its own `environment` option, then
+OpenTelemetry's `deployment.environment.name` or `deployment.environment`,
+then `test` for a test run. With none of these, a payload arrives with the
+field blank. UAT traffic
 looks nothing like prod traffic: code that is dead in prod is often
 exercised in UAT, and the reverse. A backend has to know which
 environment each payload came from to keep the two apart. An operator
@@ -623,7 +626,7 @@ a secret, set as described under
 | Variable | Meaning |
 | --- | --- |
 | `OTHERLODE_COLLECTOR_REDACT_BLOCKED_VALUES` | Regular expressions in Go syntax, one per line, since a comma can appear inside a pattern. A literal that any of them matches anywhere in its text is redacted. Anchor a pattern with `^` and `$` to match the whole literal. Blank lines are ignored. |
-| `OTHERLODE_COLLECTOR_REDACT_ALL_LITERALS` | `1`, `t` or `true`, with `true` also in upper or title case, redacts every string literal. `0`, `f` or `false`, in the same forms, leaves this setting off. |
+| `OTHERLODE_COLLECTOR_REDACT_ALL_LITERALS` | `1`, `t`, `T`, `true`, `TRUE` or `True` redacts every string literal. `0`, `f`, `F`, `false`, `FALSE` or `False` leaves this setting off. |
 
 ```
 OTHERLODE_COLLECTOR_REDACT_BLOCKED_VALUES='(?i)password|secret|token
@@ -648,12 +651,12 @@ that a newer agent's new fields are lost until the collector is updated.
 
 A payload that loses at least one field this way is marked. The collector
 sets `fields_stripped` on the payload's resource and never clears it. The
-server keeps the data but makes no never-hit or cluster claim from a run
-that carried the mark, and labels the run as sent through a collector
+server keeps the data but counts a run that carried the mark in no
+finding, and labels the run as sent through a collector
 older than its agent (agent ADR 0054, collector
 [ADR 0005](docs/adr/0005-a-collector-that-strips-unknown-fields-marks-the-payload.md)).
 `otherlode_collector_fields_stripped_total` counts the marked payloads. The
-collector also logs one `WARNING` per run id, naming the namespace,
+collector also logs one `WARN` line per run id, naming the namespace,
 service, instance, run id and `agent_version`. The fix is to upgrade to the
 latest collector. With redaction off nothing is dropped
 and nothing is marked.

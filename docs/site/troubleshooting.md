@@ -72,10 +72,10 @@ The URL to use for Otherlode is on Otherlode's [connect page](/docs/server/conne
 | `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN or OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE is set but OTHERLODE_COLLECTOR_FORWARD_URL is empty; set OTHERLODE_COLLECTOR_FORWARD_URL or unset the key variable` | You set a key but no URL. Set the URL, or unset the key to run log-only. |
 | `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN and OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE are both set; set one` | Unset one of the two. |
 | `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN holds only spaces` | The variable is set but blank. Set the key or unset the variable. |
-| `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN: the key holds a control character at byte 12` | The key has a newline, tab or other control character. Copy the key again without trailing whitespace. A key file with such a character gives the same message after the file path. |
+| `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN: the key holds a control character at byte 12` | The key has a tab, newline or other control character inside it. The collector trims spaces, tabs and newlines at each end, so the character sits between other characters of the key. Copy the key again. A key file with such a character gives the same message after the file path. |
 | `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE: /run/secrets/forward-key: found 2 tokens, want exactly one` | The key file must hold exactly one key. Remove the extra lines. |
 
-The key file can also fail with the file errors in the table above, under the name `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE`. [Set and rotate tokens](tokens) describes the key and its file.
+The key file can also fail with the first three file errors in the table above, under the name `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE`. An empty key file gives `found 0 tokens, want exactly one`. [Set and rotate tokens](tokens) describes the key and its file.
 
 ### A number, a duration or a switch does not parse
 
@@ -83,7 +83,7 @@ A value that does not parse, or a number that is zero or negative where the sett
 
 | Log line | Cause and fix |
 |---|---|
-| `OTHERLODE_COLLECTOR_FORWARD_SHARDS must be positive` | The same line applies to `OTHERLODE_COLLECTOR_FORWARD_QUEUE_SIZE`, `OTHERLODE_COLLECTOR_FORWARD_QUEUE_BYTES` and `OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES`. Use a whole number above 0. |
+| `OTHERLODE_COLLECTOR_FORWARD_SHARDS must be positive` | The same line applies to `OTHERLODE_COLLECTOR_FORWARD_QUEUE_SIZE`, `OTHERLODE_COLLECTOR_FORWARD_QUEUE_BYTES` and `OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES`, and to the four durations at `0s` or below. Use a value above 0. |
 | `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT: time: invalid duration "abc"` | Applies to the three `OTHERLODE_COLLECTOR_FORWARD_RETRY_*` durations too. Use Go syntax such as `30s` or `5m`. |
 | `OTHERLODE_COLLECTOR_FORWARD_SHARDS: strconv.Atoi: parsing "eight": invalid syntax` | Use digits only. |
 | `OTHERLODE_COLLECTOR_RATE_LIMIT_RPS: strconv.ParseFloat: parsing "fast": invalid syntax` | Use a number. `0` turns the limit off. |
@@ -102,6 +102,7 @@ A value that does not parse, or a number that is zero or negative where the sett
 | `OTHERLODE_COLLECTOR_ENVIRONMENT_ACTION: invalid action "replace": must be "insert" or "upsert"` | Use `insert` or `upsert`, in any case. The namespace action gives the same line under its own name. |
 | `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE is "..", which no URL path can name` | `.` and `..` are refused. Pick another namespace. |
 | `OTHERLODE_COLLECTOR_ENVIRONMENT is not valid UTF-8` | Applies to the namespace too. Re-enter the value as UTF-8. |
+| `OTHERLODE_COLLECTOR_ENVIRONMENT is 2000 bytes, over the 1024-byte limit` | Applies to the namespace too. Use a value of at most 1024 bytes. |
 | `OTHERLODE_COLLECTOR_REDACT_BLOCKED_VALUES line 2: error parsing regexp: missing closing ): ` followed by the pattern | The line number counts from 1. Fix that pattern. Each line is one regular expression. |
 | `OTHERLODE_COLLECTOR_REDACT_ALL_LITERALS: strconv.ParseBool: parsing "maybe": invalid syntax` | Use `true` or `false`. A typo stops startup, so it cannot leave redaction off. |
 
@@ -122,7 +123,7 @@ While redaction is on, the collector needs a secret in `OTHERLODE_COLLECTOR_REDA
 | `OTHERLODE_COLLECTOR_REDACT_SECRET equals the forward key, which the backend holds; use a secret of its own` | Use a separate secret. |
 | `OTHERLODE_COLLECTOR_REDACT_SECRET or OTHERLODE_COLLECTOR_REDACT_SECRET_FILE is set but redaction is off; set OTHERLODE_COLLECTOR_REDACT_BLOCKED_VALUES or OTHERLODE_COLLECTOR_REDACT_ALL_LITERALS, or unset the secret variable` | Turn redaction on, or unset the secret variable. `OTHERLODE_COLLECTOR_REDACT_ALL_LITERALS=false` counts as off. |
 
-A secret file gives the same lines under `OTHERLODE_COLLECTOR_REDACT_SECRET_FILE`, plus the file errors in the token table above. A file with two lines gives `found 2 tokens, want exactly one`. [Replace branch and site keys](redaction#replace-branch-and-site-keys) has the rules.
+A secret file gives the same lines under `OTHERLODE_COLLECTOR_REDACT_SECRET_FILE`, plus the first three file errors in the token table above. A file with no secret gives `found 0 tokens, want exactly one`, and a file with two gives `found 2 tokens, want exactly one`. [Replace branch and site keys](redaction#replace-branch-and-site-keys) has the rules.
 
 ### The collector cannot listen
 
@@ -249,9 +250,9 @@ The `service`, `instance` and `path` fields say which payload. The `msg` gives t
 |---|---|
 | `dropping payload: permanent failure` | Otherlode answered with a status the collector does not retry, or the request could not be built. The `error` field ends with the status. Every status except 429, 502, 503 and 504 lands here, including a redirect, because the collector follows none. Fix what the status means. |
 | `dropping payload: retry budget exhausted` | The collector retried for its budget, 5 minutes by default, and every attempt failed. The `error` field holds the last failure, a status or a network error such as a timeout. Check the route from the collector to Otherlode, including `HTTPS_PROXY` and `NO_PROXY`. |
-| `dropping payload: shutdown deadline exceeded` | The collector stopped and could not deliver everything within its 10 second drain. No `error` field. Give the container a stop timeout longer than 10 seconds. |
+| `dropping payload: shutdown deadline exceeded` | The collector stopped, and its 10 second drain ended before it reached this payload. No `error` field. No setting changes the 10 seconds. A backlog at shutdown means Otherlode was slow or refusing, so read the `WARN` lines before the stop. |
 | `dropping payload: shutdown drain attempt failed` | The final attempt during shutdown failed. Read the `error` field. |
-| `dropping payload: marshal failed` | The collector could not re-encode the payload. This should not happen. Keep the line and report it. |
+| `dropping payload: marshal failed` | The collector could not re-encode the payload. The line carries `payload` and `error` in place of `service`, `instance` and `path`. It means a collector bug, so keep the line and report it. |
 
 The agent already had its 202 for a dropped payload, so it does not send that payload again. A probe in a dropped delta batch reaches Otherlode again only when its count changes. [How the collector works](how-it-works) explains why. [Forwarding](forwarding) covers the retry rules and the tuning variables. For what Otherlode's ingest answers and why, see Otherlode's [dropped payload entries](/docs/server/troubleshooting#the-collector-logs-a-dropped-payload).
 

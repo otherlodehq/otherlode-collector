@@ -34,7 +34,7 @@ So the answer decides what the agent does next.
 
 A probe that runs once a quarter shows the difference. If the collector answered 202 and then lost the payload, the agent would consider that probe reported. Its count would not change, so nothing would resend it, and Otherlode would see a probe that looks unused. A refused payload costs one flush interval. An acknowledged and lost payload can cost the finding.
 
-The collector therefore answers 202 only after the payload is in its queue, and it refuses otherwise. A payload can still be lost after the 202 if the collector crashes, if Otherlode refuses it for good, or if it stays unreachable past the retry budget. Each of those drops is counted and logged, and [forwarding](forwarding) lists them. The queue has a fixed size, so a slow Otherlode cannot make the collector grow without limit.
+The collector therefore answers 202 only after the payload is in its queue, and it refuses otherwise. A payload can still be lost after the 202 if the collector crashes, if Otherlode refuses it for good, if it stays unreachable past the retry budget, or if the shutdown drain cannot deliver it. A crash loses the queue with no count or log line. Each of the other drops is counted and logged, and [forwarding](forwarding) lists them. The queue has a fixed size, so a slow Otherlode cannot make the collector grow without limit.
 
 ## Payloads from one instance keep their order
 
@@ -52,7 +52,7 @@ Every setting is read once at startup. If the collector cannot tell what you mea
 - An invalid number, duration, pattern, boolean or URL stops startup. Setting a forward key with no forward URL stops it too, because you meant to forward.
 - A typo in `OTHERLODE_COLLECTOR_REDACT_ALL_LITERALS` cannot leave blanking off. The typo stops startup. A typo in `OTHERLODE_COLLECTOR_INSECURE_NO_AUTH` stops startup too.
 - With blanking on and no usable secret, it refuses to start, because plain branch and site keys let anyone test guesses at a blanked literal. A secret set with blanking off stops startup too, because you meant to protect the keys. See [replace branch and site keys](redaction#replace-branch-and-site-keys).
-- With blanking on, a string part of a kind the collector does not recognise is treated as a literal and blanked. The collector drops any field it does not recognise. A newer agent that adds a field able to carry text cannot get it past an older collector.
+- With blanking on, a string part of a kind the collector does not recognise counts as a literal, so the blanking settings apply to it. The collector also drops any field it does not recognise. A newer agent that adds a field able to carry text cannot get it past an older collector.
 
 A collector that quietly ran without a token, or without the blanking you asked for, would be the more dangerous failure. A container that exits at startup is easy to see and easy to fix.
 

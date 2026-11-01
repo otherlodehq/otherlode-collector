@@ -37,7 +37,7 @@ Each request is a `POST`. The body is the same protobuf message the agent sent, 
 
 ### The key header
 
-If you set a forward key, the collector sends `Authorization: Bearer <key>` on every request. It reads the key again before each request, so a rotated key file applies without a restart. The agent token is a separate secret and is never sent to the backend. See [set and rotate tokens](tokens) for the key and its file.
+If you set a forward key, the collector sends `Authorization: Bearer <key>` on every request. It takes the current key for each request and re-reads a key file every 30 seconds, so a rotated key file applies without a restart. The agent token is a separate secret and is never sent to the backend. See [set and rotate tokens](tokens) for the key and its file.
 
 Setting a key without `OTHERLODE_COLLECTOR_FORWARD_URL` stops startup. So does a key that holds a control character.
 
@@ -114,7 +114,7 @@ A `403` with `redaction_required` or `redaction_secret_mismatch` means the tenan
 
 ## When the queue is full
 
-Each queue holds up to 64 payloads and up to 64 MiB of encoded payload bytes by default, counting the payload in flight. A queue that holds nothing accepts any payload, even one larger than the byte limit.
+Each queue holds up to 64 waiting payloads by default, and up to 64 MiB of encoded payload bytes counting the payload in flight. A queue that holds nothing accepts any payload, even one larger than the byte limit.
 
 If the payload's queue is full by count or by bytes, or the collector is shutting down, the collector does not take the payload. It answers the agent `503` with `Retry-After: 5` and no body, and logs an ERROR line that names the instance:
 

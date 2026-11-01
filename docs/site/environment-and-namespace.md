@@ -14,9 +14,9 @@ For the options on the agent's side, see [service identity](/docs/agent/configur
 
 | Variable | Default | Accepted values |
 |---|---|---|
-| `OTHERLODE_COLLECTOR_ENVIRONMENT` | Empty, so the collector leaves the environment alone | Any text that is valid UTF-8 |
+| `OTHERLODE_COLLECTOR_ENVIRONMENT` | Empty, so the collector leaves the environment alone | Any text that is valid UTF-8, up to 1024 bytes |
 | `OTHERLODE_COLLECTOR_ENVIRONMENT_ACTION` | `insert` | `insert` or `upsert`, in any letter case |
-| `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE` | Empty, so the collector leaves the namespace alone | Any text that is valid UTF-8, except `.` and `..` |
+| `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE` | Empty, so the collector leaves the namespace alone | Any text that is valid UTF-8, up to 1024 bytes, except `.` and `..` |
 | `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE_ACTION` | `insert` | `insert` or `upsert`, in any letter case |
 
 The collector reads these once, at startup. Restart it after you change them. It trims the spaces around each value and each action. A value or an action that is blank after trimming counts as not set.

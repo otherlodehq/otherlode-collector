@@ -17,7 +17,7 @@ The collector looks at the condition parts in two places, in every branch site o
 - The condition of the branch site.
 - The case label of each outcome of the site.
 
-A part is blanked when its kind is neither code nor placeholder, and the settings select it. A part of a kind the collector does not recognise counts as a literal, so it is blanked too. The part keeps its kind, and its text becomes `…`.
+A part is blanked when its kind is neither code nor placeholder, and the settings select it. A part of a kind the collector does not recognise counts as a literal, so the same settings blank it. The part keeps its kind, and its text becomes `…`.
 
 The class listing holds class names and the include and exclude rules. The collector keeps both as they arrive, as it keeps class names everywhere else.
 
@@ -79,7 +79,7 @@ When blanking is on, the collector logs this line at startup. `secret_fingerprin
 
 ## Check that blanking works
 
-The counter `otherlode_collector_redacted_literals_total` on `/metrics` counts the parts the collector blanked. `otherlode_collector_redacted_case_keys_total` counts the case keys it cleared. See [case keys that are a hash code](#case-keys-that-are-a-hash-code). The `payload` label of both is `manifest` or `static_baseline`. A class listing holds no string literal, so it adds to neither. Each stays at zero until a payload arrives with something to blank or clear.
+The counter `otherlode_collector_redacted_literals_total` on `/metrics` counts the parts the collector blanked. `otherlode_collector_redacted_case_keys_total` counts the case keys it cleared. See [case keys that are a hash code](#case-keys-that-are-a-hash-code). The `payload` label of both is `manifest` or `static_baseline`. A class listing holds no string literal, so it adds to neither. Neither has a series until a payload arrives with something to blank or clear.
 
 No counter and no log line holds a literal's text, a key or the secret.
 

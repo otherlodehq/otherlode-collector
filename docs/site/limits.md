@@ -17,7 +17,7 @@ The collector keeps a token bucket for each client address. A request takes one 
 | `OTHERLODE_COLLECTOR_RATE_LIMIT_IPV6_PREFIX` | `128` | An integer from 1 to 128. |
 | `OTHERLODE_COLLECTOR_CLIENT_IP_HEADER` | unset | A header name. |
 
-A value that is not a number, a negative or non-finite rate, a burst below 1 while the rate is above 0, or a prefix outside 1 to 128 stops the collector at startup. The error names the variable. A burst must parse as an integer even when the rate is `0`. With the limit off, the collector logs this warning at startup and ignores the other three variables:
+A value that is not a number, a negative or non-finite rate, a burst below 1 while the rate is above 0, or a prefix outside 1 to 128 stops the collector at startup. The error names the variable. A burst must parse as an integer, and a prefix must be from 1 to 128, even when the rate is `0`. With the limit off, the collector logs this warning at startup and ignores the other three variables:
 
 ```text
 {"time":"...","level":"WARN","msg":"rate limiting disabled; ingest endpoints accept requests unthrottled"}
