@@ -1,6 +1,6 @@
 ---
 title: Troubleshooting
-description: Find the cause of a collector that will not start, an agent that gets a 401, 404, 405, 413, 415, 429, 400 or 503, a dropped payload, a 403 for redaction, a payload that Otherlode stores but does not track, branch history that starts over, the stripped-fields warning, a token rotation that did not apply, a shared rate limit or a failing healthcheck.
+description: Find the cause of a collector that will not start, an agent that gets a 401, 404, 405, 413, 415, 429, 400 or 503, a payload that Otherlode did not store, a 403 for redaction, a payload that Otherlode stores but does not track, branch history that starts over, the stripped-fields warning, a token rotation that did not apply, a shared rate limit or a failing healthcheck.
 order: 110
 ---
 
@@ -63,7 +63,7 @@ When `OTHERLODE_COLLECTOR_FORWARD_URL` is set, it must be an `http` or `https` U
 | `forward URL must not contain a query` | Remove everything from `?`. |
 | `forward URL must not contain a fragment` | Remove everything from `#`. |
 
-The URL to use for Otherlode is on Otherlode's [connect page](/docs/server/connect). [Forwarding](forwarding) describes what the collector does after it accepts a payload.
+The URL to use for Otherlode is on Otherlode's [connect page](/docs/server/connect). [Forwarding](forwarding) describes what the collector does with a payload once it has processed it.
 
 ### The forward key settings are wrong
 
@@ -83,9 +83,10 @@ A value that does not parse, or a number that is zero or negative where the sett
 
 | Log line | Cause and fix |
 |---|---|
-| `OTHERLODE_COLLECTOR_FORWARD_SHARDS must be positive` | The same line applies to `OTHERLODE_COLLECTOR_FORWARD_QUEUE_SIZE`, `OTHERLODE_COLLECTOR_FORWARD_QUEUE_BYTES` and `OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES`, and to the four durations at `0s` or below. Use a value above 0. |
-| `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT: time: invalid duration "abc"` | Applies to the three `OTHERLODE_COLLECTOR_FORWARD_RETRY_*` durations too. Use Go syntax such as `30s` or `5m`. |
-| `OTHERLODE_COLLECTOR_FORWARD_SHARDS: strconv.Atoi: parsing "eight": invalid syntax` | Use digits only. |
+| `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS must be positive` | The same line applies to `OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES`, and to `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT` at `0s` or below. Use a value above 0. |
+| `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT: time: invalid duration "abc"` | Use Go syntax such as `5s` or `8s`. |
+| `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT is 9s, which is not below the 9s time budget of one request; set it lower` | A request has 9 seconds in all, so the forward timeout must be below that. Use `8s`, the default, or less. The line quotes the value you set. `10s` gives the same line. |
+| `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS: strconv.Atoi: parsing "many": invalid syntax` | Use digits only. |
 | `OTHERLODE_COLLECTOR_RATE_LIMIT_RPS: strconv.ParseFloat: parsing "fast": invalid syntax` | Use a number. `0` turns the limit off. |
 | `OTHERLODE_COLLECTOR_RATE_LIMIT_RPS must not be negative` | Use 0 or more. Infinity and NaN give `must be a finite number`. |
 | `OTHERLODE_COLLECTOR_RATE_LIMIT_BURST must be positive when rate limiting is enabled` | Use 1 or more, or set the rate to 0. |
@@ -226,37 +227,46 @@ The agent's [configuration](/docs/agent/configuration) lists its service name an
 
 ### 503
 
-A 503 means the collector did not take a valid payload. The agent keeps its counts and builds the payload again on its next flush, so nothing is lost. Three causes look alike, and the log tells them apart.
+A 503 means the collector did not take a valid payload. The agent keeps its counts and builds the payload again on its next flush, so nothing is lost. The log tells the causes apart.
 
 | Sign | Cause and fix |
 |---|---|
-| `ERROR` line `sink rejected delta batch` with `error` `forward: shard queue is full (service "checkout" instance "3f1c9a")`, `Retry-After: 5`, empty response body | The queue for that instance is full, by count or by bytes, because Otherlode is slow or refusing. Check the `WARN` lines in the next section. If Otherlode is healthy, raise `OTHERLODE_COLLECTOR_FORWARD_QUEUE_SIZE`, `OTHERLODE_COLLECTOR_FORWARD_QUEUE_BYTES` or `OTHERLODE_COLLECTOR_FORWARD_SHARDS`. [Forwarding](forwarding) explains the queues. |
-| `ERROR` line `sink rejected delta batch` with `error` `forward: sink is shutting down (service "checkout" instance "3f1c9a")`, `Retry-After: 5` | The collector is stopping, for example during a rollout. This is expected and clears when the new collector is up. |
-| `WARN` line `refusing delta batch: no decode slot came free`, `Retry-After: 1`, empty body | No decode slot came free within 5 seconds. Too many large requests arrived at once. The collector logs at most one such line a minute, and its `unlogged_busy_refusals` field counts the refusals since the last line that got no line of their own. The counter `otherlode_collector_ingest_rejected_total{reason="busy"}` counts every one. Raise `OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES` or give the collector more CPU and memory. [Rate and memory limits](limits) has the trade-off. |
+| `ERROR` line `sink rejected delta batch` with a `reason`, `Retry-After: 5`, empty response body | Otherlode did not store the payload, or the collector could not forward it. The `reason` says why. [Otherlode did not store a payload](#otherlode-did-not-store-a-payload) has one entry for each. |
+| `ERROR` line `sink rejected delta batch` with `reason` `shutting_down` | The collector is stopping, for example during a rollout. This is expected and clears when the new collector is up. |
+| `WARN` line `refusing delta batch: no decode slot came free`, `Retry-After: 1`, empty body | No decode slot came free within 1 second. Too many large requests arrived at once, or forwards are slow and hold their decode slots. The collector logs at most one such line a minute, and its `unlogged_busy_refusals` field counts the refusals since the last line that got no line of their own. The counter `otherlode_collector_ingest_rejected_total{reason="busy"}` counts every one. If `forward_failed_total{reason="timeout"}` rises too, fix the route to Otherlode first. Otherwise raise `OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES` or give the collector more CPU and memory. [Rate and memory limits](limits) has the trade-off. |
 
-The `ERROR` and `WARN` lines name `manifest`, `static baseline` or `class listing` for the other payloads. The counter `otherlode_collector_forward_refused_total`, labelled `queue_full` or `shutting_down`, counts the first two causes.
+The `ERROR` and `WARN` lines name `manifest`, `static baseline` or `class listing` for the other payloads. A request whose client has already disconnected is counted under `canceled` and gets the same 503.
 
-## Payloads are dropped after forwarding
+## Otherlode did not store a payload
 
-The collector answers the agent with a 202 before it contacts Otherlode, then delivers each payload in the background. When it gives up on a payload, it logs a `WARN` line and counts it in `otherlode_collector_forward_dropped_total`.
+The collector answers `202` only after Otherlode has answered `202`. When Otherlode does not store a payload, the collector logs one line, counts it in `otherlode_collector_forward_failed_total` with a `reason`, and answers the agent without a `202`. The agent keeps the payload's counts and sends them again on its next flush, so nothing is dropped. A service reads as behind until a payload gets through.
 
 ```text
-{"time":"2026-10-10T09:12:44.512Z","level":"WARN","msg":"dropping payload: permanent failure","namespace":"","service":"checkout","instance":"3f1c9a","path":"/v1/otherlode/deltas","error":"backend returned 401 Unauthorized"}
+{"time":"...","level":"ERROR","msg":"sink rejected delta batch","error":"backend returned 503 Service Unavailable for service \"demo\" instance \"i1\"","reason":"server_error","unlogged_sink_failures":0}
 ```
 
-The `service`, `instance` and `path` fields say which payload. The `msg` gives the reason. When Otherlode's response body names an error code, the line adds it as `backend_error`, such as `"backend_error":"redaction_required"`. The code is cut to 64 bytes, and each byte outside printable ASCII becomes `?`.
+The `error` field names the service and instance, and ends with Otherlode's status or the network error. The collector writes at most one line a minute for each payload type and cause. `unlogged_sink_failures` counts the failures since the previous line that got no line of their own, and the counter counts every one. A `4xx` from Otherlode logs a `WARN` line with `msg` `sink refused delta batch`, the `status` and `unlogged_sink_refusals` instead.
 
-| `msg` | Meaning and fix |
-|---|---|
-| `dropping payload: permanent failure` | Otherlode answered with a status the collector does not retry, or the request could not be built. The `error` field ends with the status. Every status except 429, 502, 503 and 504 lands here, including a redirect, because the collector follows none. Fix what the status means. |
-| `dropping payload: retry budget exhausted` | The collector retried for its budget, 5 minutes by default, and every attempt failed. The `error` field holds the last failure, a status or a network error such as a timeout. Check the route from the collector to Otherlode, including `HTTPS_PROXY` and `NO_PROXY`. |
-| `dropping payload: shutdown deadline exceeded` | The collector stopped, and its 10 second drain ended before it reached this payload. No `error` field. No setting changes the 10 seconds. A backlog at shutdown means Otherlode was slow or refusing, so read the `WARN` lines before the stop. |
-| `dropping payload: shutdown drain attempt failed` | The final attempt during shutdown failed. Read the `error` field. |
-| `dropping payload: marshal failed` | The collector could not re-encode the payload. The line carries `payload` and `error` in place of `service`, `instance` and `path`. It means a collector bug, so keep the line and report it. |
+When Otherlode's response body names an error code, the `WARN` line adds it as `backend_error`, such as `"backend_error":"ingest_key_invalid"`. The code is cut to 64 bytes, and each byte outside printable ASCII becomes `?`.
 
-The agent already had its 202 for a dropped payload, so it does not send that payload again. A probe in a dropped delta batch reaches Otherlode again only when its count changes. [How the collector works](how-it-works) explains why. [Forwarding](forwarding) covers the retry rules and the tuning variables. For what Otherlode's ingest answers and why, see Otherlode's [dropped payload entries](/docs/server/troubleshooting#the-collector-logs-a-dropped-payload).
+| `reason` | Answer to the agent | Meaning and fix |
+|---|---|---|
+| `server_error` | `503` | Otherlode answered a `5xx`, or a redirect or another status that is not `2xx`. The `error` field ends with the status. For a `5xx`, check Otherlode's status. For a redirect, point `OTHERLODE_COLLECTOR_FORWARD_URL` at the final URL, since the collector follows no redirect. |
+| `timeout` | `503` | Otherlode did not answer within `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT`, 8 seconds by default. The `error` field ends with `context deadline exceeded`. Check the route from the collector to Otherlode, including `HTTPS_PROXY` and `NO_PROXY`. |
+| `transport` | `503` | The connection to Otherlode failed, for example on a DNS failure, a refused connection or a TLS error. The `error` field holds the network error. Check the URL and the route. |
+| `unexpected_status` | `503` | Otherlode, or something in front of it, answered a `2xx` other than `202`. A line `backend answered 2xx other than 202, so the payload is not counted as stored; check OTHERLODE_COLLECTOR_FORWARD_URL` comes first. The URL points at the wrong service, or a proxy answers for it. |
+| `busy` | `503` | `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS` forwards were in flight and none finished within the forward timeout. If Otherlode is slow, fix that first. If it answers quickly, raise the limit. |
+| `canceled` | `503` | The agent closed its connection, or the shutdown deadline passed, before Otherlode answered. |
+| `shutting_down` | `503` | The collector had begun to shut down. |
+| `rate_limited` | `429` | Otherlode answered `429`. The agent gets Otherlode's `Retry-After`. |
+| `rejected` | Otherlode's status | Otherlode answered another `4xx`. A `401` means Otherlode did not accept the forward key. Check `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN`. A `403` carries the code in `backend_error`. A `413` means Otherlode refused the size. |
+| `marshal` or `request` | `400` or `503` | The collector could not encode the payload or build the request. It means a collector bug, so keep the line and report it. |
 
-One more `WARN` shows at startup and is not a drop.
+A `400` or `422` from Otherlode for a static baseline or class listing chunk makes the agent drop the chunks it has left, as [the agent's data sent page](/docs/agent/data-sent#after-a-failed-send) describes. Any other failure keeps them.
+
+If Otherlode stays unreachable, every agent reads as behind and makes no claim about hits it has not delivered. When Otherlode answers again, the next flush of each agent catches up from its own totals. An agent whose process stops during the outage loses what it had not delivered, and reads in Otherlode as one that went silent. For what Otherlode's ingest answers and why, see Otherlode's [refused payload entries](/docs/server/troubleshooting#the-collector-logs-a-refused-payload).
+
+One more `WARN` shows at startup and is not a failure.
 
 ```text
 {"time":"...","level":"WARN","msg":"forward URL uses plain http; the backend auth token is sent unencrypted","url":"http://..."}
@@ -267,7 +277,7 @@ The forward URL starts with `http://` and a key is set. Use `https://`.
 ### 403 with redaction_required or redaction_secret_mismatch
 
 ```text
-{"time":"...","level":"WARN","msg":"dropping payload: permanent failure","namespace":"","service":"checkout","instance":"3f1c9a","path":"/v1/otherlode/deltas","error":"backend returned 403 Forbidden","backend_error":"redaction_required"}
+{"time":"...","level":"WARN","msg":"sink refused delta batch","error":"sink answered Forbidden: backend returned 403 Forbidden for service \"demo\" instance \"i1\"","status":403,"unlogged_sink_refusals":0,"backend_error":"redaction_required"}
 ```
 
 The tenant has Otherlode require redaction, and this collector's payloads do not match. Otherlode reads the `Otherlode-Redaction` header that a collector sends while redaction is on.
@@ -275,11 +285,11 @@ The tenant has Otherlode require redaction, and this collector's payloads do not
 - `redaction_required` means the payload had no header. This collector has redaction off. Turn it on and give it the tenant's secret.
 - `redaction_secret_mismatch` means the header holds another fingerprint. This collector's secret differs from the tenant's. Compare the `secret_fingerprint` in its startup line with another collector's, and set the same secret.
 
-Every payload from such a collector is dropped until you fix it and restart it. [Let Otherlode refuse payloads that were not blanked](redaction#let-otherlode-refuse-payloads-that-were-not-blanked) covers the header. Any other `403` comes from the key. See Otherlode's [backend returned 403](/docs/server/troubleshooting#backend-returned-403).
+Otherlode refuses every payload from such a collector with `403` until you fix it and restart it, and the agent gets that `403` each time. [Let Otherlode refuse payloads that were not blanked](redaction#let-otherlode-refuse-payloads-that-were-not-blanked) covers the header. Any other `403` comes from the key. See Otherlode's [backend returned 403](/docs/server/troubleshooting#backend-returned-403).
 
 ## Otherlode stores a payload but does not track it
 
-Otherlode answers a payload with a 2xx status, so the collector counts it as delivered. When Otherlode stores the payload and does not judge it, the response carries an `Otherlode-Notice` header, and the collector logs a `WARN` line for it.
+Otherlode answers a payload with `202`, so the collector counts it as delivered. When Otherlode stores the payload and does not judge it, the response carries an `Otherlode-Notice` header, and the collector logs a `WARN` line for it.
 
 ```text
 {"time":"2026-10-29T08:28:22.418Z","level":"WARN","msg":"backend stores the service's payloads but does not track the service, because the tenant's plan tracks no more services","notice":"service-over-cap","namespace":"","service":"checkout"}
@@ -300,7 +310,7 @@ A notice that this collector does not know logs this line instead:
 
 The `notice` field shows the value when it is 1 to 64 lowercase letters and hyphens. Any other value shows as `"notice":"unknown"`. The counter labels both as `unknown`. Run the latest collector image, because a newer Otherlode can send a notice that an older collector has no name for.
 
-None of these lines means the collector dropped something. `forward_dropped_total` stays where it was. [Health checks, metrics and logs](monitoring) lists the counter.
+None of these lines means Otherlode failed to store a payload. `forward_failed_total` stays where it was. [Health checks, metrics and logs](monitoring) lists the counter.
 
 ## The collector warns that it dropped fields it does not know
 
@@ -372,7 +382,7 @@ The probe reads `OTHERLODE_COLLECTOR_ADDR` and checks that address. An empty or 
 - [Configuration](configuration) for every setting and what an invalid value does.
 - [Set and rotate tokens](tokens) for token lists, files and mounts.
 - [Blank out string literals](redaction) for the redaction settings, the secret and the header.
-- [Forwarding](forwarding) for queues, retries and shutdown.
+- [Forwarding](forwarding) for the forward, its time limits and shutdown.
 - [Rate and memory limits](limits) for the limits behind 413, 429 and the busy 503.
 - [Health checks, metrics and logs](monitoring) for the counters and what to alert on.
 - [Troubleshooting the agent](/docs/agent/troubleshooting) and [troubleshooting Otherlode](/docs/server/troubleshooting) for the other two ends.

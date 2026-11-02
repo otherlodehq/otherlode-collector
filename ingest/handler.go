@@ -21,6 +21,7 @@ import (
 
 	otherlodepb "buf.build/gen/go/otherlode/otherlode/protocolbuffers/go/otherlode/v1"
 
+	"github.com/otherlodehq/otherlode-collector/internal/ratelog"
 	"github.com/otherlodehq/otherlode-collector/metrics"
 )
 
@@ -33,6 +34,15 @@ import (
 // "Retry-After: 5" and the sender is expected to retry. The handler then
 // ignores the notices. When the payload was taken, the handler sends each
 // notice in NoticeHeader on the 202. A sink with nothing to say returns nil.
+//
+// A sink that wants the sender to see a client-error status of its own, for
+// example the status a backend gave, returns a *StatusError. The handler
+// answers with that status and sends the sender's Retry-After if the error
+// holds one. Every other error is a 503, so a sink that returns plain
+// errors works as before.
+//
+// The handler answers 202 only after the sink returns without an error, so
+// a sink that returns nil is saying it holds the payload.
 type Sink interface {
 	AcceptDeltaBatch(ctx context.Context, batch *otherlodepb.DeltaBatch) ([]Notice, error)
 	AcceptManifest(ctx context.Context, manifest *otherlodepb.ProbeManifest) ([]Notice, error)
@@ -114,6 +124,13 @@ type Handler struct {
 	// slotWait is the longest a request waits for a slot.
 	slotWait time.Duration
 
+	// budget is the time one request may take from handler entry. Zero
+	// means no budget.
+	budget time.Duration
+
+	// sinkLog limits the log lines for sink failures. See sinkFailed.
+	sinkLog *ratelog.Limiter
+
 	// busyMu guards busyLogged and busyUnlogged. See logBusy.
 	busyMu       sync.Mutex
 	busyLogEvery time.Duration
@@ -135,8 +152,9 @@ const busyLogInterval = time.Minute
 type HandlerOption func(*Handler)
 
 // WithMaxConcurrentDecodes caps how many requests the Handler decodes
-// and passes to the sink at one time. A value of zero or less means no
-// cap, which is the default.
+// and passes to the sink at one time. A request holds its slot until the
+// sink returns, unless the sink calls ReleaseDecodeSlot first. A value of
+// zero or less means no cap, which is the default.
 //
 // Decoding a protobuf can take far more memory than the body. The handler
 // refuses a body over its element limit before it decodes it. The decoded
@@ -147,17 +165,63 @@ type HandlerOption func(*Handler)
 //
 // A slow client holds no slot while it sends, and the cap counts only the
 // work that needs the memory. A request that finds no free slot waits for
-// one. If its context ends first, the Handler writes no response, since
-// the client is gone, and counts the request as rejected with reason
-// "canceled". If no slot comes free within five seconds, the Handler
-// answers 503 with "Retry-After: 1" and counts reason "busy". It logs a
-// warning for such refusals at most once a minute. The wait is bounded so
-// the answer usually arrives before the server's write timeout.
+// one, for the slot wait (see WithSlotWait) or the time left in its
+// budget (see WithRequestBudget), whichever is shorter. If its context
+// ends first, the Handler counts the request as rejected with reason
+// "canceled". If the wait ends first, it counts reason "busy" and logs a
+// warning at most once a minute. Either way the Handler answers 503 with
+// "Retry-After: 1", since a handler that writes nothing makes net/http
+// send 200.
 func WithMaxConcurrentDecodes(n int) HandlerOption {
 	return func(h *Handler) {
 		if n > 0 {
 			h.slots = make(chan struct{}, n)
 		}
+	}
+}
+
+// WithSlotWait sets the longest a request waits for a decode slot. A value
+// of zero or less keeps the default of five seconds.
+func WithSlotWait(d time.Duration) HandlerOption {
+	return func(h *Handler) {
+		if d > 0 {
+			h.slotWait = d
+		}
+	}
+}
+
+// WithRequestBudget sets the time one request may take, measured from the
+// moment the handler starts on it. The slot wait and the sink's work share
+// it: the context passed to the sink ends when the budget ends, and a wait
+// for a decode slot ends then too. When the budget ends before the sink
+// takes the payload, the Handler answers 503 with "Retry-After". A value
+// of zero or less means no budget, which is the default.
+func WithRequestBudget(d time.Duration) HandlerOption {
+	return func(h *Handler) {
+		if d > 0 {
+			h.budget = d
+		}
+	}
+}
+
+type slotKey struct{}
+
+// slotRelease frees a decode slot once, however often it is called.
+type slotRelease struct {
+	once sync.Once
+	free func()
+}
+
+func (s *slotRelease) release() { s.once.Do(s.free) }
+
+// ReleaseDecodeSlot frees the decode slot of the request that ctx belongs
+// to. A sink calls it when it no longer needs the memory of the decoded
+// payload, for example before a network call. It is safe to call more than
+// once, and does nothing for a context the Handler did not make. A sink
+// that never calls it keeps the slot until it returns.
+func ReleaseDecodeSlot(ctx context.Context) {
+	if s, ok := ctx.Value(slotKey{}).(*slotRelease); ok {
+		s.release()
 	}
 }
 
@@ -167,7 +231,7 @@ func NewHandler(sink Sink, logger *slog.Logger, opts ...HandlerOption) *Handler 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	h := &Handler{sink: sink, logger: logger, slotWait: maxSlotWait, busyLogEvery: busyLogInterval}
+	h := &Handler{sink: sink, logger: logger, slotWait: maxSlotWait, busyLogEvery: busyLogInterval, sinkLog: ratelog.New(busyLogInterval, time.Now)}
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -203,9 +267,18 @@ func (h *Handler) handleClassListing(w http.ResponseWriter, r *http.Request) {
 // handle serves one ingest request. It reads the body, counts its
 // elements, takes a decode slot, decodes the body into a new T, validates
 // it, passes it to accept, and answers 202 with one NoticeHeader value for
-// each notice accept returned. It holds the slot until accept returns. T is
-// the pointer type of the payload message.
+// each notice accept returned. It holds the slot until accept returns or
+// calls ReleaseDecodeSlot. With a request budget, the context passed to
+// accept ends when the budget does. T is the pointer type of the payload
+// message.
 func handle[T proto.Message](h *Handler, w http.ResponseWriter, r *http.Request, kind payloadKind, validate func(T) error, accept func(context.Context, T) ([]Notice, error)) {
+	start := time.Now()
+	ctx := r.Context()
+	if h.budget > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithDeadline(ctx, start.Add(h.budget))
+		defer cancel()
+	}
 	body, ok := h.readRequest(w, r, kind)
 	if !ok {
 		return
@@ -213,10 +286,12 @@ func handle[T proto.Message](h *Handler, w http.ResponseWriter, r *http.Request,
 	if !h.withinLimit(w, body, kind) {
 		return
 	}
-	if !h.acquire(r.Context(), w, kind) {
+	if !h.acquire(ctx, r.Context(), w, kind) {
 		return
 	}
-	defer h.release()
+	slot := &slotRelease{free: h.free}
+	defer slot.release()
+	ctx = context.WithValue(ctx, slotKey{}, slot)
 	msg := newMessage[T]()
 	if !h.unmarshal(w, body, msg, kind) {
 		return
@@ -225,7 +300,7 @@ func handle[T proto.Message](h *Handler, w http.ResponseWriter, r *http.Request,
 		h.reject(w, kind, err)
 		return
 	}
-	notices, err := accept(r.Context(), msg)
+	notices, err := accept(ctx, msg)
 	if err != nil {
 		h.sinkFailed(w, kind, err)
 		return
@@ -468,17 +543,41 @@ func (h *Handler) reject(w http.ResponseWriter, kind payloadKind, err error) {
 }
 
 // sinkRetryAfter is the Retry-After value, in seconds, on a 503 for a
-// payload the sink did not take. A forwarder's full queue empties at the
-// backend's pace, so a sender that honours the header waits longer than
-// after a busy refusal.
+// payload the sink did not take. A sender that honours the header waits
+// longer than after a busy refusal.
 const sinkRetryAfter = "5"
 
-// sinkFailed answers a valid payload the sink did not take with 503,
-// "Retry-After: 5" and no body, so the sender retries instead of the data
-// being lost.
+// sinkFailed answers a valid payload the sink did not take. A
+// *StatusError with a client-error status gets that status, with its
+// Retry-After when it has one. Any other error gets 503, "Retry-After: 5"
+// and no body. Either way the sender keeps the payload and retries instead
+// of the data being lost.
+//
+// It writes the first log line of each kind in an interval: one per
+// payload type, status and cause class. A sink marks the cause class with
+// WithReason, using the reasons of the forward failure metric; an error
+// without one is class "error". The metric counts every failure.
 func (h *Handler) sinkFailed(w http.ResponseWriter, kind payloadKind, err error) {
-	h.logger.Error("sink rejected "+kind.name, "error", err)
 	metrics.IngestRejected.Inc(kind.label, "sink")
+	reason := reasonOf(err)
+	var statusErr *StatusError
+	if errors.As(err, &statusErr) && statusErr.relayed() {
+		if unlogged, ok := h.sinkLog.Allow(fmt.Sprintf("%s/%d/%s", kind.label, statusErr.Status, reason)); ok {
+			attrs := []any{"error", err, "status", statusErr.Status, "unlogged_sink_refusals", unlogged}
+			if statusErr.Code != "" {
+				attrs = append(attrs, "backend_error", statusErr.Code)
+			}
+			h.logger.Warn("sink refused "+kind.name, attrs...)
+		}
+		if statusErr.RetryAfter != "" {
+			w.Header().Set("Retry-After", statusErr.RetryAfter)
+		}
+		w.WriteHeader(statusErr.Status)
+		return
+	}
+	if unlogged, ok := h.sinkLog.Allow(kind.label + "/" + reason); ok {
+		h.logger.Error("sink rejected "+kind.name, "error", err, "reason", reason, "unlogged_sink_failures", unlogged)
+	}
 	w.Header().Set("Retry-After", sinkRetryAfter)
 	w.WriteHeader(http.StatusServiceUnavailable)
 }
@@ -517,36 +616,47 @@ func (h *Handler) withinLimit(w http.ResponseWriter, body []byte, kind payloadKi
 }
 
 // acquire waits for a free decode slot. Without a cap it returns true at
-// once. It reports false when it took no slot. If ctx ends first, it
-// counts reason "canceled" and writes no response, since the client is
-// gone. If slotWait passes first, it counts reason "busy", logs it through
-// logBusy and answers 503 with "Retry-After: 1".
-func (h *Handler) acquire(ctx context.Context, w http.ResponseWriter, kind payloadKind) bool {
+// once. It reports false when it took no slot, after answering 503 with
+// "Retry-After: 1". ctx carries the request budget, and requestCtx is the
+// client's own context. The wait is the slot wait or the time left in ctx,
+// whichever is shorter. If requestCtx ends first, it counts reason
+// "canceled". If the wait ends first, it counts reason "busy" and logs it
+// through logBusy.
+func (h *Handler) acquire(ctx, requestCtx context.Context, w http.ResponseWriter, kind payloadKind) bool {
 	if h.slots == nil {
 		return true
 	}
-	timer := time.NewTimer(h.slotWait)
-	defer timer.Stop()
-	select {
-	case h.slots <- struct{}{}:
-		return true
-	case <-ctx.Done():
-		metrics.IngestRejected.Inc(kind.label, "canceled")
-		return false
-	case <-timer.C:
-		metrics.IngestRejected.Inc(kind.label, "busy")
-		h.logBusy(kind)
-		w.Header().Set("Retry-After", "1")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		return false
+	wait := h.slotWait
+	if deadline, ok := ctx.Deadline(); ok {
+		wait = min(wait, time.Until(deadline))
 	}
+	if ctx.Err() == nil {
+		timer := time.NewTimer(max(wait, 0))
+		defer timer.Stop()
+		select {
+		case h.slots <- struct{}{}:
+			return true
+		case <-ctx.Done():
+		case <-timer.C:
+		}
+	}
+	w.Header().Set("Retry-After", "1")
+	if requestCtx.Err() != nil {
+		metrics.IngestRejected.Inc(kind.label, "canceled")
+	} else {
+		metrics.IngestRejected.Inc(kind.label, "busy")
+		h.logBusy(kind, max(wait, 0))
+	}
+	w.WriteHeader(http.StatusServiceUnavailable)
+	return false
 }
 
 // logBusy logs a request refused because no decode slot came free. Such
 // refusals come in bursts while the collector is overloaded, so it writes
 // at most one line per busyLogEvery. The line counts the refusals since
-// the previous line that wrote none of their own.
-func (h *Handler) logBusy(kind payloadKind) {
+// the previous line that wrote none of their own. wait is the time the
+// request waited.
+func (h *Handler) logBusy(kind payloadKind, wait time.Duration) {
 	h.busyMu.Lock()
 	now := time.Now()
 	if !h.busyLogged.IsZero() && now.Sub(h.busyLogged) < h.busyLogEvery {
@@ -559,14 +669,14 @@ func (h *Handler) logBusy(kind payloadKind) {
 	h.busyUnlogged = 0
 	h.busyMu.Unlock()
 	h.logger.Warn("refusing "+kind.name+": no decode slot came free",
-		"wait", h.slotWait.String(),
+		"wait", wait.String(),
 		"max_concurrent_decodes", cap(h.slots),
 		"unlogged_busy_refusals", unlogged,
 	)
 }
 
-// release frees the slot that a successful acquire took.
-func (h *Handler) release() {
+// free frees the slot that a successful acquire took.
+func (h *Handler) free() {
 	if h.slots != nil {
 		<-h.slots
 	}

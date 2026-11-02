@@ -1,6 +1,6 @@
 ---
 title: How the collector works
-description: Why the collector sits in your network and keeps nothing, why it answers 503 instead of buffering, how it keeps one instance's payloads in order, why it refuses to start on a bad setting, and what happens when the collector and the agent are different versions.
+description: Why the collector sits in your network and keeps nothing, why it answers 202 only once Otherlode has stored the payload and 503 otherwise, why it refuses to start on a bad setting, and what happens when the collector and the agent are different versions.
 order: 100
 ---
 
@@ -10,39 +10,33 @@ The collector is a small HTTP service between your agents and Otherlode. This pa
 
 Agents send to the collector, and only the collector sends to Otherlode. Your applications never need a route to the internet. Everything that decides what leaves happens in one place that you run and configure.
 
-That place does four things with each payload. It decodes the protobuf body and checks that it names a service, an instance and a run. It processes the payload by stamping the environment and service namespace, and by blanking string literals and replacing branch and site keys, if you turned those on. It forwards the result. Then it forgets it.
+That place does four things with each payload. It decodes the protobuf body and checks that it names a service, an instance and a run. It processes the payload by stamping the environment and service namespace, and by blanking string literals and replacing branch and site keys, if you turned those on. It forwards the result and waits for Otherlode's answer. Then it forgets it.
 
 ```text
 agent --> collector (decode, check, process) --> Otherlode
           your network
 ```
 
-The collector writes no payload to disk. It holds payloads in memory only while they wait in the forwarding queue, and a restart drops whatever the shutdown drain could not deliver. With no forward URL set, it logs each payload's identity and sizes and does nothing else with it.
+The collector writes no payload to disk. It holds a payload in memory only for the length of its request. With no forward URL set, it logs each payload's identity and sizes and does nothing else with it.
 
-The consequence is that nothing at rest in the collector can leak, be backed up by mistake or need a retention policy. The cost is that a crash loses whatever sat in the queue. The next section says why that cost is small.
+The consequence is that nothing at rest in the collector can leak, be backed up by mistake or need a retention policy. The cost is that the collector cannot hold a payload for later. The next section says why that costs nothing.
 
-## It answers 503 when it cannot take a payload
+## It answers 202 only once Otherlode has stored the payload
 
-When a payload's queue is full, or the collector is shutting down, it answers 503 and queues nothing. The same happens when every decode slot stays busy for 5 seconds. The collector does not grow its queue and does not drop an older payload to make room.
+The collector forwards each payload to Otherlode while the agent's request waits. It makes one attempt and answers from Otherlode's answer. A `202` from Otherlode becomes `202`. A `429` stays `429`, with Otherlode's `Retry-After`. Any other `4xx` keeps its status. A `5xx`, a timeout, no connection, a full forward limit or a shutdown becomes `503` with `Retry-After: 5`. [Forwarding](forwarding) has the full table.
 
 The reason is what the agent does with the answer. The agent sends running totals, not changes, and it remembers the total the collector last confirmed for each probe. A probe goes into a payload only when its total differs from that remembered value. See [what the agent sends](/docs/agent/data-sent#when-the-collector-is-down-or-refuses-a-payload).
 
 So the answer decides what the agent does next.
 
-- A 503 leaves the remembered total where it was. The agent builds the payload again on its next flush, with the live totals.
-- A 202 moves the remembered total forward. The agent will not mention that probe again until its count changes.
+- Any answer but `202` leaves the remembered total where it was. The agent builds the payload again on its next flush, with the live totals.
+- A `202` moves the remembered total forward. The agent will not mention that probe again until its count changes.
 
-A probe that runs once a quarter shows the difference. If the collector answered 202 and then lost the payload, the agent would consider that probe reported. Its count would not change, so nothing would resend it, and Otherlode would see a probe that looks unused. A refused payload costs one flush interval. An acknowledged and lost payload can cost the finding.
+A probe that runs once a quarter shows the difference. If the collector answered `202` before Otherlode had the payload, and the payload was then lost, the agent would consider that probe reported. Its count would not change, so nothing would resend it, and Otherlode would see a probe that looks unused. A payload that is refused costs one flush interval. A payload that is acknowledged and lost can cost the finding.
 
-The collector therefore answers 202 only after the payload is in its queue, and it refuses otherwise. A payload can still be lost after the 202 if the collector crashes, if Otherlode refuses it for good, if it stays unreachable past the retry budget, or if the shutdown drain cannot deliver it. A crash loses the queue with no count or log line. Each of the other drops is counted and logged, and [forwarding](forwarding) lists them. The queue has a fixed size, so a slow Otherlode cannot make the collector grow without limit.
+So every payload an agent sees accepted is stored, and every other payload stays with the agent. The collector has no queue, retries nothing and drops nothing. The agent resends what Otherlode did not store, and the agent's memory is the only buffer. While Otherlode is down, every agent reads as behind and makes no zero-count claim, which is what is true. Each catches up from its own totals when Otherlode answers again. The one loss is an agent process that stops during the outage. Its undelivered counts go with it, and it reads in Otherlode as one that went silent.
 
-## Payloads from one instance keep their order
-
-The collector splits its forwarding queue into shards, 8 by default. It picks a shard by hashing the service namespace, service name and instance id of each payload, and one worker per shard sends in order. The run id is left out of the hash, so an instance that restarts stays on the same shard.
-
-Two things follow. First, an instance's manifest, delta batches, static baseline and class listing reach Otherlode in the order they arrived. Second, a slow or failing Otherlode response holds up only the instances that hash to the same shard. The others keep flowing. An instance whose queue is full gets 503 while the rest still get 202.
-
-Sharing a shard is by chance, not by design. With 8 shards, roughly one instance in eight shares a queue with any given instance. Raise the shard count if a fleet is large and a stuck instance affects too many neighbours. See [forwarding](forwarding) for the variables.
+The price is time. An agent's send takes as long as Otherlode's ingest of the payload, within 8 seconds by default. A request has 9 seconds in all, so the agent gets the collector's answer before it gives up. A slow Otherlode shows as `503` answers and a rise in `forward_failed_total`, not as a growing queue in the collector.
 
 ## It fails closed
 
@@ -74,4 +68,4 @@ The code gives no promise beyond that. Upgrading the collector fixes the third c
 
 - It does not serve TLS. Put a TLS proxy in front of it if agents reach it over a network you do not trust.
 - It does not aggregate or merge counts. Each payload leaves as one payload.
-- It does not keep a queue on disk. The queue is in memory and bounded.
+- It does not keep a queue, in memory or on disk, and it retries nothing.

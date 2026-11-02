@@ -4,7 +4,7 @@ description: Every collector setting with its default, accepted values and what 
 order: 20
 ---
 
-You configure the collector with environment variables only. It has 28 of them, all starting with `OTHERLODE_COLLECTOR_`. It reads them once, at startup. The two token files are the exception, because the collector re-reads them every 30 seconds. The redaction secret file is not one of them. The collector reads it once. Any other change needs a restart.
+You configure the collector with environment variables only. It has 23 of them, all starting with `OTHERLODE_COLLECTOR_`. It reads them once, at startup. The two token files are the exception, because the collector re-reads them every 30 seconds. The redaction secret file is not one of them. The collector reads it once. Any other change needs a restart.
 
 Every invalid value stops startup. The collector writes one `ERROR` line to standard output, then exits with code 1. It never falls back to a default for a value you set wrongly, and this is the opposite of the [agent](/docs/agent/configuration), which warns and keeps running. The collector sits between your agents and Otherlode. A silent fallback could turn off redaction or authentication without anyone noticing.
 
@@ -23,7 +23,7 @@ An invalid value logs a line like these. The `msg` field carries the text.
 
 ```text
 {"time":"...","level":"ERROR","msg":"OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT: time: missing unit in duration \"10\""}
-{"time":"...","level":"ERROR","msg":"OTHERLODE_COLLECTOR_FORWARD_SHARDS must be positive"}
+{"time":"...","level":"ERROR","msg":"OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS must be positive"}
 {"time":"...","level":"ERROR","msg":"OTHERLODE_COLLECTOR_REDACT_ALL_LITERALS: strconv.ParseBool: parsing \"yes\": invalid syntax"}
 ```
 
@@ -77,20 +77,15 @@ The agent sends its token as `authToken`. See [authToken](/docs/agent/configurat
 
 ## Forwarding
 
-These settings control where the collector sends payloads and how it queues and retries them. See [forwarding](forwarding) for how the queues, retries and shutdown work.
+These settings control where the collector sends payloads and how long it waits for Otherlode's answer. See [forwarding](forwarding) for how a payload is forwarded and what the agent gets back.
 
 | Variable | Default | Accepted values | If the value is invalid |
 |---|---|---|---|
 | `OTHERLODE_COLLECTOR_FORWARD_URL` | None, so the collector only logs payloads | An absolute `http` or `https` URL with a host, no user info, no query and no fragment. A path is allowed. The collector removes trailing slashes | Startup fails with a `forward URL` error that names the problem |
 | `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN` | None | The key the collector sends to the forward URL. The collector trims spaces around it. It cannot hold a control character | Startup fails for a value of only spaces or a control character |
 | `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE` | None | The path of a file that holds exactly one key. Blank lines and `#` lines do not count | Startup fails if the file is missing, is not a regular file, is larger than 1 MiB, holds no key or more than one, or holds a control character |
-| `OTHERLODE_COLLECTOR_FORWARD_SHARDS` | `8` | A positive integer | Startup fails |
-| `OTHERLODE_COLLECTOR_FORWARD_QUEUE_SIZE` | `64` | A positive integer. Payloads per shard | Startup fails |
-| `OTHERLODE_COLLECTOR_FORWARD_QUEUE_BYTES` | `67108864` (64 MiB) | A positive integer. Bytes per shard | Startup fails |
-| `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT` | `10s` | A positive duration. The limit for one attempt | Startup fails |
-| `OTHERLODE_COLLECTOR_FORWARD_RETRY_INITIAL_INTERVAL` | `5s` | A positive duration. The first wait between attempts | Startup fails |
-| `OTHERLODE_COLLECTOR_FORWARD_RETRY_MAX_INTERVAL` | `30s` | A positive duration. The longest wait between attempts | Startup fails |
-| `OTHERLODE_COLLECTOR_FORWARD_RETRY_MAX_ELAPSED_TIME` | `5m` | A positive duration. How long the collector keeps retrying one payload | Startup fails |
+| `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT` | `8s` | A positive duration below `9s`, the time budget of one request. The limit for the one attempt to Otherlode | Startup fails. A value of `9s` or more fails with `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT is 9s, which is not below the 9s time budget of one request; set it lower` |
+| `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS` | `32` | A positive integer. The most forwards in flight to Otherlode at one time | Startup fails |
 
 Without `OTHERLODE_COLLECTOR_FORWARD_URL`, the collector starts and logs this at `WARN`. Payloads are decoded and logged, never sent.
 
@@ -98,14 +93,14 @@ Without `OTHERLODE_COLLECTOR_FORWARD_URL`, the collector starts and logs this at
 {"time":"...","level":"WARN","msg":"OTHERLODE_COLLECTOR_FORWARD_URL not set; ingest payloads are only logged, not forwarded"}
 ```
 
-The tuning variables are read only to build the forwarder. With no forward URL they are still checked, so a bad value stops startup, but they do nothing.
+The two tuning variables are read only to build the forwarder. With no forward URL they are still checked, so a bad value stops startup, but they do nothing.
 
 Two combinations fail startup on purpose.
 
 - A forward key variable with no forward URL. The error is `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN or OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE is set but OTHERLODE_COLLECTOR_FORWARD_URL is empty; set OTHERLODE_COLLECTOR_FORWARD_URL or unset the key variable`.
 - Both `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN` and `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE`. The error ends with `are both set; set one`.
 
-A retry initial interval above the maximum interval is allowed. The collector then uses the maximum as the first wait.
+The collector makes one attempt for each payload. It retries nothing, and it keeps no queue.
 
 A forward URL that starts with `http://` and comes with a key gets a `WARN` at startup, because the key travels unencrypted.
 
@@ -171,7 +166,7 @@ These settings protect the collector from a flood of requests and from decode me
 | `OTHERLODE_COLLECTOR_RATE_LIMIT_BURST` | `20` | An integer. The largest spike one client can send | Startup fails for text that is not an integer. It also fails for `0` or a negative number when the rate is above `0`. With the rate at `0`, the burst is ignored |
 | `OTHERLODE_COLLECTOR_RATE_LIMIT_IPV6_PREFIX` | `128` | An integer from `1` to `128`. IPv6 addresses that share these leading bits share one bucket | Startup fails |
 | `OTHERLODE_COLLECTOR_CLIENT_IP_HEADER` | None, so the limit uses the connection's address | A request header name, such as `X-Forwarded-For`. The collector reads the last entry. A request without the header, or with an empty one, falls back to the connection's address | No check. A name that no request carries has no effect |
-| `OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES` | The Go runtime's `GOMAXPROCS`, which is the number of CPUs available | A positive integer | Startup fails |
+| `OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES` | The Go runtime's `GOMAXPROCS`, which is the number of CPUs available | A positive integer. It caps decoding only. `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS` caps the forwards | Startup fails |
 
 Only set `OTHERLODE_COLLECTOR_CLIENT_IP_HEADER` when a proxy in front of the collector sets or appends to that header, and nothing else can reach the collector. Otherwise a client can choose its own bucket. See [limits](limits) for the details. The rate limit settings do nothing when the rate is `0`, including `OTHERLODE_COLLECTOR_RATE_LIMIT_IPV6_PREFIX` and `OTHERLODE_COLLECTOR_CLIENT_IP_HEADER`, but their parse rules still apply. A rate of `0` logs this at `WARN`.
 
@@ -209,6 +204,6 @@ The collector reads the proxy variables once, when the forwarder first sends. Re
 
 - [Deploy the collector](deploy) to run the image with the minimum settings.
 - [Set and rotate tokens](tokens) for the token variables and files.
-- [Forwarding](forwarding) for queues, retries and shutdown.
+- [Forwarding](forwarding) for how a payload is forwarded, what the agent gets back and shutdown.
 - [Monitoring](monitoring) for `/healthz`, `/metrics` and logs.
 - [Troubleshooting](troubleshooting) when the collector will not start.

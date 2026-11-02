@@ -1,6 +1,6 @@
 ---
 title: Forwarding
-description: How the collector forwards payloads after it answers 202, including the forward URL rules, the headers it sends, per-instance queues and order, retried statuses and the retry budget, the backend's error code in a drop, the 503 for a full queue, the shutdown drain, the counters, the tuning variables and the proxy variables.
+description: How the collector forwards each payload to Otherlode while the agent's request waits, including the forward URL rules, the headers it sends, the answer the agent gets for each answer from Otherlode, the time limits, the forward limit, the log lines and counters for a failed forward, shutdown, the two tuning variables and the proxy variables.
 order: 40
 ---
 
@@ -10,7 +10,7 @@ Forwarding is on when you set `OTHERLODE_COLLECTOR_FORWARD_URL`. Without it, the
 {"time":"...","level":"WARN","msg":"OTHERLODE_COLLECTOR_FORWARD_URL not set; ingest payloads are only logged, not forwarded"}
 ```
 
-To forward to Otherlode, see [send data from your collector](/docs/server/connect) for the URL and the ingest key. This page covers what the collector does with a payload after it accepts it.
+To forward to Otherlode, see [send data from your collector](/docs/server/connect) for the URL and the ingest key. This page covers what the collector does with a payload once it has decoded and processed it.
 
 ## The forward URL
 
@@ -53,119 +53,116 @@ The hop to the backend carries the key. Use `https` for any backend you reach ac
 {"time":"...","level":"WARN","msg":"forward URL uses plain http; the backend auth token is sent unencrypted","url":"http://gateway.internal:8080"}
 ```
 
-## What happens after the 202
+## Forward while the agent waits
 
-The collector answers the agent with `202` as soon as it has queued the payload. Delivery runs in the background. The agent never waits for the backend, and it never learns whether delivery worked.
+The collector forwards a payload while the agent's request is open, makes one attempt, and answers the agent from Otherlode's answer. It answers `202` only when Otherlode answered `202`. So every payload that an agent sees accepted is stored, and every other payload stays with the agent, which keeps its counts and sends them again on its next flush.
 
-### Queues and order
+The collector keeps no queue, retries nothing and drops nothing. It holds a payload in memory only for the length of its request.
 
-The collector has a fixed number of queues, 8 by default, and each queue has one worker. A payload goes to a queue by its service namespace, service name and instance ID.
-
-- One instance always uses the same queue, so its payloads leave in the order they arrived.
-- A restarted instance gets a new run ID but keeps its queue. Its order holds across the restart.
-- A worker sends one payload at a time. The collector has at most one request in flight per queue.
-- Instances that share a queue wait on each other. If the backend stalls on one instance's payload, only the other instances on that queue wait. Instances on other queues are not held up.
-- The queue follows the service name and instance ID the agent sends, so an agent with a valid token picks its own queue. A payload that the backend keeps answering with a retried status, or not at all, holds its queue's worker until its retry budget runs out.
-
-### Retried statuses
-
-The collector retries only when a retry can help.
-
-| Backend answer | What the collector does |
+| Otherlode's answer | What the agent gets |
 |---|---|
-| Any `2xx` | Counts the payload as delivered |
-| `429`, `502`, `503` or `504` | Retries |
-| No response (connection error or request timeout) | Retries |
-| Any other status, including `500`, `400`, `401`, `403`, `404`, `413` and every `3xx` | Drops the payload at once |
+| `202` | `202` |
+| `429` | `429`, with Otherlode's `Retry-After` when it sent one |
+| Any other `4xx`, such as `400`, `401`, `403` or `413` | The same status |
+| A `5xx`, a redirect or any other status that is not `2xx` | `503` with `Retry-After: 5` |
+| A `2xx` other than `202` | `503` with `Retry-After: 5` |
+| No answer within the forward request timeout, or no connection | `503` with `Retry-After: 5` |
 
-The collector does not follow redirects. A `3xx` answer is a drop.
+Two more cases get a `503` with `Retry-After: 5` and never reach Otherlode: the forward limit is full, and the collector is shutting down.
 
-### Backoff and the budget
+Every answer has an empty body. The collector passes on a `Retry-After` from Otherlode only for a `429`, and only when the value is up to 64 printable ASCII characters. It does not follow redirects, so a `3xx` is a failure. A `2xx` other than `202` comes from a wrong forward URL or from a proxy, not from Otherlode, so the collector does not count the payload as stored.
 
-The wait before the first retry is 5 seconds. Each later wait is 1.5 times the one before, up to 30 seconds. The collector then adds jitter, so each wait is a random length between half and one and a half times the interval. The first wait is therefore between 2.5 and 7.5 seconds.
+The agent resends a failed payload by itself. It ends a send at once when `Retry-After` is over 2 seconds, and sends the payload again on its next flush. It keeps its counts in memory, so nothing is lost while Otherlode is down unless the agent's process stops. A process that stops during an outage reads in Otherlode as one that went silent. See [when the collector is down or refuses a payload](/docs/agent/data-sent#when-the-collector-is-down-or-refuses-a-payload).
 
-The budget limits retrying by time, not by attempt count. It starts at the first attempt and runs 5 minutes by default. Time spent inside the attempts counts against it. When the budget is spent, the collector drops the payload. The last wait is cut short so the final attempt lands at the end of the budget.
+### Order
 
-If the backend sends a `Retry-After` header with a retried status, the collector waits for the longer of the jittered interval and the header. The header can be a number of seconds or an HTTP date. A missing, malformed or past value is ignored. The collector does not cap the header, except that a wait never runs past the budget. A long `Retry-After` therefore leaves one last attempt at the end of the budget.
+The collector forwards each payload as its request arrives and does not order payloads across requests. Otherlode orders a run's payloads by the sequence number the agent stamps on each one.
 
-### Dropped payloads
+## Time limits
 
-A payload the collector drops after the 202 is lost. The agent already has its `202`, so it does not send that payload again. The collector logs one WARN line for each drop, with the instance it belonged to and the backend's status.
+A request has a budget of 9 seconds from the moment the collector starts on it. The agent gives up on an attempt after 10 seconds, so it always gets the collector's answer first. Three limits share the budget.
 
-```text
-{"time":"...","level":"WARN","msg":"dropping payload: permanent failure","namespace":"","service":"checkout","instance":"3f1c9a","path":"/v1/otherlode/deltas","error":"backend returned 401 Unauthorized"}
-```
+- **The decode slot.** A request waits for a decode slot for at most 1 second. If none comes free, the agent gets `503` with `Retry-After: 1`. [Rate and memory limits](limits#decode-cap) covers the slot.
+- **The forward slot.** A request takes one of `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS` forward slots before it frees its decode slot. See [the forward limit](#the-forward-limit).
+- **The forward request.** The attempt to Otherlode ends after `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT`, which is 8 seconds by default, or when the request's budget ends, whichever comes first.
 
-| Message | Cause |
-|---|---|
-| `dropping payload: permanent failure` | The backend answered with a status the collector does not retry |
-| `dropping payload: retry budget exhausted` | Retries ran for the whole budget |
-| `dropping payload: shutdown drain attempt failed` | The one final attempt at shutdown failed |
-| `dropping payload: shutdown deadline exceeded` | The shutdown time ran out before the attempt |
-| `dropping payload: marshal failed` | The collector could not encode the payload. It logs `payload` and `error` instead of the fields above, and the agent still got its `202` |
-
-The `error` field ends with the status. When the backend answers with a JSON body that has an `error` string, such as `{"error":"redaction_required"}`, the line adds that string as `backend_error`. The collector keeps at most 64 bytes of it and replaces each byte outside printable ASCII with `?`. A body that is not such an object adds nothing.
+At startup the collector refuses a request timeout that is not below the budget. A value of `9s` or more stops it with this line:
 
 ```text
-{"time":"...","level":"WARN","msg":"dropping payload: permanent failure","namespace":"","service":"checkout","instance":"3f1c9a","path":"/v1/otherlode/deltas","error":"backend returned 403 Forbidden","backend_error":"redaction_secret_mismatch"}
+{"time":"...","level":"ERROR","msg":"OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT is 9s, which is not below the 9s time budget of one request; set it lower"}
 ```
 
-A `403` with `redaction_required` or `redaction_secret_mismatch` means the tenant requires redaction and this collector does not match. [Troubleshooting](troubleshooting#403-with-redaction_required-or-redaction_secret_mismatch) has the fix. For what else Otherlode's ingest answers and what to fix, see [Otherlode's troubleshooting](/docs/server/troubleshooting#the-collector-logs-a-dropped-payload).
+When Otherlode does not answer in time, the agent gets its `503` after the timeout, for example after 8 seconds with the default.
 
-## When the queue is full
+## The forward limit
 
-Each queue holds up to 64 waiting payloads by default, and up to 64 MiB of encoded payload bytes counting the payload in flight. A queue that holds nothing accepts any payload, even one larger than the byte limit.
+`OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS` bounds how many forwards are in flight to Otherlode at one time. It defaults to 32. The collector keeps that many idle connections to Otherlode.
 
-If the payload's queue is full by count or by bytes, or the collector is shutting down, the collector does not take the payload. It answers the agent `503` with `Retry-After: 5` and no body, and logs an ERROR line that names the instance:
+A request takes a forward slot before it frees its decode slot. When Otherlode is slow and every forward slot is taken, a waiting request keeps its decode slot, so decoding stops taking new requests instead of holding more decoded payloads. A request that waits for a forward slot for the length of the forward request timeout, or until its budget ends, gets `503` with `Retry-After: 5`. The collector counts it under reason `busy` in `forward_failed_total`.
+
+Raising `OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES` does not help here, because it limits decoding and not forwarding. Each forward in flight holds its marshaled payload, which counts toward the [worst-case memory](limits#worst-case-memory).
+
+## Failed forwards in the log and the counters
+
+When Otherlode does not store a payload, the collector logs one line and counts the failure in `otherlode_collector_forward_failed_total` with a `reason`. The counter counts every failure. The log writes at most one line a minute for each payload type and cause, and the field `unlogged_sink_failures` or `unlogged_sink_refusals` counts the failures since the previous line that got no line of their own.
+
+A `4xx` from Otherlode logs a `WARN` line, and the collector answers the agent with that status.
 
 ```text
-{"time":"...","level":"ERROR","msg":"sink rejected delta batch","error":"forward: shard queue is full (service \"checkout\" instance \"3f1c9a\")"}
+{"time":"...","level":"WARN","msg":"sink refused delta batch","error":"sink answered Unauthorized: backend returned 401 Unauthorized for service \"demo\" instance \"i1\"","status":401,"unlogged_sink_refusals":0,"backend_error":"ingest_key_invalid"}
 ```
 
-The agent loses nothing. It keeps its counts and builds the payload again on its next flush. See [when the collector is down or refuses a payload](/docs/agent/data-sent#when-the-collector-is-down-or-refuses-a-payload).
+Any other failure logs an `ERROR` line, and the collector answers `503`.
 
-A full queue means the backend is slower than the agents, or it is failing and the retries have not run out.
+```text
+{"time":"...","level":"ERROR","msg":"sink rejected delta batch","error":"backend returned 500 Internal Server Error for service \"demo\" instance \"i1\"","reason":"server_error","unlogged_sink_failures":0}
+{"time":"...","level":"ERROR","msg":"sink rejected delta batch","error":"forward for service \"demo\" instance \"i1\": Post \"http://127.0.0.1:4400/v1/otherlode/deltas\": context deadline exceeded","reason":"timeout","unlogged_sink_failures":0}
+```
+
+A `2xx` other than `202` logs a line of its own first, at most once a minute for each status, and then the `sink rejected` line.
+
+```text
+{"time":"...","level":"ERROR","msg":"backend answered 2xx other than 202, so the payload is not counted as stored; check OTHERLODE_COLLECTOR_FORWARD_URL","status":200,"path":"/v1/otherlode/deltas","owner":"service \"demo\" instance \"i1\"","unlogged_unexpected_statuses":0}
+{"time":"...","level":"ERROR","msg":"sink rejected delta batch","error":"backend returned 200 OK, not 202, for service \"demo\" instance \"i1\"","reason":"unexpected_status","unlogged_sink_failures":0}
+```
+
+The `error` field names the service and instance. When Otherlode answers with a JSON body that has an `error` string, such as `{"error":"redaction_required"}`, the `WARN` line adds that string as `backend_error`. The collector keeps at most 64 bytes of it and replaces each byte outside printable ASCII with `?`. A body that is not such an object adds nothing.
+
+A `403` with `redaction_required` or `redaction_secret_mismatch` means the tenant requires redaction and this collector does not match. [Troubleshooting](troubleshooting#403-with-redaction_required-or-redaction_secret_mismatch) has the fix. For what else Otherlode's ingest answers and what to fix, see [Otherlode's troubleshooting](/docs/server/troubleshooting#the-collector-logs-a-refused-payload).
+
+Each failure also adds one to `otherlode_collector_ingest_rejected_total` with `reason="sink"`.
 
 ## Shutdown
 
-On `SIGTERM` or `SIGINT`, the collector stops the HTTP server and drains the forwarder at the same time. Both share one 10-second deadline, so a slow request to the HTTP server cannot use up the drain's time. Give the container a stop timeout longer than 10 seconds, or the runtime may kill the collector first.
+On `SIGTERM` or `SIGINT`, the collector logs `shutting down` and closes its listener at once, so a new connection is refused. It stops the HTTP server and the forwarder at the same time, and both share one 10-second deadline. Give the container a stop timeout longer than 10 seconds, or the runtime may kill the collector first.
 
-Once the drain starts, the forwarder takes no new payloads. A payload that reaches it while the HTTP server finishes its open requests gets `503` with `Retry-After: 5`, and the agent sends it again later. Every payload the forwarder still holds gets one final attempt. That includes queued payloads and a payload waiting between retries. The final attempt does not retry.
+A request already in flight finishes with Otherlode's answer. If the deadline passes first, the collector cancels the forward, and the agent gets `503` with `Retry-After: 5` when its connection is still open. A request that reaches the forwarder after shutdown starts, on a connection that was already open, also gets that `503`. The collector exits as soon as the last request ends, or at the deadline.
 
-The queues drain in parallel, and each queue drains in order. The attempt in flight is cancelled when the deadline passes, and the payloads not yet attempted are dropped. This is a best-effort drain and does not guarantee delivery.
+Nothing sits in a queue at shutdown, so the stop loses no payload. A payload whose request the stop cut short stays with the agent, which sends it again.
 
 ## Counters
 
-Each outcome increments these counters on `/metrics`. The `payload` label is `deltas`, `manifest`, `static_baseline` or `class_listing`. See [monitoring](monitoring) for the full table.
+Each forward ends in one of these counters on `/metrics`. The `payload` label is `deltas`, `manifest`, `static_baseline` or `class_listing`. See [monitoring](monitoring) for the full table and every `reason`.
 
 | Outcome | Counter |
 |---|---|
-| Backend accepted the payload | `otherlode_collector_forward_delivered_total` |
-| A wait ended and the collector retried | `otherlode_collector_forward_retries_total` |
-| Backend accepted the payload and sent a notice | `otherlode_collector_forward_notices_total` with `notice` of `service-over-cap`, `environment-not-tracked` or `unknown`, and a `WARN` line at most once an hour for each notice, namespace and service |
-| Dropped after the 202 | `otherlode_collector_forward_dropped_total` with `reason` of `permanent`, `retry_exhausted`, `shutdown_deadline`, `shutdown_attempt_failed` or `marshal` |
-| Refused with 503 | `otherlode_collector_forward_refused_total` with `reason` of `queue_full` or `shutting_down`, and `otherlode_collector_ingest_rejected_total` with `reason` `sink` |
+| Otherlode answered `202` | `otherlode_collector_forward_delivered_total` |
+| Otherlode did not store the payload | `otherlode_collector_forward_failed_total` with a `reason` of `rate_limited`, `rejected`, `server_error`, `timeout`, `transport`, `unexpected_status`, `busy`, `canceled`, `shutting_down`, `marshal` or `request`, and `otherlode_collector_ingest_rejected_total` with `reason` `sink` |
+| Otherlode answered `202` and sent a notice | `otherlode_collector_forward_notices_total` with `notice` of `service-over-cap`, `environment-not-tracked` or `unknown`, and a `WARN` line at most once an hour for each notice, namespace and service |
 
 ## Tuning
 
-The defaults suit most deployments. Set a variable only when you have a reason. All values are read once at startup. A value that is not a number, not a duration or not above zero stops startup with an ERROR line that names the variable, such as `OTHERLODE_COLLECTOR_FORWARD_SHARDS must be positive`. An empty value uses the default. Durations use Go syntax, such as `30s` or `5m`.
+The defaults suit most deployments. Set a variable only when you have a reason. The collector reads all values once at startup. A value that is not a number, not a duration or not above zero stops startup with an ERROR line that names the variable, such as `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS must be positive`. An empty value uses the default. Durations use Go syntax, such as `5s` or `8s`.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `OTHERLODE_COLLECTOR_FORWARD_URL` | None | The backend's base URL. Forwarding is on only when it is set |
+| `OTHERLODE_COLLECTOR_FORWARD_URL` | None | Otherlode's base URL. Forwarding is on only when it is set |
 | `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN` | None | The forward key. Set this or the file variable, not both |
 | `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE` | None | Path to a file that holds the forward key |
-| `OTHERLODE_COLLECTOR_FORWARD_SHARDS` | `8` | Number of queues, each with one worker |
-| `OTHERLODE_COLLECTOR_FORWARD_QUEUE_SIZE` | `64` | Payloads one queue holds before it refuses new ones |
-| `OTHERLODE_COLLECTOR_FORWARD_QUEUE_BYTES` | `67108864` (64 MiB) | Encoded bytes one queue holds, including the payload in flight, before it refuses new ones |
-| `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT` | `10s` | Time limit for one attempt |
-| `OTHERLODE_COLLECTOR_FORWARD_RETRY_INITIAL_INTERVAL` | `5s` | The first retry wait, before jitter |
-| `OTHERLODE_COLLECTOR_FORWARD_RETRY_MAX_INTERVAL` | `30s` | The longest retry wait, before jitter |
-| `OTHERLODE_COLLECTOR_FORWARD_RETRY_MAX_ELAPSED_TIME` | `5m` | How long the collector retries one payload before it drops it |
+| `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT` | `8s` | Time limit for the one attempt to Otherlode. It must be below `9s` |
+| `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS` | `32` | Forwards in flight to Otherlode at one time |
 
-Queued payloads can use up to the number of queues times the larger of the byte limit and the largest payload. With the defaults that is 512 MiB. Count that memory when you size the container. See [limits](limits) for the other memory bounds.
-
-An initial interval above the maximum interval is lowered to the maximum.
+Lower the request timeout if you want a slow Otherlode to hand the agent a `503` sooner. Raise the forward limit if `busy` appears in `forward_failed_total` while Otherlode answers quickly.
 
 ## Proxies
 
@@ -178,4 +175,5 @@ The `healthcheck` subcommand never uses a proxy.
 - [Send data from your collector](/docs/server/connect) has Otherlode's URL and the ingest key.
 - [Set and rotate tokens](tokens) covers the forward key and its file.
 - [Health checks, metrics and logs](monitoring) lists every counter.
-- [Troubleshooting](troubleshooting) covers dropped payloads and 503 answers.
+- [Rate and memory limits](limits) covers the decode cap and the memory bound.
+- [Troubleshooting](troubleshooting) covers a payload Otherlode did not store and the agent's `503` answers.

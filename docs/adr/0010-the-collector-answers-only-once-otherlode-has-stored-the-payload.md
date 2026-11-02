@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted, amended while building it
 ---
 
 # The collector answers only once Otherlode has stored the payload
@@ -12,7 +12,7 @@ The collector answered an agent's payload with 202 once it had queued the payloa
 
 - **The collector forwards while the agent's request waits,** and answers from Otherlode's answer. A 2xx becomes 202. A 429 stays 429, with Otherlode's `Retry-After`. Any other 4xx keeps its status. A 5xx, a timeout or no connection becomes 503 with `Retry-After`. So every payload the agent sees accepted is stored, and every other one stays the agent's: it keeps its counts, reads as pending, and sends again on its next flush.
 - **One attempt, with an 8-second deadline,** `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT`. The agent's own attempt gives up after 10 seconds, so the agent always gets the collector's answer. The collector retries nothing: the agent's retries replace its retries.
-- **No queue.** The forward queue, its shards and its retry policy go, with their six settings. `OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES` bounds the requests in flight, since a request now decodes and forwards in one go, and a request past it gets 503. On shutdown, requests in flight finish within the drain budget and new ones get 503.
+- **No queue.** The forward queue, its shards and its retry policy go, with their six settings. On shutdown, requests in flight finish within the drain budget and new ones get 503.
 - **The collector still writes nothing to disk** and holds a payload only for the length of its request.
 
 ## Considered options
@@ -26,3 +26,11 @@ The collector answered an agent's payload with 202 once it had queued the payloa
 - An agent's send now takes as long as Otherlode's ingest of the payload, within 8 seconds.
 - While Otherlode is down or slow, every agent reads as counts behind and makes no zero-count claim, which is what is true, and catches up from its own totals when Otherlode answers again.
 - The agent's in-memory counts are the only buffer during an outage. A process that stops during one loses what it had not delivered, and reads as one that went silent.
+
+## Settled while building it, 2026-11-02
+
+- **Only 202 is stored.** Otherlode answers 202 for every payload it takes. Another 2xx, from a wrong forward URL or a proxy, is not a confirmation: the collector answers 503 and logs the status.
+- **No answer is ever implied.** A request whose wait for a decode slot ends, by its budget or because the agent went away, gets 503 with `Retry-After`. Before, the handler wrote nothing, and Go then sent a 200, which the agent counts as success.
+- **One budget per request.** A request has 9 seconds from the handler's start, under the agent's 10-second attempt and the server's 10-second write timeout, so the agent always gets the collector's answer. The wait for a decode slot, at most 1 second, and the forward share it: the forward's deadline is the smaller of `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT` and the time left. Startup refuses a request timeout that is not below the budget. A server that imports the handler keeps a 5-second slot wait and no budget unless it sets them.
+- **Two limits, not one.** `OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES` covers decoding, processing and encoding only. The forwarding sink then takes one of `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS` (default 32) before it frees its decode slot, so a full forward limit pushes back on decoding, and no request waits for a forward slot without holding a decode slot. Requests waiting for a decode slot still hold their bodies, for at most 1 second. Raising the decode limit instead would have raised the decode memory bound four times over.
+- **Failures log once a minute for each cause** (Otherlode's 5xx, a timeout, no connection, a full forward limit, shutdown, an unexpected 2xx), and the counters count every one.

@@ -95,16 +95,12 @@ repo and is published to the Buf Schema Registry as
   internal.
 - `internal/forward`: `ForwardingSink` relays each decoded payload to a
   backend over the same protobuf-over-HTTP shape the collector accepts,
-  the way an OTel Collector exporter re-sends OTLP downstream. Payloads
-  are queued and sent by background workers, sharded by service
-  namespace, service name and instance ID. Instances share a fixed number
-  of shards, so a stuck backend call for one instance holds up only the
-  instances on its shard. The run ID is left out of the shard key, so a
-  restarted instance keeps its shard and its payloads stay in order.
-  Retries use time-bounded exponential backoff on `429`, `502`, `503` and
-  `504`, and on transport errors that bring no response. A full
-  shard queue refuses the payload with `503` instead of queuing it, so
-  the agent sends it again.
+  the way an OTel Collector exporter re-sends OTLP downstream. It posts
+  the payload while the agent's request waits, makes one attempt, and
+  returns nil only when the backend answered `202`. A `429` or another
+  `4xx` comes back as an `*ingest.StatusError` with the backend's
+  status. Anything else is a plain error and the handler answers `503`.
+  It queues nothing and retries nothing.
 - `internal/processor`: sinks that wrap another sink, changing or
   inspecting a decoded payload before passing it on: the role an OTel
   Collector processor plays. Three exist, `Environment`, `Namespace` and
@@ -354,28 +350,25 @@ wildcard), exiting 0 or 1, and never through a proxy. The image's
 | Counter | Labels | Meaning |
 | --- | --- | --- |
 | `otherlode_collector_ingest_accepted_total` | `payload` | Decoded, valid, handed to the sink |
-| `otherlode_collector_ingest_rejected_total` | `payload`, `reason` | Turned away before or by the sink: `content_type` (also a `Content-Encoding` other than `identity`, answered `415`), `too_large`, `read`, `malformed`, `invalid`, `sink` (the sink refused the payload; the response was `503` with `Retry-After: 5`), `canceled` (the client went away while the request waited for a decode slot), `busy` (no decode slot came free within 5 seconds; the response was `503`), `too_many_elements` (the body held more elements than its payload's limit; the response was `413`) |
+| `otherlode_collector_ingest_rejected_total` | `payload`, `reason` | Turned away before or by the sink: `content_type` (also a `Content-Encoding` other than `identity`, answered `415`), `too_large`, `read`, `malformed`, `invalid`, `sink` (the backend did not store the payload; the response was the backend's `429` or other `4xx`, or `503` with `Retry-After: 5`), `canceled` (the client went away while the request waited for a decode slot; the response was `503`), `busy` (no decode slot came free within 1 second; the response was `503` with `Retry-After: 1`), `too_many_elements` (the body held more elements than its payload's limit; the response was `413`) |
 | `otherlode_collector_auth_rejected_total` | | 401 responses |
 | `otherlode_collector_token_reload_failures_total` | `file` | A token file re-read that failed or found no usable token, so the last good value stayed; `file` is `auth` (`OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE`) or `forward` (`OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE`) |
 | `otherlode_collector_rate_limited_total` | | 429 responses |
-| `otherlode_collector_forward_delivered_total` | `payload` | Backend accepted the payload |
-| `otherlode_collector_forward_retries_total` | `payload` | Attempts made after a retryable failure |
-| `otherlode_collector_forward_dropped_total` | `payload`, `reason` | Discarded without delivery: `marshal`, `permanent`, `retry_exhausted`, `shutdown_deadline`, `shutdown_attempt_failed` |
+| `otherlode_collector_forward_delivered_total` | `payload` | The backend answered `202`, and so did the collector |
+| `otherlode_collector_forward_failed_total` | `payload`, `reason` | The backend did not store the payload, so the collector did not answer `202` and the agent sends it again: `rate_limited`, `rejected`, `server_error`, `timeout`, `transport`, `unexpected_status`, `busy`, `canceled`, `shutting_down`, `marshal`, `request` |
 | `otherlode_collector_forward_notices_total` | `notice` | Notices the backend sent with an accepted payload: `service-over-cap`, `environment-not-tracked`, or `unknown` for any other value |
-| `otherlode_collector_forward_refused_total` | `payload`, `reason` | Not taken and answered `503` so the sender sends it again: `queue_full`, `shutting_down` |
 | `otherlode_collector_environment_mismatch_total` | `payload` | The agent's environment differed from the collector's configured one (see [Environment](#environment)); `payload` is `deltas`, `manifest`, `static_baseline`, or `class_listing` |
 | `otherlode_collector_namespace_mismatch_total` | `payload` | The agent's service namespace differed from the collector's configured one (see [Namespace](#namespace)); `payload` is `deltas`, `manifest`, `static_baseline`, or `class_listing` |
 | `otherlode_collector_redacted_literals_total` | `payload` | String literal parts replaced by the redaction processor (see [Redaction](#redaction)); `payload` is `manifest` or `static_baseline` |
 | `otherlode_collector_redacted_case_keys_total` | `payload` | Case keys cleared by the redaction processor, from a switch on a string's hash code or equal to the hash code of a redacted literal (see [Branch and site keys](#branch-and-site-keys)); `payload` is `manifest` or `static_baseline` |
 | `otherlode_collector_fields_stripped_total` | `payload` | Payloads that lost an unknown field to the redaction processor and were marked `fields_stripped` (see [Redaction](#redaction)); `payload` is `deltas`, `manifest`, `static_baseline` or `class_listing` |
 
-`payload` is `deltas`, `manifest`, `static_baseline`, or `class_listing`. The dropped
-counter is the one to alert on: every increment is agent data that never
-reached the backend. A steadily rising refused counter means the backend
-is slower than the fleet, or the queue is too small; no data is lost
-while agents keep retrying. A rising token reload failures counter means
-a token file is broken and the collector is still on the tokens it last
-read, so a rotation has not taken effect.
+`payload` is `deltas`, `manifest`, `static_baseline`, or `class_listing`. A rising
+failed counter means the backend is not storing payloads; its `reason` says
+why. Nothing is lost while the agents keep running, since each agent keeps
+its counts and sends them again on its next flush. A rising token reload
+failures counter means a token file is broken and the collector is still
+on the tokens it last read, so a rotation has not taken effect.
 
 ### Forwarding
 
@@ -422,56 +415,50 @@ than one, or a control character, keeps the last good key, logs a
 warning, and counts in
 `otherlode_collector_token_reload_failures_total{file="forward"}`.
 
-Forwarding is asynchronous. The agent gets its `202` as soon as the
-payload is decoded and queued; background workers deliver it, retrying
-`429`, `502`, `503`, `504` and transport errors that bring no response
-with exponential backoff for up to five minutes.
-When the payload's queue is full, or the collector is shutting down, the
-collector answers `503` with `Retry-After: 5` instead and does not take
-the payload. The agent does not read `Retry-After`. It treats the `503`
-like any failed flush: it retries a few times, then keeps its counts and
-sends them on its next flush, so nothing is lost. The agent
-reports a probe again only when its hit count changes. If the collector
-acknowledged a payload and then dropped it, a rarely hit probe could look
-dead for the life of that agent instance.
+The collector forwards a payload while the agent's request waits, makes
+one attempt, and answers from the backend's answer. It answers `202` only
+when the backend answered `202`. A `429` stays `429`, with the backend's
+`Retry-After`. Any other `4xx` keeps its status. A `5xx`, a redirect, a
+timeout, no connection, an unexpected `2xx`, a full forward limit or a
+shutdown becomes `503` with `Retry-After: 5`. There is no queue, no retry
+and no drop: a payload is either stored or the agent keeps it and sends it
+again. The agent ends a send at once when `Retry-After` is over 2 seconds,
+and sends again on its next flush. It reports a probe again only when its
+hit count changes, which is why the collector must not acknowledge a
+payload that the backend has not stored. A process that stops during an
+outage loses the counts it had not delivered.
 
-A payload that fails after it is queued is dropped and counted: the
-backend answered with a status that is not retryable, or retries ran
-past five minutes. A `3xx` from the backend is a permanent failure,
-because the collector does not follow redirects. On shutdown, every
-payload the collector still holds gets one more delivery attempt within
-the shutdown deadline, whether it sits in a queue or a worker was waiting
-to retry it. The deadline is 10 seconds in total. The collector stops the
-HTTP server and drains the forward queues at the same time, so a slow
-request cannot use up the drain's time. A payload that reaches the
-forwarder after the drain starts gets `503`, and the agent sends it
-again. Each shard drains in parallel with the others, and in order
-within its own shard.
+A request has 9 seconds from the moment the handler starts on it. The wait
+for a decode slot takes at most 1 second. The attempt to the backend ends
+after `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT` or when the request's
+time runs out, whichever comes first. Startup refuses a request timeout
+that is not below 9 seconds. A request takes a forward slot before it
+frees its decode slot, and `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS`
+bounds the forwards in flight.
 
-Each dropped payload logs a warning, such as `dropping payload:
-permanent failure`, with the namespace, service, instance and path it
-belonged to. For a backend response, `error` gives the status. When the
-response body is a JSON object with an `error` string, the warning adds
-it as `backend_error`, cut to 64 bytes, with each byte outside printable
-ASCII replaced by `?`. A 403 with `backend_error` set to
+On shutdown the collector closes its listener at once, so a new
+connection is refused, and a request already in flight finishes within the
+10-second deadline. A request that reaches the forwarder after shutdown
+starts, and one still in flight when the deadline passes, gets `503`.
+
+A failed forward logs once a minute for each cause, and the counters count
+every one. A `4xx` from the backend logs a warning, `sink refused delta
+batch`, with the `status`. Any other failure logs an error, `sink rejected
+delta batch`, with a `reason`. For a backend response, `error` gives the
+status. When the response body is a JSON object with an `error` string,
+the warning adds it as `backend_error`, cut to 64 bytes, with each byte
+outside printable ASCII replaced by `?`. A 403 with `backend_error` set to
 `redaction_required` or `redaction_secret_mismatch` means the backend
 wants redacted payloads, and this collector has redaction off or a
 different secret. See [Branch and site keys](#branch-and-site-keys).
 
-The retry defaults match the OpenTelemetry Collector's OTLP HTTP exporter.
-The shard count, queue size and queue byte budget are this collector's
-own. The defaults should rarely need changing. Each can be overridden;
-durations use Go syntax (`30s`, `5m`).
+The two tuning variables below are this collector's own. The defaults
+should rarely need changing. Durations use Go syntax (`5s`, `8s`).
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `OTHERLODE_COLLECTOR_FORWARD_SHARDS` | `8` | Independent queue/worker pairs; payloads are sharded by service namespace, service name and instance ID |
-| `OTHERLODE_COLLECTOR_FORWARD_QUEUE_SIZE` | `64` | Queued payloads per shard before new ones are refused with `503` |
-| `OTHERLODE_COLLECTOR_FORWARD_QUEUE_BYTES` | `67108864` (64 MiB) | Marshaled bytes per shard, queued and in flight, before new payloads are refused with `503`; an idle shard accepts any payload |
-| `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT` | `10s` | Bound on one delivery attempt |
-| `OTHERLODE_COLLECTOR_FORWARD_RETRY_INITIAL_INTERVAL` | `5s` | First retry wait, grown 1.5x each attempt with jitter |
-| `OTHERLODE_COLLECTOR_FORWARD_RETRY_MAX_INTERVAL` | `30s` | Cap on the retry wait |
-| `OTHERLODE_COLLECTOR_FORWARD_RETRY_MAX_ELAPSED_TIME` | `5m` | Total time to keep retrying one payload before dropping it |
+| `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT` | `8s` | Bound on the one attempt to the backend; must be below 9 seconds |
+| `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS` | `32` | Forwards in flight to the backend at one time |
 
 Trying this out locally needs no real backend: a second
 `otherlode-collector` instance is a valid one, since `ForwardingSink`
@@ -495,19 +482,17 @@ decoded and handed to the sink at one time. The default is the number of
 CPUs (`GOMAXPROCS`), because decoding is CPU-bound and more parallel
 decodes than CPUs gain no throughput. A request reads its body first and
 takes a slot only after that, so a slow sender holds no slot. A request
-that waits for a slot is dropped if its client disconnects. One that
-waits more than 5 seconds gets `503` with `Retry-After: 1`. The collector
+that waits for a slot and whose client disconnects gets `503`. One that
+waits more than 1 second gets `503` with `Retry-After: 1`. The collector
 logs a warning for such a refusal at most once a minute. Its
 `unlogged_busy_refusals` field counts the refusals since the previous
-warning that were not logged. The forward
-queue is also bounded by bytes: `OTHERLODE_COLLECTOR_FORWARD_QUEUE_BYTES`
-(default `67108864`, 64 MiB) is the budget per shard for queued and
-in-flight payloads. A shard over budget refuses new payloads with `503`,
-except when it holds nothing, so one payload larger than the budget can
-still pass through an idle shard. The worst case is roughly the decode
-cap times the largest decode (the hosted server measured about 230 MiB), plus the bodies waiting for a slot (up to
-16 MiB each, bounded by open connections), plus the shard count times the
-larger of the queue byte budget and the largest payload.
+warning that were not logged. A request keeps its decode slot until it
+holds a forward slot, and `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS`
+(default `32`) bounds the forwards in flight. The worst case is roughly the
+decode cap times the largest decode (the hosted server measured about
+230 MiB), plus the bodies waiting for a decode slot (up to 16 MiB each,
+for at most 1 second), plus the forward cap times the largest marshaled
+payload.
 
 ### Environment
 

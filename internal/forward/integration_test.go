@@ -3,11 +3,14 @@ package forward
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -346,84 +349,400 @@ func TestIntegration_ClassListing_RoundTripsThroughRealHandlerOnBothEnds(t *test
 	}
 }
 
-// TestIntegration_QueueFull_RefusesWithServiceUnavailable proves the
-// backpressure path end to end: a real ingest.Handler in front of a
-// ForwardingSink answers 503, not 202, once the shard queue behind it has
-// no room, so the agent knows to keep its counts and resend.
-func TestIntegration_QueueFull_RefusesWithServiceUnavailable(t *testing.T) {
-	blockBackend := make(chan struct{})
-	backendReceivedFirst := make(chan struct{})
-	var signalFirst sync.Once
-
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		signalFirst.Do(func() { close(backendReceivedFirst) })
-		<-blockBackend
-		w.WriteHeader(http.StatusOK)
-	}))
-	// t.Cleanup, not defer: cleanups run after the test body's own defers,
-	// so registering backend.Close via defer here would make it run before
-	// the unblock-then-shutdown cleanup below, and hang waiting for the
-	// still-blocked handler to return.
-	t.Cleanup(backend.Close)
-
-	cfg := testConfig(backend.URL)
-	cfg.Shards = 1
-	cfg.QueueSize = 1
-	cfg.RequestTimeout = time.Hour // keep the timeout from unblocking the worker under test
+// frontCollectorWith stands up a real ingest.Handler with a decode cap in
+// front of a ForwardingSink, like newFrontCollector.
+func frontCollectorWith(t *testing.T, cfg Config, maxDecodes int, opts ...ingest.HandlerOption) (*httptest.Server, *ForwardingSink) {
+	t.Helper()
 	fwd := mustNewSink(t, cfg)
-	t.Cleanup(func() {
-		close(blockBackend) // unblock the handler before Shutdown waits on the worker
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		fwd.Shutdown(ctx)
-	})
-
+	t.Cleanup(func() { fwd.Shutdown(context.Background()) })
 	mux := http.NewServeMux()
-	ingest.NewHandler(fwd, slog.New(slog.DiscardHandler)).Register(mux)
+	ingest.NewHandler(fwd, slog.New(slog.DiscardHandler), append([]ingest.HandlerOption{ingest.WithMaxConcurrentDecodes(maxDecodes)}, opts...)...).Register(mux)
 	front := httptest.NewServer(mux)
 	t.Cleanup(front.Close)
+	return front, fwd
+}
 
-	post := func(serviceName string) *http.Response {
-		t.Helper()
-		body, err := proto.Marshal(manifestWithService(serviceName))
-		if err != nil {
-			t.Fatalf("marshal manifest for %s: %v", serviceName, err)
+func postManifest(t *testing.T, frontURL, serviceName string) *http.Response {
+	t.Helper()
+	body, err := proto.Marshal(manifestWithService(serviceName))
+	if err != nil {
+		t.Fatalf("marshal manifest for %s: %v", serviceName, err)
+	}
+	resp, err := http.Post(frontURL+ingest.ManifestPath, "application/x-protobuf", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("post manifest for %s: %v", serviceName, err)
+	}
+	resp.Body.Close()
+	return resp
+}
+
+// TestIntegration_BackendStatus_IsWhatTheAgentSees pins the status mapping
+// end to end through a real ingest.Handler.
+func TestIntegration_BackendStatus_IsWhatTheAgentSees(t *testing.T) {
+	tests := []struct {
+		name           string
+		backendStatus  int
+		backendHeaders map[string]string
+		wantStatus     int
+		wantRetryAfter string
+	}{
+		{"200 is not a confirmation", http.StatusOK, nil, http.StatusServiceUnavailable, "5"},
+		{"204 is not a confirmation", http.StatusNoContent, nil, http.StatusServiceUnavailable, "5"},
+		{"202", http.StatusAccepted, nil, http.StatusAccepted, ""},
+		{"429 passes Retry-After", http.StatusTooManyRequests, map[string]string{"Retry-After": "42"}, http.StatusTooManyRequests, "42"},
+		{"400", http.StatusBadRequest, nil, http.StatusBadRequest, ""},
+		{"401", http.StatusUnauthorized, nil, http.StatusUnauthorized, ""},
+		{"403", http.StatusForbidden, nil, http.StatusForbidden, ""},
+		{"404", http.StatusNotFound, nil, http.StatusNotFound, ""},
+		{"413", http.StatusRequestEntityTooLarge, nil, http.StatusRequestEntityTooLarge, ""},
+		{"500", http.StatusInternalServerError, nil, http.StatusServiceUnavailable, "5"},
+		{"502", http.StatusBadGateway, nil, http.StatusServiceUnavailable, "5"},
+		{"503 does not pass its Retry-After", http.StatusServiceUnavailable, map[string]string{"Retry-After": "99"}, http.StatusServiceUnavailable, "5"},
+		{"302", http.StatusFound, map[string]string{"Location": "http://127.0.0.1:1/"}, http.StatusServiceUnavailable, "5"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			backend, _ := statusBackend(t, tt.backendStatus, tt.backendHeaders, "")
+			front := newFrontCollector(t, backend.URL)
+			defer front.Close()
+
+			resp := postManifest(t, front.URL, "svc")
+
+			if resp.StatusCode != tt.wantStatus {
+				t.Errorf("status = %d, want %d", resp.StatusCode, tt.wantStatus)
+			}
+			if got := resp.Header.Get("Retry-After"); got != tt.wantRetryAfter {
+				t.Errorf("Retry-After = %q, want %q", got, tt.wantRetryAfter)
+			}
+		})
+	}
+}
+
+func TestIntegration_BackendTimeout_AnswersServiceUnavailable(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		<-r.Context().Done()
+	}))
+	defer backend.Close()
+	cfg := testConfig(backend.URL)
+	cfg.RequestTimeout = 100 * time.Millisecond
+	front, _ := frontCollectorWith(t, cfg, 4)
+
+	resp := postManifest(t, front.URL, "svc")
+
+	if resp.StatusCode != http.StatusServiceUnavailable || resp.Header.Get("Retry-After") != "5" {
+		t.Fatalf("status = %d, Retry-After = %q, want 503 and 5", resp.StatusCode, resp.Header.Get("Retry-After"))
+	}
+}
+
+// TestIntegration_DecodeSlot_ReleasedBeforeTheNetworkCall proves a slow
+// backend does not hold decode slots: with one decode slot, a second
+// request still reaches the backend while the first waits for it.
+func TestIntegration_DecodeSlot_ReleasedBeforeTheNetworkCall(t *testing.T) {
+	url, entered, release := blockingBackend(t)
+	cfg := testConfig(url)
+	cfg.RequestTimeout = time.Hour
+	front, _ := frontCollectorWith(t, cfg, 1, ingest.WithSlotWait(50*time.Millisecond))
+
+	results := make(chan int, 2)
+	go func() { results <- postManifest(t, front.URL, "svc-1").StatusCode }()
+	waitEntered(t, entered)
+	go func() { results <- postManifest(t, front.URL, "svc-2").StatusCode }()
+	waitEntered(t, entered)
+
+	release()
+	for range 2 {
+		if got := <-results; got != http.StatusAccepted {
+			t.Errorf("status = %d, want %d", got, http.StatusAccepted)
 		}
-		resp, err := http.Post(front.URL+ingest.ManifestPath, "application/x-protobuf", bytes.NewReader(body))
-		if err != nil {
-			t.Fatalf("post manifest for %s: %v", serviceName, err)
+	}
+}
+
+// TestIntegration_DecodeSlot_HeldByASinkThatNeverReleases proves the decode cap still
+// bounds the work before the network call: a sink that keeps its slot
+// makes the next request wait and then get 503.
+func TestIntegration_DecodeSlot_HeldByASinkThatNeverReleases(t *testing.T) {
+	gate := make(chan struct{})
+	entered := make(chan struct{}, 4)
+	mux := http.NewServeMux()
+	ingest.NewHandler(&holdingSink{entered: entered, gate: gate}, slog.New(slog.DiscardHandler),
+		ingest.WithMaxConcurrentDecodes(1), ingest.WithSlotWait(50*time.Millisecond)).Register(mux)
+	front := httptest.NewServer(mux)
+	defer front.Close()
+	defer close(gate)
+
+	go func() { postManifest(t, front.URL, "svc-1") }()
+	<-entered
+
+	if got := postManifest(t, front.URL, "svc-2"); got.StatusCode != http.StatusServiceUnavailable || got.Header.Get("Retry-After") == "" {
+		t.Errorf("status = %d, Retry-After = %q, want 503 with Retry-After", got.StatusCode, got.Header.Get("Retry-After"))
+	}
+}
+
+// holdingSink keeps every manifest in AcceptManifest until gate closes and
+// never releases the decode slot.
+type holdingSink struct {
+	captureSink
+	entered chan struct{}
+	gate    chan struct{}
+}
+
+func (h *holdingSink) AcceptManifest(context.Context, *otherlodepb.ProbeManifest) ([]ingest.Notice, error) {
+	h.entered <- struct{}{}
+	<-h.gate
+	return nil, nil
+}
+
+// TestIntegration_ForwardCap_AnswersServiceUnavailable proves requests in
+// flight to the backend are capped apart from the decode slots, and that a
+// request past the cap gets 503 with Retry-After.
+func TestIntegration_ForwardCap_AnswersServiceUnavailable(t *testing.T) {
+	url, entered, release := blockingBackend(t)
+	cfg := testConfig(url)
+	cfg.RequestTimeout = time.Hour
+	cfg.MaxConcurrentForwards = 1
+	front, fwd := frontCollectorWith(t, cfg, 8, ingest.WithRequestBudget(300*time.Millisecond))
+	before := failedCount("manifest", "busy")
+
+	first := make(chan error, 1)
+	go func() {
+		_, err := fwd.AcceptManifest(context.Background(), manifestWithService("svc-1"))
+		first <- err
+	}()
+	waitEntered(t, entered)
+
+	start := time.Now()
+	second := postManifest(t, front.URL, "svc-2")
+	if second.StatusCode != http.StatusServiceUnavailable || second.Header.Get("Retry-After") != "5" {
+		t.Errorf("request past the forward cap: status = %d, Retry-After = %q, want 503 and 5", second.StatusCode, second.Header.Get("Retry-After"))
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("request past the forward cap answered after %v, want about the 300ms budget", elapsed)
+	}
+	if got := failedCount("manifest", "busy"); got != before+1 {
+		t.Errorf("failed(busy) = %d, want %d", got, before+1)
+	}
+
+	release()
+	if err := <-first; err != nil {
+		t.Errorf("request holding the forward slot: %v", err)
+	}
+}
+
+// TestIntegration_Budget_SlowForwardGets503BeforeTheBudgetEnds proves the
+// forward's deadline is the time left in the request budget when that is
+// shorter than the request timeout, and that the answer is a 503 the agent
+// can read.
+func TestIntegration_Budget_SlowForwardGets503BeforeTheBudgetEnds(t *testing.T) {
+	url, entered, release := blockingBackend(t)
+	defer release()
+	cfg := testConfig(url)
+	cfg.RequestTimeout = time.Hour
+	const budget = 500 * time.Millisecond
+	front, _ := frontCollectorWith(t, cfg, 4, ingest.WithRequestBudget(budget))
+
+	start := time.Now()
+	resp := postManifest(t, front.URL, "svc")
+	elapsed := time.Since(start)
+	waitEntered(t, entered)
+
+	if resp.StatusCode != http.StatusServiceUnavailable || resp.Header.Get("Retry-After") != "5" {
+		t.Errorf("status = %d, Retry-After = %q, want 503 and 5", resp.StatusCode, resp.Header.Get("Retry-After"))
+	}
+	if elapsed < budget-50*time.Millisecond || elapsed > budget+500*time.Millisecond {
+		t.Errorf("answered after %v, want about the %v budget", elapsed, budget)
+	}
+}
+
+// TestIntegration_Budget_SlotWaitAndForwardShareIt proves the time a
+// request waits for a decode slot comes off the time its forward has.
+func TestIntegration_Budget_SlotWaitAndForwardShareIt(t *testing.T) {
+	entered := make(chan struct{}, 4)
+	url, _, release := blockingBackend(t)
+	defer release()
+	cfg := testConfig(url)
+	cfg.RequestTimeout = time.Hour
+	fwd := mustNewSink(t, cfg)
+	t.Cleanup(func() { fwd.Shutdown(context.Background()) })
+
+	const budget = 600 * time.Millisecond
+	const hold = 300 * time.Millisecond
+	mux := http.NewServeMux()
+	gated := &slotHoldSink{Sink: fwd, hold: hold, entered: entered}
+	ingest.NewHandler(gated, slog.New(slog.DiscardHandler), ingest.WithMaxConcurrentDecodes(1), ingest.WithSlotWait(time.Hour), ingest.WithRequestBudget(budget)).Register(mux)
+	front := httptest.NewServer(mux)
+	defer front.Close()
+
+	go func() { postManifest(t, front.URL, "holder") }()
+	<-entered
+
+	start := time.Now()
+	resp := postManifest(t, front.URL, "svc")
+	elapsed := time.Since(start)
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", resp.StatusCode)
+	}
+	if elapsed < budget-100*time.Millisecond || elapsed > budget+200*time.Millisecond {
+		t.Errorf("answered after %v, want about the %v budget, not the budget plus the wait", elapsed, budget)
+	}
+	deadline := gated.deadline.Load()
+	if deadline == nil {
+		t.Fatal("the second request never reached the sink")
+	}
+	if got := deadline.Sub(start); got > budget+50*time.Millisecond {
+		t.Errorf("sink deadline is %v after the request started, want about %v: the budget starts at handler entry", got, budget)
+	}
+}
+
+// slotHoldSink keeps the first manifest's decode slot for hold, then
+// passes it on. Later manifests go straight to the sink.
+type slotHoldSink struct {
+	ingest.Sink
+	hold    time.Duration
+	entered chan struct{}
+	once    sync.Once
+
+	// deadline is the deadline of the context the second manifest carried.
+	deadline atomic.Pointer[time.Time]
+}
+
+func (s *slotHoldSink) AcceptManifest(ctx context.Context, m *otherlodepb.ProbeManifest) ([]ingest.Notice, error) {
+	first := false
+	s.once.Do(func() { first = true })
+	if first {
+		s.entered <- struct{}{}
+		time.Sleep(s.hold)
+		return nil, nil
+	}
+	if d, ok := ctx.Deadline(); ok {
+		s.deadline.Store(&d)
+	}
+	return s.Sink.AcceptManifest(ctx, m)
+}
+
+// TestIntegration_Shutdown_FinishesInFlightAndRefusesNew proves a request
+// in flight when shutdown starts is answered from the backend, and a
+// request after it gets 503.
+func TestIntegration_Shutdown_FinishesInFlightAndRefusesNew(t *testing.T) {
+	url, entered, release := blockingBackend(t)
+	cfg := testConfig(url)
+	cfg.RequestTimeout = time.Hour
+	front, fwd := frontCollectorWith(t, cfg, 4)
+
+	inFlight := make(chan int, 1)
+	go func() { inFlight <- postManifest(t, front.URL, "svc-1").StatusCode }()
+	waitEntered(t, entered)
+
+	shutdownDone := make(chan struct{})
+	go func() {
+		fwd.Shutdown(context.Background())
+		close(shutdownDone)
+	}()
+	waitFor(t, time.Second, func() bool {
+		fwd.mu.RLock()
+		defer fwd.mu.RUnlock()
+		return fwd.closed
+	})
+
+	if got := postManifest(t, front.URL, "svc-2").StatusCode; got != http.StatusServiceUnavailable {
+		t.Errorf("request after shutdown started: status = %d, want %d", got, http.StatusServiceUnavailable)
+	}
+
+	release()
+	if got := <-inFlight; got != http.StatusAccepted {
+		t.Errorf("request in flight: status = %d, want %d", got, http.StatusAccepted)
+	}
+	<-shutdownDone
+}
+
+// TestIntegration_ForwardCapPushesBackOnDecoding proves a request that
+// waits for a forward slot still holds its decode slot, so the requests
+// holding a marshaled body never outnumber the decode cap.
+func TestIntegration_ForwardCapPushesBackOnDecoding(t *testing.T) {
+	url, entered, release := blockingBackend(t)
+	defer release()
+	cfg := testConfig(url)
+	cfg.RequestTimeout = time.Hour
+	cfg.MaxConcurrentForwards = 1
+	fwd := mustNewSink(t, cfg)
+	t.Cleanup(func() { fwd.Shutdown(context.Background()) })
+
+	const decodes = 2
+	counting := &countingSink{Sink: fwd}
+	mux := http.NewServeMux()
+	ingest.NewHandler(counting, slog.New(slog.DiscardHandler),
+		ingest.WithMaxConcurrentDecodes(decodes),
+		ingest.WithSlotWait(50*time.Millisecond),
+		ingest.WithRequestBudget(600*time.Millisecond)).Register(mux)
+	front := httptest.NewServer(mux)
+	defer front.Close()
+
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			postManifest(t, front.URL, fmt.Sprintf("svc-%d", i))
+		}()
+		if i == 0 {
+			waitEntered(t, entered)
 		}
-		return resp
 	}
+	wg.Wait()
 
-	// svc-1 is picked up by the single worker, which then blocks in the
-	// backend handler above, holding the shard's only in-flight slot.
-	resp1 := post("svc-1")
-	resp1.Body.Close()
-	if resp1.StatusCode != http.StatusAccepted {
-		t.Fatalf("first post status = %d, want %d", resp1.StatusCode, http.StatusAccepted)
+	// One request holds the forward slot and has given its decode slot
+	// back. The others wait for the forward slot, each with a decode slot.
+	if got := counting.maxActive.Load(); got > decodes+1 {
+		t.Errorf("requests inside the sink at once = %d, want at most %d: the decode cap %d plus the one holding the forward slot", got, decodes+1, decodes)
 	}
-
-	// Wait for the worker to pull svc-1 off the queue before posting more.
-	// Otherwise svc-2 could be the one that finds the queue full instead
-	// of svc-3.
-	select {
-	case <-backendReceivedFirst:
-	case <-time.After(time.Second):
-		t.Fatal("backend never received the first request")
+	if got := counting.maxActive.Load(); got < decodes+1 {
+		t.Errorf("requests inside the sink at once = %d, want %d reached, or the test proves nothing", got, decodes+1)
 	}
+}
 
-	// svc-2 fills the empty queue.
-	resp2 := post("svc-2")
-	resp2.Body.Close()
-	if resp2.StatusCode != http.StatusAccepted {
-		t.Fatalf("second post status = %d, want %d", resp2.StatusCode, http.StatusAccepted)
+// countingSink counts the requests inside AcceptManifest at once.
+type countingSink struct {
+	ingest.Sink
+	active    atomic.Int32
+	maxActive atomic.Int32
+}
+
+func (c *countingSink) AcceptManifest(ctx context.Context, m *otherlodepb.ProbeManifest) ([]ingest.Notice, error) {
+	n := c.active.Add(1)
+	defer c.active.Add(-1)
+	for {
+		m := c.maxActive.Load()
+		if n <= m || c.maxActive.CompareAndSwap(m, n) {
+			break
+		}
 	}
+	return c.Sink.AcceptManifest(ctx, m)
+}
 
-	// svc-3 finds the queue full and must be refused.
-	resp3 := post("svc-3")
-	resp3.Body.Close()
-	if resp3.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("third post status = %d, want %d", resp3.StatusCode, http.StatusServiceUnavailable)
+// TestIntegration_SinkFailureLogs_KeepApartByCause proves a 5xx from the
+// backend does not hold back the first log line of a shutdown refusal.
+func TestIntegration_SinkFailureLogs_KeepApartByCause(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer backend.Close()
+	fwd := mustNewSink(t, testConfig(backend.URL))
+	var logs bytes.Buffer
+	mux := http.NewServeMux()
+	ingest.NewHandler(fwd, slog.New(slog.NewJSONHandler(&logs, nil))).Register(mux)
+	front := httptest.NewServer(mux)
+	defer front.Close()
+
+	postManifest(t, front.URL, "svc")
+	postManifest(t, front.URL, "svc")
+	fwd.Shutdown(context.Background())
+	postManifest(t, front.URL, "svc")
+
+	out := logs.String()
+	for _, reason := range []string{"server_error", "shutting_down"} {
+		if got := strings.Count(out, `"reason":"`+reason+`"`); got != 1 {
+			t.Errorf("log lines with reason %s = %d, want 1: %s", reason, got, out)
+		}
 	}
 }

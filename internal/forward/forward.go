@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"io"
 	"log/slog"
 	"net/http"
@@ -27,26 +26,33 @@ import (
 	otherlodepb "buf.build/gen/go/otherlode/otherlode/protocolbuffers/go/otherlode/v1"
 
 	"github.com/otherlodehq/otherlode-collector/ingest"
+	"github.com/otherlodehq/otherlode-collector/internal/ratelog"
 	"github.com/otherlodehq/otherlode-collector/metrics"
 )
 
 const (
-	defaultShards     = 8
-	defaultQueueSize  = 64
-	defaultQueueBytes = 64 << 20 // 64 MiB per shard
+	defaultRequestTimeout = 8 * time.Second
 
-	defaultRequestTimeout       = 10 * time.Second
-	defaultRetryInitialInterval = 5 * time.Second
-	defaultRetryMaxInterval     = 30 * time.Second
-	defaultRetryMaxElapsedTime  = 300 * time.Second
+	// defaultMaxConcurrentForwards is how many requests may be in flight to
+	// the backend at once. The default client keeps that many idle
+	// connections.
+	defaultMaxConcurrentForwards = 32
+
+	// unexpectedStatusLogInterval is the shortest gap between two log lines
+	// for a 2xx answer other than 202.
+	unexpectedStatusLogInterval = time.Minute
 
 	// maxResponseBytes bounds how much of a backend response body is read
-	// before the connection is released. A 202 carries no body worth
+	// before the connection is released. A 2xx carries no body worth
 	// reading; the read only exists to let the connection be reused.
 	maxResponseBytes = 64 << 10
 
-	// maxErrorCodeBytes bounds the backend error code a drop log carries.
+	// maxErrorCodeBytes bounds the backend error code a failure log carries.
 	maxErrorCodeBytes = 64
+
+	// maxRetryAfterBytes bounds the Retry-After value passed on to the
+	// agent.
+	maxRetryAfterBytes = 64
 
 	// RedactionHeader is the request header that carries the redaction
 	// secret's fingerprint while redaction is on (ADR 0007).
@@ -54,8 +60,7 @@ const (
 )
 
 // Config configures a ForwardingSink. URL is required. Every other field
-// falls back to a default when left zero. The retry defaults match the
-// OTLP HTTP exporter.
+// falls back to a default when left zero.
 type Config struct {
 	// URL is the backend's base URL, with an http or https scheme and a
 	// host. NewForwardingSink rejects a URL with a query, a fragment or
@@ -84,57 +89,29 @@ type Config struct {
 	// valid header value.
 	RedactionFingerprint string
 
-	// Shards is the number of independent worker/queue pairs. A payload is
-	// routed to a shard by hashing its namespace, service name and
-	// instance ID, so one instance's stuck backend retries cannot hold up
-	// delivery for every other instance's healthy traffic. Defaults to
-	// defaultShards.
-	Shards int
-
-	// QueueSize bounds each shard's queue by item count. A full shard
-	// refuses the newest item, returning ErrQueueFull, rather than
-	// blocking the caller. Defaults to defaultQueueSize.
-	QueueSize int
-
-	// QueueBytes bounds each shard's marshaled payload bytes, counted
-	// from enqueue until the worker is done with the item. That includes
-	// the item in flight. A shard refuses an item, returning
-	// ErrQueueFull, when its held bytes plus the item's size would pass
-	// QueueBytes. A shard that holds nothing accepts any item, so a
-	// payload larger than QueueBytes can still pass through an idle
-	// shard. Worst-case memory for queued bodies is Shards times the
-	// larger of QueueBytes and the largest payload. Defaults to
-	// defaultQueueBytes.
-	QueueBytes int
-
-	// HTTPClient sends the relayed requests. Defaults to a client whose
-	// transport keeps one idle connection per shard to the backend, so
-	// concurrent workers do not churn connections the way
-	// http.DefaultTransport's two-per-host limit would. Each request
-	// carries its own timeout via context, so the client itself does not
-	// need one. The default client does not follow redirects: a 3xx
-	// response is a permanent failure. A client you supply should do the
-	// same, because a followed redirect can turn the POST into a GET and a
-	// 2xx from the target would count as delivered.
+	// HTTPClient sends the relayed requests. Defaults to a client that
+	// keeps idle connections to the backend. Each request carries its own
+	// timeout via context, so the client itself does not need one. The
+	// default client does not follow redirects: a 3xx response is a
+	// failure. A client you supply should do the same, because a followed
+	// redirect can turn the POST into a GET and a 2xx from the target
+	// would count as stored.
 	HTTPClient *http.Client
 
-	// Logger receives Warn logs for dropped payloads and for the notices
-	// the backend sends with an accepted payload. Defaults to
-	// slog.Default().
+	// Logger receives the Warn logs for the notices the backend sends
+	// with an accepted payload. Defaults to slog.Default().
 	Logger *slog.Logger
 
-	// RequestTimeout bounds a single HTTP attempt. Defaults to
-	// defaultRequestTimeout.
+	// RequestTimeout bounds the one HTTP attempt made for a payload.
+	// Defaults to defaultRequestTimeout.
 	RequestTimeout time.Duration
 
-	// RetryInitialInterval, RetryMaxInterval, and RetryMaxElapsedTime
-	// shape the retry backoff between attempts at delivering one payload.
-	// Default to defaultRetryInitialInterval, defaultRetryMaxInterval, and
-	// defaultRetryMaxElapsedTime, matching the OTLP HTTP exporter's own
-	// defaults (1.5x multiplier, 30s max interval, 300s max elapsed time).
-	RetryInitialInterval time.Duration
-	RetryMaxInterval     time.Duration
-	RetryMaxElapsedTime  time.Duration
+	// MaxConcurrentForwards caps the requests in flight to the backend. A
+	// forward that finds no free slot waits for one until its context ends
+	// or RequestTimeout passes, then fails. Defaults to
+	// defaultMaxConcurrentForwards. The default client keeps this many idle
+	// connections to the backend.
+	MaxConcurrentForwards int
 }
 
 // TokenSource yields the key a ForwardingSink sends to the backend.
@@ -159,17 +136,11 @@ func (c Config) authToken() string {
 }
 
 func (c Config) withDefaults() Config {
-	if c.Shards <= 0 {
-		c.Shards = defaultShards
-	}
-	if c.QueueSize <= 0 {
-		c.QueueSize = defaultQueueSize
-	}
-	if c.QueueBytes <= 0 {
-		c.QueueBytes = defaultQueueBytes
+	if c.MaxConcurrentForwards <= 0 {
+		c.MaxConcurrentForwards = defaultMaxConcurrentForwards
 	}
 	if c.HTTPClient == nil {
-		c.HTTPClient = newHTTPClient(c.Shards)
+		c.HTTPClient = newHTTPClient(c.MaxConcurrentForwards)
 	}
 	if c.Logger == nil {
 		c.Logger = slog.Default()
@@ -177,27 +148,19 @@ func (c Config) withDefaults() Config {
 	if c.RequestTimeout <= 0 {
 		c.RequestTimeout = defaultRequestTimeout
 	}
-	if c.RetryInitialInterval <= 0 {
-		c.RetryInitialInterval = defaultRetryInitialInterval
-	}
-	if c.RetryMaxInterval <= 0 {
-		c.RetryMaxInterval = defaultRetryMaxInterval
-	}
-	if c.RetryMaxElapsedTime <= 0 {
-		c.RetryMaxElapsedTime = defaultRetryMaxElapsedTime
-	}
 	return c
 }
 
-// newHTTPClient returns a client sized for shards concurrent workers all
-// talking to one backend host. It keeps http.DefaultTransport's proxy
-// function, so HTTPS_PROXY, HTTP_PROXY and NO_PROXY apply. It does not
-// follow redirects, so a 3xx response reaches attempt as a failure.
-func newHTTPClient(shards int) *http.Client {
+// newHTTPClient returns a client for one backend host that keeps up to
+// conns idle connections to it. It keeps
+// http.DefaultTransport's proxy function, so HTTPS_PROXY, HTTP_PROXY and
+// NO_PROXY apply. It does not follow redirects, so a 3xx response reaches
+// send as a failure.
+func newHTTPClient(conns int) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.MaxIdleConnsPerHost = shards
-	if transport.MaxIdleConns < shards {
-		transport.MaxIdleConns = shards
+	transport.MaxIdleConnsPerHost = conns
+	if transport.MaxIdleConns < conns {
+		transport.MaxIdleConns = conns
 	}
 	return &http.Client{
 		Transport: transport,
@@ -207,118 +170,74 @@ func newHTTPClient(shards int) *http.Client {
 	}
 }
 
-// queuedItem is a payload already marshaled to wire bytes, ready to POST.
-// Marshaling happens once, in Accept, not on every retry attempt. owner
-// is the instance the item was sharded on. It names the owner in log
-// lines when the item is dropped, so an operator can tell whose data went
-// missing.
-type queuedItem struct {
+// outbound is a payload already marshaled to wire bytes, ready to POST.
+// owner names the instance in errors, so an operator can tell whose data
+// was not stored.
+type outbound struct {
 	owner instance
 	path  string
 	body  []byte
 }
 
-// shard is one independent queue and worker goroutine. ForwardingSink
-// routes a payload to a shard by hashing its instance's shard key, so a
-// stuck backend for one instance only ever occupies that instance's
-// shard, never every other instance's.
-//
-// bytes counts the body bytes of every item the shard holds, queued or
-// in flight. mu guards it, because enqueues to one shard can run
-// concurrently.
-type shard struct {
-	queue chan queuedItem
-
-	mu    sync.Mutex
-	bytes int
-}
-
-// reserve adds n bytes to the shard's count and reports true, unless the
-// count would pass limit. An empty shard accepts any n, so an item larger
-// than limit is never refused for good.
-func (sh *shard) reserve(n, limit int) bool {
-	sh.mu.Lock()
-	defer sh.mu.Unlock()
-	if sh.bytes > 0 && sh.bytes+n > limit {
-		return false
-	}
-	sh.bytes += n
-	return true
-}
-
-func (sh *shard) release(n int) {
-	sh.mu.Lock()
-	sh.bytes -= n
-	sh.mu.Unlock()
-}
-
-// heldBytes returns the shard's byte count. Tests use it to check the
-// accounting.
-func (sh *shard) heldBytes() int {
-	sh.mu.Lock()
-	defer sh.mu.Unlock()
-	return sh.bytes
-}
-
-// ErrQueueFull is the error AcceptDeltaBatch, AcceptManifest,
-// AcceptStaticBaseline and AcceptClassListing return when the payload's
-// shard queue has no room, either in item count (Config.QueueSize) or in bytes (Config.QueueBytes).
-// The ingest handler answers 503 for it, so the agent keeps its counts
-// and sends the payload again on its next flush.
-var ErrQueueFull = errors.New("forward: shard queue is full")
-
 // ErrShuttingDown is the error AcceptDeltaBatch, AcceptManifest,
 // AcceptStaticBaseline and AcceptClassListing return once Shutdown has
-// started. The ingest handler answers 503 for it, so the agent keeps its counts and sends
-// the payload again on its next flush.
+// started. The ingest handler answers 503 for it, so the agent keeps its
+// counts and sends the payload again on its next flush.
 var ErrShuttingDown = errors.New("forward: sink is shutting down")
 
-// ForwardingSink is a Sink that relays decoded payloads to a backend
-// instead of only logging them. Accept methods queue the payload and
-// return at once. Background workers, one per shard, do the HTTP relay,
-// so the agent-facing handler never blocks on the backend.
+// ForwardingSink is a Sink that relays decoded payloads to a backend. An
+// Accept method posts the payload and waits for the backend's answer, in
+// one attempt bounded by Config.RequestTimeout. It returns nil only when
+// the backend answered 202, so the handler tells the agent the payload is
+// stored only when it is. Any other 2xx is an error: it comes from a wrong
+// URL or a proxy, not from Otherlode.
 //
-// An Accept method returns an error when the payload's shard queue is
-// full by item count or by bytes, or the sink is shutting down. The
-// handler then answers 503, and the agent is never told that the
-// collector took data it did not queue. An Accept method returns no
-// notices, since it answers before the backend does. The workers log the
-// notices the backend sends instead.
+// An Accept method marshals the payload, waits for a forward slot and then
+// calls ingest.ReleaseDecodeSlot, so the request holds no decode slot
+// during the network call. A request that waits for a forward slot still
+// holds its decode slot, so a full forward cap pushes back on decoding.
+// Requests in flight to the backend are capped by
+// Config.MaxConcurrentForwards.
+//
+// For any other outcome the Accept method returns an error. A 429 or any
+// other 4xx from the backend comes back as an *ingest.StatusError with the
+// backend's status, and the handler answers with that status. A 5xx, a
+// redirect, a timeout or a transport error comes back as a plain error,
+// and the handler answers 503 with Retry-After. The sink retries
+// nothing: the agent sends the payload again on its next flush. An Accept
+// method returns no notices, since the backend's notices go to the log.
 type ForwardingSink struct {
-	cfg    Config
-	shards []*shard
+	cfg Config
 
-	// ctx bounds every worker delivery attempt. Shutdown cancels it once
-	// its own deadline passes, so a slow in-flight request cannot outlive
-	// the shutdown budget.
+	// ctx bounds every attempt. Shutdown cancels it once its own deadline
+	// passes, so a slow in-flight request cannot outlive the shutdown
+	// budget.
 	ctx    context.Context
 	cancel context.CancelFunc
 
 	noticeLog *noticeLog
 
-	// mu holds enqueue's shutdown check and its queue send together
-	// against Shutdown setting closed. An item that passed the check is
-	// queued before any worker starts its final drain, not after it, where
-	// it would be answered 202 and never forwarded. The send never
-	// blocks, so the read lock is brief.
-	mu       sync.RWMutex
-	closed   bool
-	stopping chan struct{}
+	// slots is a counting semaphore for requests in flight to the backend.
+	slots chan struct{}
 
-	// beforeSend, when set by a test, runs in enqueue between the
-	// shutdown check and the queue send.
-	beforeSend   func()
+	// statusLog limits the log lines for a 2xx answer other than 202.
+	statusLog *ratelog.Limiter
+
+	// mu holds begin's shutdown check and its wg.Add together against
+	// Shutdown setting closed. A request that passed the check is counted
+	// before Shutdown starts waiting, not after it.
+	mu           sync.RWMutex
+	closed       bool
 	shutdownOnce sync.Once
 	wg           sync.WaitGroup
 }
 
 var _ ingest.Sink = (*ForwardingSink)(nil)
 
-// NewForwardingSink starts cfg.Shards worker goroutines and returns a
-// ready-to-use ForwardingSink. Call Shutdown to drain and stop them. It
-// returns an error for a cfg.URL that could never reach a backend, so a
-// bad setting stops the collector at startup rather than dropping every
-// payload as a permanent failure.
+// NewForwardingSink returns a ready-to-use ForwardingSink. Call Shutdown
+// to wait for the requests in flight. It returns an error for a cfg.URL
+// that could never reach a backend, so a bad setting stops the collector
+// at startup rather than failing every payload.
 func NewForwardingSink(cfg Config) (*ForwardingSink, error) {
 	cfg = cfg.withDefaults()
 
@@ -337,22 +256,14 @@ func NewForwardingSink(cfg Config) (*ForwardingSink, error) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	s := &ForwardingSink{
-		cfg:      cfg,
-		shards:   make([]*shard, cfg.Shards),
-		ctx:      ctx,
-		cancel:   cancel,
-		stopping: make(chan struct{}),
-
+	return &ForwardingSink{
+		cfg:       cfg,
+		ctx:       ctx,
+		cancel:    cancel,
 		noticeLog: newNoticeLog(time.Now, maxNoticeKeys),
-	}
-	for i := range s.shards {
-		sh := &shard{queue: make(chan queuedItem, cfg.QueueSize)}
-		s.shards[i] = sh
-		s.wg.Add(1)
-		go s.runShard(sh)
-	}
-	return s, nil
+		slots:     make(chan struct{}, cfg.MaxConcurrentForwards),
+		statusLog: ratelog.New(unexpectedStatusLogInterval, time.Now),
+	}, nil
 }
 
 // validateURL checks that raw is an absolute http or https URL with a
@@ -397,34 +308,13 @@ type instance struct {
 
 // instanceOf reads the instance from res. It trims the namespace and
 // service name, as the backend does when it keys a service, so one
-// service never splits across shards. A nil res gives the zero instance.
+// service never splits in two. A nil res gives the zero instance.
 func instanceOf(res *otherlodepb.ResourceAttributes) instance {
 	return instance{
 		namespace: strings.TrimSpace(res.GetServiceNamespace()),
 		service:   strings.TrimSpace(res.GetServiceName()),
 		id:        res.GetServiceInstanceId(),
 	}
-}
-
-// shardKey builds the key every payload type is routed on. It writes
-// each part as its byte length, a colon, then the part itself. Any part
-// may hold "/" or ":", or be empty, so a plain separator could give two
-// distinct instances one key. With the length prefix, each key decodes
-// one way only.
-//
-// The run ID is left out on purpose. A restarted instance gets a
-// different run ID, and a key with the run ID in it would move the
-// instance to another shard. The single worker per shard keeps one
-// instance's payloads in order, and that order would be lost across the
-// restart.
-func (i instance) shardKey() string {
-	var b strings.Builder
-	for _, part := range [...]string{i.namespace, i.service, i.id} {
-		b.WriteString(strconv.Itoa(len(part)))
-		b.WriteByte(':')
-		b.WriteString(part)
-	}
-	return b.String()
 }
 
 // String names the instance for people to read in errors and logs. It
@@ -436,217 +326,122 @@ func (i instance) String() string {
 	return fmt.Sprintf("namespace %q service %q instance %q", i.namespace, i.service, i.id)
 }
 
-// AcceptDeltaBatch marshals batch and queues it on the shard for its
-// service instance. It returns without waiting for delivery, and does not
-// use ctx: the request it comes from ends when the handler returns, long
-// before the queued item is delivered in the background.
-func (s *ForwardingSink) AcceptDeltaBatch(_ context.Context, batch *otherlodepb.DeltaBatch) ([]ingest.Notice, error) {
-	return nil, s.marshalAndEnqueue(batch, instanceOf(batch.GetResource()), ingest.DeltaBatchPath)
+// AcceptDeltaBatch posts batch to the backend and waits for its answer.
+func (s *ForwardingSink) AcceptDeltaBatch(ctx context.Context, batch *otherlodepb.DeltaBatch) ([]ingest.Notice, error) {
+	return nil, s.forward(ctx, batch, instanceOf(batch.GetResource()), ingest.DeltaBatchPath)
 }
 
-// AcceptManifest marshals manifest and queues it on the shard for its
-// service instance. It returns without waiting for delivery, and does not
-// use ctx: the request it comes from ends when the handler returns, long
-// before the queued item is delivered in the background.
-func (s *ForwardingSink) AcceptManifest(_ context.Context, manifest *otherlodepb.ProbeManifest) ([]ingest.Notice, error) {
-	return nil, s.marshalAndEnqueue(manifest, instanceOf(manifest.GetResource()), ingest.ManifestPath)
+// AcceptManifest posts manifest to the backend and waits for its answer.
+func (s *ForwardingSink) AcceptManifest(ctx context.Context, manifest *otherlodepb.ProbeManifest) ([]ingest.Notice, error) {
+	return nil, s.forward(ctx, manifest, instanceOf(manifest.GetResource()), ingest.ManifestPath)
 }
 
-// AcceptStaticBaseline marshals baseline and queues it on the shard for
-// its service instance. It returns without waiting for delivery, and does
-// not use ctx: the request it comes from ends when the handler returns,
-// long before the queued item is delivered in the background.
-func (s *ForwardingSink) AcceptStaticBaseline(_ context.Context, baseline *otherlodepb.StaticBaseline) ([]ingest.Notice, error) {
-	return nil, s.marshalAndEnqueue(baseline, instanceOf(baseline.GetResource()), ingest.StaticBaselinePath)
+// AcceptStaticBaseline posts baseline to the backend and waits for its
+// answer.
+func (s *ForwardingSink) AcceptStaticBaseline(ctx context.Context, baseline *otherlodepb.StaticBaseline) ([]ingest.Notice, error) {
+	return nil, s.forward(ctx, baseline, instanceOf(baseline.GetResource()), ingest.StaticBaselinePath)
 }
 
-// AcceptClassListing marshals listing and queues it on the shard for its
-// service instance, like AcceptStaticBaseline. It returns without waiting
-// for delivery.
-func (s *ForwardingSink) AcceptClassListing(_ context.Context, listing *otherlodepb.ClassListing) ([]ingest.Notice, error) {
-	return nil, s.marshalAndEnqueue(listing, instanceOf(listing.GetResource()), ingest.ClassListingPath)
+// AcceptClassListing posts listing to the backend and waits for its
+// answer.
+func (s *ForwardingSink) AcceptClassListing(ctx context.Context, listing *otherlodepb.ClassListing) ([]ingest.Notice, error) {
+	return nil, s.forward(ctx, listing, instanceOf(listing.GetResource()), ingest.ClassListingPath)
 }
 
-// marshalAndEnqueue marshals msg and queues it for path. A marshal failure
-// is logged and counted, and returned as nil. Resending the same payload
-// cannot fix it, so a 503 would only make the agent retry it forever.
-func (s *ForwardingSink) marshalAndEnqueue(msg proto.Message, owner instance, path string) error {
-	payload := ingest.PayloadLabel(path)
-	body, err := proto.Marshal(msg)
-	if err != nil {
-		s.cfg.Logger.Warn("dropping payload: marshal failed", "payload", payload, "error", err)
-		metrics.ForwardDropped.Inc(payload, "marshal")
-		return nil
-	}
-	return s.enqueue(queuedItem{owner: owner, path: path, body: body})
-}
-
-// enqueue puts item on its shard's queue. It returns an error wrapping
-// ErrShuttingDown when Shutdown has started, or ErrQueueFull when the
-// shard has no room by item count or by bytes. It does not log the
-// error: the ingest handler logs every sink error it answers with 503.
-func (s *ForwardingSink) enqueue(item queuedItem) error {
+// begin counts a request in flight. It reports false once Shutdown has
+// started.
+func (s *ForwardingSink) begin() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.closed {
-		s.refused(item, "shutting_down")
-		return fmt.Errorf("%w (%s)", ErrShuttingDown, item.owner)
+		return false
 	}
-	if s.beforeSend != nil {
-		s.beforeSend()
-	}
-	sh := s.shards[shardIndex(item.owner.shardKey(), len(s.shards))]
-	if !sh.reserve(len(item.body), s.cfg.QueueBytes) {
-		s.refused(item, "queue_full")
-		return fmt.Errorf("%w (%s)", ErrQueueFull, item.owner)
-	}
-	select {
-	case sh.queue <- item:
-		return nil
-	default:
-		sh.release(len(item.body))
-		s.refused(item, "queue_full")
-		return fmt.Errorf("%w (%s)", ErrQueueFull, item.owner)
-	}
+	s.wg.Add(1)
+	return true
 }
 
-// refused counts one payload the sink did not take, under reason
-// "shutting_down" or "queue_full". The sender still holds the payload and
-// is expected to send it again, so this is not a ForwardDropped count.
-func (s *ForwardingSink) refused(item queuedItem, reason string) {
-	metrics.ForwardRefused.Inc(ingest.PayloadLabel(item.path), reason)
-}
-
-// dropReasons maps a drop reason label to the text logged for it.
-var dropReasons = map[string]string{
-	"permanent":               "permanent failure",
-	"retry_exhausted":         "retry budget exhausted",
-	"shutdown_deadline":       "shutdown deadline exceeded",
-	"shutdown_attempt_failed": "shutdown drain attempt failed",
-}
-
-// dropped records one discarded payload: a Warn log naming the instance
-// it belonged to, and a count under reason.
-func (s *ForwardingSink) dropped(item queuedItem, reason string, err error) {
-	attrs := []any{
-		"namespace", item.owner.namespace,
-		"service", item.owner.service,
-		"instance", item.owner.id,
-		"path", item.path,
+// forward marshals msg and posts it to path. It returns nil when the
+// backend answered 202. ctx is the agent's request: when it ends, the post
+// ends. The forward ends by the deadline of ctx too, so it shares the
+// request's time budget.
+func (s *ForwardingSink) forward(ctx context.Context, msg proto.Message, owner instance, path string) error {
+	payload := ingest.PayloadLabel(path)
+	if !s.begin() {
+		metrics.ForwardFailed.Inc(payload, "shutting_down")
+		return ingest.WithReason(fmt.Errorf("%w (%s)", ErrShuttingDown, owner), "shutting_down")
 	}
-	if err != nil {
-		attrs = append(attrs, "error", err)
-		var backendErr *backendError
-		if errors.As(err, &backendErr) && backendErr.code != "" {
-			attrs = append(attrs, "backend_error", backendErr.code)
-		}
-	}
-	s.cfg.Logger.Warn("dropping payload: "+dropReasons[reason], attrs...)
-	metrics.ForwardDropped.Inc(ingest.PayloadLabel(item.path), reason)
-}
-
-// shardIndex maps key to a shard deterministically: the same key always
-// lands on the same shard, so one instance's payloads are always ordered
-// against each other, even though shards themselves run independently.
-func shardIndex(key string, numShards int) int {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(key))
-	return int(h.Sum32() % uint32(numShards))
-}
-
-// runShard delivers sh's items in order until Shutdown closes stopping.
-// It then drains sh's queue, giving each item one final attempt, and
-// returns.
-func (s *ForwardingSink) runShard(sh *shard) {
 	defer s.wg.Done()
-	for {
-		// Check for shutdown before looking at the queue. A select with
-		// both cases ready picks one at random, which would let the
-		// worker keep running full retry sequences after Shutdown began.
-		select {
-		case <-s.stopping:
-			s.drain(sh)
-			return
-		default:
-		}
-		select {
-		case item := <-sh.queue:
-			s.deliver(item)
-			sh.release(len(item.body))
-		case <-s.stopping:
-			s.drain(sh)
-			return
-		}
+
+	body, err := proto.Marshal(msg)
+	if err != nil {
+		metrics.ForwardFailed.Inc(payload, "marshal")
+		return ingest.WithReason(&ingest.StatusError{Status: http.StatusBadRequest, Err: fmt.Errorf("marshal payload for %s: %w", owner, err)}, "marshal")
 	}
+	item := outbound{owner: owner, path: path, body: body}
+
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+	defer context.AfterFunc(s.ctx, stop)()
+
+	if reason, err := s.acquire(ctx, owner); err != nil {
+		metrics.ForwardFailed.Inc(payload, reason)
+		return ingest.WithReason(err, reason)
+	}
+	defer func() { <-s.slots }()
+	ingest.ReleaseDecodeSlot(ctx)
+
+	reason, err := s.send(ctx, item)
+	if err != nil {
+		metrics.ForwardFailed.Inc(payload, reason)
+		return ingest.WithReason(err, reason)
+	}
+	metrics.ForwardDelivered.Inc(payload)
+	return nil
 }
 
-// drain empties sh's queue, giving each item one final attempt bounded by
-// s.ctx. It does not wait for more items. enqueue refuses new items once
-// Shutdown has set closed, so the queue cannot refill.
-func (s *ForwardingSink) drain(sh *shard) {
-	for {
-		select {
-		case item := <-sh.queue:
-			s.finalDeliveryAttempt(item)
-			sh.release(len(item.body))
-		default:
-			return
-		}
+// acquire waits for a free forward slot until ctx ends or
+// cfg.RequestTimeout passes. It returns the reason the failure is counted
+// under and the error when it took no slot.
+func (s *ForwardingSink) acquire(ctx context.Context, owner instance) (reason string, err error) {
+	select {
+	case s.slots <- struct{}{}:
+		return "", nil
+	default:
 	}
+	timer := time.NewTimer(s.cfg.RequestTimeout)
+	defer timer.Stop()
+	select {
+	case s.slots <- struct{}{}:
+		return "", nil
+	case <-ctx.Done():
+		reason = "canceled"
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			reason = "busy"
+		}
+	case <-timer.C:
+		reason = "busy"
+	}
+	return reason, fmt.Errorf("forward for %s: no forward slot came free (max %d): %w", owner, cap(s.slots), errNoForwardSlot)
 }
 
-// deliver attempts item with the configured retry backoff, until it
-// succeeds, hits a permanent (non-retryable) failure, or exhausts the
-// retry budget. Shutdown can start while deliver holds item, either in
-// the retry wait or right after a retryable failure. deliver then gives
-// item one final attempt bounded by s.ctx, so every item ends as a
-// counted delivery or a counted drop.
-func (s *ForwardingSink) deliver(item queuedItem) {
-	b := newBackoff(s.cfg.RetryInitialInterval, s.cfg.RetryMaxInterval, s.cfg.RetryMaxElapsedTime)
-	payload := ingest.PayloadLabel(item.path)
-	for {
-		retryable, retryAfter, err := s.attempt(s.ctx, item)
-		if err == nil {
-			metrics.ForwardDelivered.Inc(payload)
-			return
-		}
-		if !retryable {
-			s.dropped(item, "permanent", err)
-			return
-		}
-		select {
-		case <-s.stopping:
-			s.finalDeliveryAttempt(item)
-			return
-		default:
-		}
-		wait, ok := b.next(retryAfter)
-		if !ok {
-			s.dropped(item, "retry_exhausted", err)
-			return
-		}
-		select {
-		case <-time.After(wait):
-			metrics.ForwardRetries.Inc(payload)
-		case <-s.stopping:
-			s.finalDeliveryAttempt(item)
-			return
-		}
-	}
-}
+// errNoForwardSlot is the cause of a forward that waited in vain for a
+// free slot.
+var errNoForwardSlot = errors.New("max concurrent forwards reached")
 
-// attempt makes one HTTP delivery attempt, bounded by cfg.RequestTimeout or
-// ctx's deadline, whichever is sooner. Only 429, 502, 503 and 504 are
-// retryable, as in otlphttpexporter, plus any error with no response. A
-// plain 500 is not retried. retryAfter is the wait from a Retry-After
-// header, or zero.
-func (s *ForwardingSink) attempt(ctx context.Context, item queuedItem) (retryable bool, retryAfter time.Duration, err error) {
+// send makes the one HTTP attempt, bounded by cfg.RequestTimeout and by
+// ctx. It returns nil for a 202 answer. For anything else it returns the
+// error the handler answers with and the reason the failure is counted
+// under: "rate_limited" for a 429 and "rejected" for another 4xx, both as
+// an *ingest.StatusError; "server_error" for any other status; "timeout",
+// "canceled" or "transport" when no answer came; "unexpected_status" for another 2xx;
+// "request" when the request could not be built.
+func (s *ForwardingSink) send(ctx context.Context, item outbound) (reason string, err error) {
 	reqCtx, cancel := context.WithTimeout(ctx, s.cfg.RequestTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, s.cfg.URL+item.path, bytes.NewReader(item.body))
 	if err != nil {
-		return false, 0, err
+		return "request", fmt.Errorf("build request for %s: %w", item.owner, err)
 	}
 	req.Header.Set("Content-Type", "application/x-protobuf")
 	if token := s.cfg.authToken(); token != "" {
@@ -658,20 +453,53 @@ func (s *ForwardingSink) attempt(ctx context.Context, item queuedItem) (retryabl
 
 	resp, err := s.cfg.HTTPClient.Do(req)
 	if err != nil {
-		return true, 0, err
+		switch {
+		case errors.Is(ctx.Err(), context.Canceled):
+			reason = "canceled"
+		case errors.Is(reqCtx.Err(), context.DeadlineExceeded):
+			reason = "timeout"
+		default:
+			reason = "transport"
+		}
+		return reason, fmt.Errorf("forward for %s: %w", item.owner, err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+	if resp.StatusCode == http.StatusAccepted {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponseBytes))
 		s.noticed(item, resp.Header.Values(ingest.NoticeHeader))
-		return false, 0, nil
+		return "", nil
+	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		s.logUnexpectedStatus(item, resp.StatusCode)
+		return "unexpected_status", fmt.Errorf("backend returned %s, not 202, for %s", resp.Status, item.owner)
 	}
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	err = &backendError{status: resp.Status, code: errorCode(body)}
-	if !isRetryableStatus(resp.StatusCode) {
-		return false, 0, err
+	backendErr := &backendError{status: resp.Status, code: errorCode(body), owner: item.owner}
+	switch {
+	case resp.StatusCode == http.StatusTooManyRequests:
+		return "rate_limited", &ingest.StatusError{
+			Status:     resp.StatusCode,
+			RetryAfter: cleanRetryAfter(resp.Header.Get("Retry-After")),
+			Code:       backendErr.code,
+			Err:        backendErr,
+		}
+	case resp.StatusCode >= 400 && resp.StatusCode < 500:
+		return "rejected", &ingest.StatusError{Status: resp.StatusCode, Code: backendErr.code, Err: backendErr}
+	default:
+		return "server_error", backendErr
 	}
-	return true, parseRetryAfter(resp.Header, time.Now()), err
+}
+
+// logUnexpectedStatus logs a 2xx answer other than 202 at ERROR, at most
+// once per status in an interval. Such an answer comes from a wrong URL or
+// a proxy, not from Otherlode, so the payload is not known to be stored.
+func (s *ForwardingSink) logUnexpectedStatus(item outbound, status int) {
+	unlogged, ok := s.statusLog.Allow(strconv.Itoa(status))
+	if !ok {
+		return
+	}
+	s.cfg.Logger.Error("backend answered 2xx other than 202, so the payload is not counted as stored; check OTHERLODE_COLLECTOR_FORWARD_URL",
+		"status", status, "path", item.path, "owner", item.owner.String(), "unlogged_unexpected_statuses", unlogged)
 }
 
 // backendError is a response from the backend outside 2xx. code is the
@@ -680,10 +508,11 @@ func (s *ForwardingSink) attempt(ctx context.Context, item queuedItem) (retryabl
 type backendError struct {
 	status string
 	code   string
+	owner  instance
 }
 
 func (e *backendError) Error() string {
-	return "backend returned " + e.status
+	return "backend returned " + e.status + " for " + e.owner.String()
 }
 
 // errorCode returns the "error" string of body, a JSON object such as
@@ -710,28 +539,27 @@ func errorCode(body []byte) string {
 	return string(code)
 }
 
-func isRetryableStatus(code int) bool {
-	switch code {
-	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
-		return true
-	default:
-		return false
+// cleanRetryAfter returns v when it is a short run of printable ASCII, and
+// "" otherwise. The handler passes it to the agent as written.
+func cleanRetryAfter(v string) string {
+	v = strings.TrimSpace(v)
+	if len(v) > maxRetryAfterBytes {
+		return ""
 	}
+	for i := 0; i < len(v); i++ {
+		if c := v[i]; c < 0x20 || c > 0x7e {
+			return ""
+		}
+	}
+	return v
 }
 
-// Shutdown stops accepting new payloads and gives every payload the sink
-// still holds one more delivery attempt instead of the full retry
-// sequence. That covers a payload in a shard's queue and a payload a
-// worker holds, either in a retry wait or right after a retryable failure.
-// Each worker drains its own shard, so the shards drain in parallel and
-// each shard keeps its order. This matches QueueBatch.Shutdown in the OTel
-// Collector: a bounded best-effort drain, not a guarantee every payload
-// is delivered.
+// Shutdown stops accepting new payloads and waits for the requests in
+// flight. A payload that arrives after Shutdown starts gets
+// ErrShuttingDown, so the handler answers 503.
 //
-// ctx bounds the whole drain. When it ends, Shutdown cancels the attempt
-// in flight on each shard, and every payload not yet attempted is dropped
-// as "shutdown_deadline". Shutdown still waits for the workers to exit, so
-// it does not leak them past its return.
+// ctx bounds the wait. When it ends, Shutdown cancels the requests still
+// in flight, so each answers 503, and waits for them to return.
 //
 // Only the first call does anything. Later calls return at once.
 func (s *ForwardingSink) Shutdown(ctx context.Context) {
@@ -743,7 +571,6 @@ func (s *ForwardingSink) Shutdown(ctx context.Context) {
 	s.mu.Lock()
 	s.closed = true
 	s.mu.Unlock()
-	close(s.stopping)
 
 	waitDone := make(chan struct{})
 	go func() {
@@ -757,20 +584,4 @@ func (s *ForwardingSink) Shutdown(ctx context.Context) {
 		<-waitDone
 	}
 	s.cancel()
-}
-
-// finalDeliveryAttempt gives item its one shutdown attempt and records
-// the outcome: a delivery, a "shutdown_deadline" drop when s.ctx has
-// already ended, or a "shutdown_attempt_failed" drop. Shutdown cancels
-// s.ctx when its own deadline passes.
-func (s *ForwardingSink) finalDeliveryAttempt(item queuedItem) {
-	if s.ctx.Err() != nil {
-		s.dropped(item, "shutdown_deadline", nil)
-		return
-	}
-	if _, _, err := s.attempt(s.ctx, item); err != nil {
-		s.dropped(item, "shutdown_attempt_failed", err)
-		return
-	}
-	metrics.ForwardDelivered.Inc(ingest.PayloadLabel(item.path))
 }

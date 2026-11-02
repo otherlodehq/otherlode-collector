@@ -78,19 +78,13 @@ func (h *noticeHarness) respondWith(status int, values ...string) {
 	h.status, h.values = status, values
 }
 
-// send posts a manifest for the service and waits until the worker is
-// done with it.
-func (h *noticeHarness) send(namespace, service string) {
+// send posts a manifest for the service and returns the sink's error.
+func (h *noticeHarness) send(namespace, service string) error {
 	h.t.Helper()
 	res := &otherlodepb.ResourceAttributes{ServiceName: service, ServiceInstanceId: "instance-1", RunId: "run-1"}
 	res.SetServiceNamespace(namespace)
-	before := metrics.ForwardDelivered.Value("manifest") + droppedTotal("manifest")
-	if _, err := h.sink.AcceptManifest(context.Background(), &otherlodepb.ProbeManifest{Resource: res}); err != nil {
-		h.t.Fatalf("AcceptManifest: %v", err)
-	}
-	waitFor(h.t, 2*time.Second, func() bool {
-		return metrics.ForwardDelivered.Value("manifest")+droppedTotal("manifest") > before
-	})
+	_, err := h.sink.AcceptManifest(context.Background(), &otherlodepb.ProbeManifest{Resource: res})
+	return err
 }
 
 func (h *noticeHarness) noticeLines() []string {
@@ -359,9 +353,9 @@ func TestForwardingSink_Notice_OnNon2xx_IsNotANotice(t *testing.T) {
 	}
 }
 
-func TestForwardingSink_Notice_Plain200_IsANotice(t *testing.T) {
+func TestForwardingSink_Notice_Plain202_IsANotice(t *testing.T) {
 	h := newNoticeHarness(t, 100)
-	h.respondWith(http.StatusOK, "service-over-cap")
+	h.respondWith(http.StatusAccepted, "service-over-cap")
 
 	h.send("", "billing")
 

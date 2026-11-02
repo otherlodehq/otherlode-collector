@@ -3,6 +3,7 @@ package ingest
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,6 +20,7 @@ import (
 
 	otherlodepb "buf.build/gen/go/otherlode/otherlode/protocolbuffers/go/otherlode/v1"
 
+	"github.com/otherlodehq/otherlode-collector/internal/ratelog"
 	"github.com/otherlodehq/otherlode-collector/metrics"
 )
 
@@ -1357,8 +1360,8 @@ func TestHandler_MaxConcurrentDecodes_CanceledWaiterCountedAndSkipsSink(t *testi
 	if got := metrics.IngestRejected.Value("manifest", "canceled"); got != before+1 {
 		t.Errorf("IngestRejected(manifest, canceled) = %d, want %d", got, before+1)
 	}
-	if rec.Body.Len() != 0 || rec.Flushed || len(rec.Header()) != 0 {
-		t.Errorf("canceled request wrote a response: body %q, headers %v", rec.Body.String(), rec.Header())
+	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != "1" {
+		t.Errorf("canceled request: status = %d, Retry-After = %q, want 503 and 1", rec.Code, rec.Header().Get("Retry-After"))
 	}
 	if got := sink.calls.Load(); got != 1 {
 		t.Errorf("sink calls = %d, want 1 (the canceled request must not reach it)", got)
@@ -1366,6 +1369,109 @@ func TestHandler_MaxConcurrentDecodes_CanceledWaiterCountedAndSkipsSink(t *testi
 
 	sink.gate <- struct{}{}
 	<-first
+}
+
+// TestHandler_SlotWait_RequestContextEnds_AnswersNever2xx pins that a
+// request whose context ends during the slot wait gets an explicit 503.
+// With no write, net/http would send an implicit 200 and the agent would
+// count the payload as stored.
+func TestHandler_SlotWait_RequestContextEnds_AnswersNever2xx(t *testing.T) {
+	sink := newGateSink()
+	mux := http.NewServeMux()
+	NewHandler(sink, nil, WithMaxConcurrentDecodes(1)).Register(mux)
+
+	first := make(chan struct{})
+	go func() {
+		mux.ServeHTTP(httptest.NewRecorder(), manifestRequest(context.Background(), t))
+		close(first)
+	}()
+	<-sink.entered
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	time.AfterFunc(30*time.Millisecond, cancel)
+	start := time.Now()
+	rec := httptest.NewRecorder()
+	serveWithin(t, mux, rec, manifestRequest(ctx, t))
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("answered after %v, want about the 30ms to the cancel, not the slot wait", elapsed)
+	}
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d (a recorder that saw no write reports 200)", rec.Code, http.StatusServiceUnavailable)
+	}
+	if got := rec.Header().Get("Retry-After"); got != "1" {
+		t.Errorf("Retry-After = %q, want %q", got, "1")
+	}
+	if got := sink.calls.Load(); got != 1 {
+		t.Errorf("sink calls = %d, want 1", got)
+	}
+
+	sink.gate <- struct{}{}
+	<-first
+}
+
+// TestHandler_SlotWait_RequestContextEnds_RealServerNever2xx runs the same
+// case through net/http, where the missing write turns into a 200.
+func TestHandler_SlotWait_RequestContextEnds_RealServerNever2xx(t *testing.T) {
+	sink := newGateSink()
+	mux := http.NewServeMux()
+	NewHandler(sink, nil, WithMaxConcurrentDecodes(1)).Register(mux)
+	var statuses sync.Map
+	var served sync.WaitGroup
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer served.Done()
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		time.AfterFunc(30*time.Millisecond, cancel)
+		sw := &statusWriter{ResponseWriter: w}
+		mux.ServeHTTP(sw, r.WithContext(ctx))
+		statuses.Store(r.Header.Get("X-Test-Id"), sw.status)
+	}))
+	defer server.Close()
+
+	post := func(id string) {
+		body, err := proto.Marshal(&otherlodepb.ProbeManifest{
+			Resource: &otherlodepb.ResourceAttributes{ServiceName: "demo-service", ServiceInstanceId: "instance-1", RunId: "run-1"},
+		})
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		req, _ := http.NewRequest(http.MethodPost, server.URL+ManifestPath, bytes.NewReader(body))
+		req.Header.Set("Content-Type", contentType)
+		req.Header.Set("X-Test-Id", id)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		resp.Body.Close()
+	}
+
+	served.Add(2)
+	go post("holder")
+	<-sink.entered
+	start := time.Now()
+	post("waiter")
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("waiter answered after %v, want soon after its context ended, not at the 5s slot wait", elapsed)
+	}
+	if got, _ := statuses.Load("waiter"); got != http.StatusServiceUnavailable {
+		t.Errorf("waiter status = %v, want %d", got, http.StatusServiceUnavailable)
+	}
+	sink.gate <- struct{}{}
+	served.Wait()
+}
+
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusWriter) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
 }
 
 func TestHandler_MaxConcurrentDecodes_BusyWaiterAnswers503AfterSlotWait(t *testing.T) {
@@ -1454,6 +1560,405 @@ func TestHandler_MaxConcurrentDecodes_BusyRefusalsLogAtMostOncePerInterval(t *te
 	}
 	if !strings.Contains(lines[1], `"unlogged_busy_refusals":2`) {
 		t.Errorf("second busy line = %s, want unlogged_busy_refusals 2", lines[1])
+	}
+
+	sink.gate <- struct{}{}
+	<-first
+}
+
+func TestHandler_WithSlotWait_SetsTheSlotWait(t *testing.T) {
+	sink := newGateSink()
+	mux := http.NewServeMux()
+	NewHandler(sink, nil, WithMaxConcurrentDecodes(1), WithSlotWait(40*time.Millisecond)).Register(mux)
+
+	first := make(chan struct{})
+	go func() {
+		mux.ServeHTTP(httptest.NewRecorder(), manifestRequest(context.Background(), t))
+		close(first)
+	}()
+	<-sink.entered
+
+	start := time.Now()
+	rec := httptest.NewRecorder()
+	serveWithin(t, mux, rec, manifestRequest(context.Background(), t))
+
+	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != "1" {
+		t.Errorf("status = %d, Retry-After = %q, want 503 and 1", rec.Code, rec.Header().Get("Retry-After"))
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("answered after %v, want about 40ms", elapsed)
+	}
+
+	sink.gate <- struct{}{}
+	<-first
+}
+
+// ctxSink runs fn for every manifest.
+type ctxSink struct {
+	fakeSink
+	fn func(ctx context.Context) ([]Notice, error)
+}
+
+func (c ctxSink) AcceptManifest(ctx context.Context, _ *otherlodepb.ProbeManifest) ([]Notice, error) {
+	return c.fn(ctx)
+}
+
+func TestHandler_WithRequestBudget_CapsTheSlotWait(t *testing.T) {
+	sink := newGateSink()
+	mux := http.NewServeMux()
+	NewHandler(sink, nil, WithMaxConcurrentDecodes(1), WithSlotWait(time.Hour), WithRequestBudget(150*time.Millisecond)).Register(mux)
+
+	first := make(chan struct{})
+	go func() {
+		mux.ServeHTTP(httptest.NewRecorder(), manifestRequest(context.Background(), t))
+		close(first)
+	}()
+	<-sink.entered
+
+	start := time.Now()
+	rec := httptest.NewRecorder()
+	serveWithin(t, mux, rec, manifestRequest(context.Background(), t))
+
+	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != "1" {
+		t.Errorf("status = %d, Retry-After = %q, want 503 and 1", rec.Code, rec.Header().Get("Retry-After"))
+	}
+	if elapsed := time.Since(start); elapsed < 100*time.Millisecond || elapsed > 2*time.Second {
+		t.Errorf("answered after %v, want about the 150ms budget", elapsed)
+	}
+
+	sink.gate <- struct{}{}
+	<-first
+}
+
+// TestHandler_WithRequestBudget_SlotWaitAndSinkShareIt pins that time spent
+// waiting for a slot comes off the time the sink has, and that a sink
+// that runs to the end of the budget gets 503 with Retry-After.
+func TestHandler_WithRequestBudget_SlotWaitAndSinkShareIt(t *testing.T) {
+	const budget = 400 * time.Millisecond
+	holder := newGateSink()
+	var sinkDeadline atomic.Pointer[time.Time]
+	mux := http.NewServeMux()
+	h := NewHandler(&ctxSink{fn: func(ctx context.Context) ([]Notice, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			return nil, errors.New("sink context has no deadline")
+		}
+		sinkDeadline.Store(&deadline)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}}, nil, WithMaxConcurrentDecodes(1), WithRequestBudget(budget))
+	h.Register(mux)
+
+	holderMux := http.NewServeMux()
+	hh := NewHandler(holder, nil)
+	hh.slots = h.slots
+	hh.Register(holderMux)
+	first := make(chan struct{})
+	go func() {
+		holderMux.ServeHTTP(httptest.NewRecorder(), manifestRequest(context.Background(), t))
+		close(first)
+	}()
+	<-holder.entered
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		holder.gate <- struct{}{}
+	}()
+
+	start := time.Now()
+	rec := httptest.NewRecorder()
+	serveWithin(t, mux, rec, manifestRequest(context.Background(), t))
+	elapsed := time.Since(start)
+	<-first
+
+	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != sinkRetryAfter {
+		t.Errorf("status = %d, Retry-After = %q, want 503 and %s", rec.Code, rec.Header().Get("Retry-After"), sinkRetryAfter)
+	}
+	if elapsed < budget-50*time.Millisecond || elapsed > budget+300*time.Millisecond {
+		t.Errorf("answered after %v, want about the %v budget, not the budget plus the 200ms slot wait", elapsed, budget)
+	}
+	deadline := sinkDeadline.Load()
+	if deadline == nil {
+		t.Fatal("sink never ran")
+	}
+	if !deadline.Before(start.Add(budget + 50*time.Millisecond)) {
+		t.Errorf("sink deadline is %v after the start, want about %v", deadline.Sub(start), budget)
+	}
+}
+
+func TestHandler_NoRequestBudget_SinkContextHasNoDeadline(t *testing.T) {
+	mux := http.NewServeMux()
+	var hasDeadline atomic.Bool
+	NewHandler(&ctxSink{fn: func(ctx context.Context) ([]Notice, error) {
+		_, ok := ctx.Deadline()
+		hasDeadline.Store(ok)
+		return nil, nil
+	}}, nil).Register(mux)
+
+	rec := httptest.NewRecorder()
+	serveWithin(t, mux, rec, manifestRequest(context.Background(), t))
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusAccepted)
+	}
+	if hasDeadline.Load() {
+		t.Error("sink context has a deadline although no budget was set")
+	}
+}
+
+// TestReleaseDecodeSlot_FreesTheSlotBeforeTheSinkReturns pins that a sink
+// can give its slot back, that a second call does nothing, and that the
+// slot is not freed twice when the sink returns.
+func TestReleaseDecodeSlot_FreesTheSlotBeforeTheSinkReturns(t *testing.T) {
+	entered := make(chan struct{}, 4)
+	gate := make(chan struct{})
+	mux := http.NewServeMux()
+	NewHandler(&ctxSink{fn: func(ctx context.Context) ([]Notice, error) {
+		ReleaseDecodeSlot(ctx)
+		ReleaseDecodeSlot(ctx)
+		entered <- struct{}{}
+		<-gate
+		ReleaseDecodeSlot(ctx)
+		return nil, nil
+	}}, nil, WithMaxConcurrentDecodes(1), WithSlotWait(time.Hour)).Register(mux)
+
+	recorders := []*httptest.ResponseRecorder{httptest.NewRecorder(), httptest.NewRecorder()}
+	done := make(chan struct{}, 2)
+	for _, rec := range recorders {
+		go func() {
+			mux.ServeHTTP(rec, manifestRequest(context.Background(), t))
+			done <- struct{}{}
+		}()
+	}
+	for range 2 {
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the second request never reached the sink although the first released its slot")
+		}
+	}
+	close(gate)
+	<-done
+	<-done
+	for i, rec := range recorders {
+		if rec.Code != http.StatusAccepted {
+			t.Errorf("request %d status = %d, want %d", i, rec.Code, http.StatusAccepted)
+		}
+	}
+}
+
+// TestReleaseDecodeSlot_SecondCallDoesNotFreeAnotherRequestsSlot pins that
+// a repeated release by one request never gives away the slot a later
+// request took.
+func TestReleaseDecodeSlot_SecondCallDoesNotFreeAnotherRequestsSlot(t *testing.T) {
+	releasedOnce := make(chan context.Context, 1)
+	gate := make(chan struct{})
+	var calls atomic.Int32
+	mux := http.NewServeMux()
+	h := NewHandler(&ctxSink{fn: func(ctx context.Context) ([]Notice, error) {
+		if calls.Add(1) == 1 {
+			ReleaseDecodeSlot(ctx)
+			releasedOnce <- ctx
+			<-gate
+			return nil, nil
+		}
+		<-gate
+		return nil, nil
+	}}, nil, WithMaxConcurrentDecodes(1), WithSlotWait(150*time.Millisecond))
+	h.Register(mux)
+
+	done := make(chan struct{}, 3)
+	go func() {
+		mux.ServeHTTP(httptest.NewRecorder(), manifestRequest(context.Background(), t))
+		done <- struct{}{}
+	}()
+	firstCtx := <-releasedOnce
+	go func() {
+		mux.ServeHTTP(httptest.NewRecorder(), manifestRequest(context.Background(), t))
+		done <- struct{}{}
+	}()
+	waitFor(t, func() bool { return calls.Load() == 2 })
+
+	ReleaseDecodeSlot(firstCtx)
+
+	rec := httptest.NewRecorder()
+	serveWithin(t, mux, rec, manifestRequest(context.Background(), t))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("third request status = %d, want %d: the repeated release freed the second request's slot", rec.Code, http.StatusServiceUnavailable)
+	}
+	close(gate)
+	<-done
+	<-done
+}
+
+func TestReleaseDecodeSlot_UnknownContext_DoesNothing(t *testing.T) {
+	ReleaseDecodeSlot(context.Background())
+}
+
+func waitFor(t *testing.T, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("condition not met before timeout")
+}
+
+// refusingSink answers every manifest with err.
+type refusingSink struct {
+	fakeSink
+	err error
+}
+
+func (r refusingSink) AcceptManifest(context.Context, *otherlodepb.ProbeManifest) ([]Notice, error) {
+	return nil, r.err
+}
+
+func logLines(logs *bytes.Buffer, contains string) []string {
+	var lines []string
+	for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+		if strings.Contains(line, contains) {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+// TestHandler_SinkFailureLogs_FirstOfEachKindOnly pins that a burst of sink
+// failures writes one line per kind, while the metric counts every one.
+func TestHandler_SinkFailureLogs_FirstOfEachKindOnly(t *testing.T) {
+	now := time.Unix(1000, 0)
+	var logs bytes.Buffer
+	var sink refusingSink
+	mux := http.NewServeMux()
+	h := NewHandler(&sink, slog.New(slog.NewJSONHandler(&logs, nil)))
+	h.sinkLog = ratelog.New(time.Minute, func() time.Time { return now })
+	h.Register(mux)
+	before := metrics.IngestRejected.Value("manifest", "sink")
+
+	sink.err = errors.New("backend down")
+	for range 3 {
+		serveWithin(t, mux, httptest.NewRecorder(), manifestRequest(context.Background(), t))
+	}
+	sink.err = &StatusError{Status: http.StatusUnauthorized, Code: "bad_key", Err: errors.New("no")}
+	for range 3 {
+		serveWithin(t, mux, httptest.NewRecorder(), manifestRequest(context.Background(), t))
+	}
+	sink.err = &StatusError{Status: http.StatusForbidden, Err: errors.New("no")}
+	serveWithin(t, mux, httptest.NewRecorder(), manifestRequest(context.Background(), t))
+
+	if got := metrics.IngestRejected.Value("manifest", "sink"); got != before+7 {
+		t.Errorf("IngestRejected(manifest, sink) = %d, want %d", got, before+7)
+	}
+	if lines := logLines(&logs, "sink rejected"); len(lines) != 1 || !strings.Contains(lines[0], `"level":"ERROR"`) {
+		t.Errorf("plain failure lines = %q, want one ERROR", lines)
+	}
+	refused := logLines(&logs, "sink refused")
+	if len(refused) != 2 {
+		t.Fatalf("refusal lines = %q, want one per status (401, 403)", refused)
+	}
+
+	now = now.Add(time.Minute)
+	sink.err = errors.New("backend down")
+	serveWithin(t, mux, httptest.NewRecorder(), manifestRequest(context.Background(), t))
+	lines := logLines(&logs, "sink rejected")
+	if len(lines) != 2 || !strings.Contains(lines[1], `"unlogged_sink_failures":2`) {
+		t.Errorf("plain failure lines after the interval = %q, want a second one counting 2 held back", lines)
+	}
+}
+
+// TestHandler_SinkFailureLogs_OneLinePerCauseClass pins that a failure of
+// one cause class does not hold back the first line of another class, and
+// that the same class is still limited.
+func TestHandler_SinkFailureLogs_OneLinePerCauseClass(t *testing.T) {
+	var logs bytes.Buffer
+	var sink refusingSink
+	mux := http.NewServeMux()
+	h := NewHandler(&sink, slog.New(slog.NewJSONHandler(&logs, nil)))
+	h.sinkLog = ratelog.New(time.Minute, func() time.Time { return time.Unix(1000, 0) })
+	h.Register(mux)
+
+	for _, reason := range []string{"server_error", "server_error", "timeout", "transport", "busy", "shutting_down", "unexpected_status", "timeout"} {
+		sink.err = WithReason(errors.New("failed"), reason)
+		serveWithin(t, mux, httptest.NewRecorder(), manifestRequest(context.Background(), t))
+	}
+	lines := logLines(&logs, "sink rejected")
+	if len(lines) != 6 {
+		t.Fatalf("failure lines = %d, want 6 (one per class): %q", len(lines), lines)
+	}
+	for i, reason := range []string{"server_error", "timeout", "transport", "busy", "shutting_down", "unexpected_status"} {
+		if !strings.Contains(lines[i], `"reason":"`+reason+`"`) {
+			t.Errorf("line %d = %s, want reason %s", i, lines[i], reason)
+		}
+	}
+}
+
+// slowBody delivers its data after a delay.
+type slowBody struct {
+	delay time.Duration
+	r     io.Reader
+}
+
+func (b *slowBody) Read(p []byte) (int, error) {
+	time.Sleep(b.delay)
+	b.delay = 0
+	return b.r.Read(p)
+}
+
+// TestHandler_ExpiredBudget_NeverDecodesEvenWithAFreeSlot pins that a
+// request whose budget ended while it read its body is answered 503 and
+// never reaches the sink, although a slot is free.
+func TestHandler_ExpiredBudget_NeverDecodesEvenWithAFreeSlot(t *testing.T) {
+	var calls atomic.Int32
+	mux := http.NewServeMux()
+	NewHandler(&ctxSink{fn: func(context.Context) ([]Notice, error) {
+		calls.Add(1)
+		return nil, nil
+	}}, nil, WithMaxConcurrentDecodes(4), WithRequestBudget(20*time.Millisecond)).Register(mux)
+
+	req := manifestRequest(context.Background(), t)
+	req.Body = io.NopCloser(&slowBody{delay: 60 * time.Millisecond, r: req.Body})
+	rec := httptest.NewRecorder()
+	serveWithin(t, mux, rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != "1" {
+		t.Errorf("status = %d, Retry-After = %q, want 503 and 1", rec.Code, rec.Header().Get("Retry-After"))
+	}
+	if got := calls.Load(); got != 0 {
+		t.Errorf("sink calls = %d, want 0", got)
+	}
+}
+
+// TestHandler_BusyLog_NamesTheWaitUsed pins that the busy log line holds the
+// time the request waited, which is the time left in the budget when the
+// budget is shorter than the slot wait.
+func TestHandler_BusyLog_NamesTheWaitUsed(t *testing.T) {
+	sink := newGateSink()
+	mux := http.NewServeMux()
+	var logs bytes.Buffer
+	NewHandler(sink, slog.New(slog.NewJSONHandler(&logs, nil)), WithMaxConcurrentDecodes(1), WithSlotWait(time.Hour), WithRequestBudget(150*time.Millisecond)).Register(mux)
+
+	first := make(chan struct{})
+	go func() {
+		mux.ServeHTTP(httptest.NewRecorder(), manifestRequest(context.Background(), t))
+		close(first)
+	}()
+	<-sink.entered
+	serveWithin(t, mux, httptest.NewRecorder(), manifestRequest(context.Background(), t))
+
+	lines := logLines(&logs, "no decode slot came free")
+	if len(lines) != 1 {
+		t.Fatalf("busy lines = %q, want 1", lines)
+	}
+	var line struct{ Wait string }
+	if err := json.Unmarshal([]byte(lines[0]), &line); err != nil {
+		t.Fatal(err)
+	}
+	wait, err := time.ParseDuration(line.Wait)
+	if err != nil || wait > time.Second {
+		t.Errorf("logged wait = %q, want about the 150ms budget, not the one-hour slot wait", line.Wait)
 	}
 
 	sink.gate <- struct{}{}

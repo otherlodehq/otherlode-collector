@@ -35,7 +35,7 @@ The listing holds names only. It holds no counts, no conditions and no string li
 
 ## What the collector checks
 
-The collector checks each request in this order. A request that fails a check gets the status below and nothing is forwarded. Only a payload that passes every check is queued, and the collector answers `202` only then.
+The collector checks each request in this order. A request that fails a check gets the status below and nothing is forwarded. Only a payload that passes every check is forwarded, and the collector answers `202` only when Otherlode has answered `202`.
 
 | Check | Fails with |
 |---|---|
@@ -45,7 +45,7 @@ The collector checks each request in this order. A request that fails a check ge
 | The body is larger than 16 MiB | `413` |
 | The body cannot be read | `400` |
 | The body holds more elements than the limit for its payload. See [rate and memory limits](limits#element-limit) | `413` |
-| No decode slot comes free within 5 seconds. See [rate and memory limits](limits) | `503` |
+| No decode slot comes free within 1 second. See [rate and memory limits](limits) | `503` |
 | The body is not valid protobuf | `400` |
 | The resource is missing | `400` |
 | `service_name`, `service_version`, `service_instance_id`, `environment`, `run_id`, `service_namespace` or `agent_version` is longer than 1024 bytes | `400` |
@@ -57,7 +57,7 @@ The collector checks each request in this order. A request that fails a check ge
 | A delta batch or manifest holds a time field outside 0 to 253402300799999 milliseconds since the epoch, which is the start of 1970 to the end of the year 9999. The fields are `first_seen_at` and `first_loaded_at` in a delta batch, and `first_seen_unreported_at`, `withheld_at`, `observed_at`, `skipped_at`, `disabled_at` and `seen_at` in a manifest. A time of 0 means not set and passes | `400` |
 | A manifest lists a class that failed to initialize with no `reason` | `400` |
 | A manifest lists a dependency with no `identities` | `400` |
-| The forwarder cannot take the payload because its queue is full or the collector is shutting down. See [forwarding](forwarding) | `503` |
+| Otherlode does not store the payload. Its `429` or other `4xx` status comes back as it is. A `5xx`, a timeout, no connection, a full forward limit or a shutdown gives `503`. See [forwarding](forwarding) | `429`, another `4xx` or `503` |
 
 The checks read only identity fields, time fields, chunk numbers, the reason a class failed to initialize and whether a dependency has an identity, and count elements. They do not read the code names, counts or conditions in a payload.
 
@@ -128,7 +128,7 @@ The collector adds no client IP, no host name and no other data about the machin
 
 ## What the collector stores
 
-The collector writes no file. It holds a payload in memory from the moment it arrives until the forward succeeds or the payload is dropped. A crash loses what was queued. A stop signal gives each queued payload one last attempt, within 10 seconds. It reads only the token files you point it at. See [forwarding](forwarding) for the queue and the drop rules.
+The collector writes no file. It holds a payload in memory only for the length of its request, which is at most 9 seconds, and it keeps no queue. A crash or a stop signal loses no payload that an agent saw accepted, because the agent gets `202` only after Otherlode has stored the payload. A request that is cut short stays with the agent, which sends it again. It reads only the token files you point it at. See [forwarding](forwarding) for the forward and shutdown.
 
 ## What the collector logs
 
@@ -140,15 +140,15 @@ The collector writes JSON lines to standard output. At the default `info` level,
 |---|---|---|
 | `rejecting invalid delta batch`, `rejecting invalid manifest`, `rejecting invalid static baseline` or `rejecting invalid class listing` | `error` | A payload failed a check in the table above. The error names the check, such as `resource.run_id is empty`. It quotes the service name or namespace only when it is `.` or `..` |
 | `rejecting malformed delta batch`, `rejecting malformed manifest`, `rejecting malformed static baseline` or `rejecting malformed class listing` | `error` | The body is not valid protobuf. The error names the decoding problem and holds no body content |
-| `dropping payload: ...` | `namespace`, `service`, `instance`, `path`, `error`, and `backend_error` when the backend named an error code | The forwarder gave up on a payload. See [forwarding](forwarding) for the reasons. The error is the backend's status or the HTTP client's error, which can include the forward URL. `backend_error` is the `error` field of the backend's JSON response, cut to 64 bytes |
+| `sink refused delta batch`, or the same with `manifest`, `static baseline` or `class listing` | `error`, `status`, `unlogged_sink_refusals`, and `backend_error` when the backend named an error code | Otherlode answered a `4xx`, and the collector answered the agent with that status. At most one line a minute for each payload type, status and cause. `backend_error` is the `error` field of the backend's JSON response, cut to 64 bytes. See [forwarding](forwarding) |
 | `agent environment does not match the collector's configured environment` | `namespace`, `service`, `instance`, `run`, `payload`, `agent_environment`, `collector_environment`, `action` | The agent named another environment than `OTHERLODE_COLLECTOR_ENVIRONMENT`. A `WARN` the first time a service sends that environment, and `DEBUG` after that |
 | `agent namespace does not match the collector's configured namespace` | `service`, `instance`, `run`, `payload`, `agent_namespace`, `collector_namespace`, `action` | The agent named another namespace than `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE`. A `WARN` the first time a service sends that namespace, and `DEBUG` after that |
 | `refusing delta batch with too many elements`, or the same with `manifest`, `static baseline` or `class listing` | `limit`, `bytes` | The body held more elements than the limit for its payload and got `413`. See [rate and memory limits](limits#element-limit) |
-| `refusing delta batch: no decode slot came free`, or the same with `manifest`, `static baseline` or `class listing` | `wait`, `max_concurrent_decodes`, `unlogged_busy_refusals` | A request waited 5 seconds for a decode slot and got `503`. At most one line a minute |
+| `refusing delta batch: no decode slot came free`, or the same with `manifest`, `static baseline` or `class listing` | `wait`, `max_concurrent_decodes`, `unlogged_busy_refusals` | A request waited 1 second for a decode slot and got `503`. At most one line a minute |
 | `dropped fields this collector does not know; its bindings are older than the agent's, so the server withholds findings from this run; upgrade to the latest collector` | `namespace`, `service`, `instance`, `run`, `agent_version`, `payload` | A blanking setting is on and a payload lost an unknown field. One line for each run |
 | `forward URL uses plain http; the backend auth token is sent unencrypted` | `url` | At startup, when the forward URL starts with `http://` and a forward key is set |
 
-When the forwarder refuses a payload, the collector also logs a line at `error` level. Its `msg` is `sink rejected delta batch`, `sink rejected manifest`, `sink rejected static baseline` or `sink rejected class listing`, and its `error` field names the namespace, service and instance. See [health checks, metrics and logs](monitoring) for every level.
+When Otherlode does not store a payload and answers anything but a `4xx`, the collector logs a line at `error` level. Its `msg` is `sink rejected delta batch`, `sink rejected manifest`, `sink rejected static baseline` or `sink rejected class listing`. Its `error` field names the service and instance, and it has a `reason`. The error is Otherlode's status or the HTTP client's error, which can include the forward URL. At most one line a minute for each payload type and reason. See [health checks, metrics and logs](monitoring) for every level.
 
 ### When no forward URL is set
 
@@ -181,5 +181,5 @@ Environment and namespace stamps, blanking and re-keying apply before the line i
 
 - [What the agent sends](/docs/agent/data-sent) lists the contents of each payload.
 - [Blank out string literals](redaction) covers the blanking settings, the re-keyed keys, the cleared case keys and the dropped unknown fields.
-- [Forwarding](forwarding) covers the queue, the retries and the drop rules.
+- [Forwarding](forwarding) covers the forward, the answers the agent gets and shutdown.
 - [Health checks, metrics and logs](monitoring) covers the counters and every log level.

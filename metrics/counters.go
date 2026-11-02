@@ -12,7 +12,8 @@ var (
 	// IngestRejected counts requests turned away before or by the sink.
 	// Reasons: content_type, too_large, read, malformed, invalid, sink,
 	// canceled (the request context ended while it waited for a decode
-	// slot), busy (no decode slot came free in time; the answer was 503),
+	// slot; the answer was 503), busy (no decode slot came free in time;
+	// the answer was 503),
 	// too_many_elements (the body held more elements than its payload's
 	// limit; the answer was 413).
 	IngestRejected = NewCounter("otherlode_collector_ingest_rejected_total",
@@ -32,25 +33,22 @@ var (
 	RateLimited = NewCounter("otherlode_collector_rate_limited_total",
 		"Requests refused because the client's rate limit was exceeded.")
 
-	// ForwardDelivered counts payloads the backend accepted.
+	// ForwardDelivered counts payloads the backend answered with a 2xx,
+	// which the collector then answered 202.
 	ForwardDelivered = NewCounter("otherlode_collector_forward_delivered_total",
-		"Payloads the backend accepted.", "payload")
+		"Payloads the backend stored, answered 202.", "payload")
 
-	// ForwardRetries counts delivery attempts made after a retryable failure.
-	ForwardRetries = NewCounter("otherlode_collector_forward_retries_total",
-		"Delivery attempts made after a retryable failure.", "payload")
-
-	// ForwardDropped counts payloads discarded without delivery. Reasons:
-	// marshal, permanent, retry_exhausted, shutdown_deadline,
-	// shutdown_attempt_failed.
-	ForwardDropped = NewCounter("otherlode_collector_forward_dropped_total",
-		"Payloads discarded without a successful delivery.", "payload", "reason")
-
-	// ForwardRefused counts payloads the forwarder did not take, answered
-	// with 503 so the sender sends them again. Reasons: queue_full,
-	// shutting_down.
-	ForwardRefused = NewCounter("otherlode_collector_forward_refused_total",
-		"Payloads the forwarder did not take, answered 503 so the sender sends them again.", "payload", "reason")
+	// ForwardFailed counts payloads the backend did not store and the
+	// collector did not answer 202. The sender sends them again. Reasons:
+	// rate_limited (the backend answered 429), rejected (another 4xx),
+	// server_error (any other non-2xx status), timeout (no answer within
+	// the forward request timeout), transport (no answer: the connection
+	// failed), canceled (the agent's request or the shutdown deadline
+	// ended first), busy (no forward slot came free in time),
+	// unexpected_status (a 2xx other than 202), shutting_down, marshal,
+	// request.
+	ForwardFailed = NewCounter("otherlode_collector_forward_failed_total",
+		"Payloads the backend did not store, so the collector did not answer 202.", "payload", "reason")
 
 	// ForwardNotices counts the notices the backend sent with an accepted
 	// payload. Its "notice" is "service-over-cap", "environment-not-tracked"

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/otherlodehq/otherlode-collector/ingest"
 	"github.com/otherlodehq/otherlode-collector/internal/auth"
@@ -11,6 +12,17 @@ import (
 	"github.com/otherlodehq/otherlode-collector/internal/processor"
 	"github.com/otherlodehq/otherlode-collector/internal/ratelimit"
 	"github.com/otherlodehq/otherlode-collector/metrics"
+)
+
+// The two timings are variables so a test can shorten them.
+var (
+	// requestBudget is the time the ingest handler gives one request, from
+	// the moment it starts on it. It is below the server's 10 second write
+	// timeout, so the agent gets the collector's answer.
+	requestBudget = 9 * time.Second
+
+	// decodeSlotWait is the longest a request waits for a decode slot.
+	decodeSlotWait = time.Second
 )
 
 // routeConfig holds what registerRoutes wires together. Every field may be
@@ -108,7 +120,11 @@ func registerRoutes(mux *http.ServeMux, cfg routeConfig) (*forward.ForwardingSin
 			"secret_fingerprint", fingerprint)
 		sink = processor.NewRedaction(sink, cfg.Redaction, logger)
 	}
-	handler := ingest.NewHandler(sink, logger, ingest.WithMaxConcurrentDecodes(cfg.MaxDecodes))
+	handler := ingest.NewHandler(sink, logger,
+		ingest.WithMaxConcurrentDecodes(cfg.MaxDecodes),
+		ingest.WithSlotWait(decodeSlotWait),
+		ingest.WithRequestBudget(requestBudget),
+	)
 
 	ingestMux := http.NewServeMux()
 	handler.Register(ingestMux)

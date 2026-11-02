@@ -279,7 +279,7 @@ func TestRegisterRoutes_NoForwardURL_ReturnsNilForwardingSink(t *testing.T) {
 
 func TestRegisterRoutes_ForwardURLSet_ReturnsForwardingSinkAndReachesAcceptedStatus(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusAccepted)
 	}))
 	defer backend.Close()
 
@@ -352,7 +352,7 @@ func forwardDelta(t *testing.T, envCfg processor.EnvironmentConfig, nsCfg proces
 			return
 		}
 		received <- &batch
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusAccepted)
 	}))
 	defer backend.Close()
 
@@ -515,7 +515,7 @@ func forwardManifestLogging(t *testing.T, redactCfg processor.RedactionConfig, l
 			return
 		}
 		received <- &manifest
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusAccepted)
 	}))
 	defer backend.Close()
 
@@ -759,7 +759,7 @@ func TestRegisterRoutes_ForwardTokenFile_NextRequestSendsReloadedKey(t *testing.
 	auths := make(chan string, 8)
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auths <- r.Header.Get("Authorization")
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusAccepted)
 	}))
 	defer backend.Close()
 
@@ -935,5 +935,112 @@ func TestRegisterRoutes_StampingLogNamesTheAction(t *testing.T) {
 		if !strings.Contains(logs.String(), want) {
 			t.Errorf("startup log does not hold %s:\n%s", want, logs.String())
 		}
+	}
+}
+
+func TestRouteTimings_AreTheDocumentedValues(t *testing.T) {
+	if requestBudget != 9*time.Second {
+		t.Errorf("requestBudget = %v, want 9s", requestBudget)
+	}
+	if decodeSlotWait != time.Second {
+		t.Errorf("decodeSlotWait = %v, want 1s", decodeSlotWait)
+	}
+}
+
+// blockingForwardBackend starts a backend that holds every request until
+// the test ends.
+func blockingForwardBackend(t *testing.T) (url string, entered chan struct{}) {
+	t.Helper()
+	entered = make(chan struct{}, 16)
+	release := make(chan struct{})
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		entered <- struct{}{}
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(backend.Close)
+	t.Cleanup(func() { close(release) })
+	return backend.URL, entered
+}
+
+func setRouteTimings(t *testing.T, budget, slotWait time.Duration) {
+	t.Helper()
+	oldBudget, oldWait := requestBudget, decodeSlotWait
+	requestBudget, decodeSlotWait = budget, slotWait
+	t.Cleanup(func() { requestBudget, decodeSlotWait = oldBudget, oldWait })
+}
+
+// TestRegisterRoutes_RequestBudget_BlockedSinkGets503AtTheBudget pins that
+// registerRoutes gives the handler its request budget: a request whose
+// backend never answers is answered 503 when the budget ends, far before
+// the forward's own 8 second timeout.
+func TestRegisterRoutes_RequestBudget_BlockedSinkGets503AtTheBudget(t *testing.T) {
+	setRouteTimings(t, 300*time.Millisecond, time.Second)
+	backendURL, entered := blockingForwardBackend(t)
+	mux := http.NewServeMux()
+	fwd := mustRegisterRoutes(t, mux, routeConfig{Forward: forward.Config{URL: backendURL}})
+	defer fwd.Shutdown(context.Background())
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	start := time.Now()
+	client := &http.Client{Timeout: 4 * time.Second}
+	resp, err := client.Do(deltaRequest(t, server.URL))
+	if err != nil {
+		t.Fatalf("post: %v (no answer within 4s: the budget is not applied)", err)
+	}
+	resp.Body.Close()
+	<-entered
+
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", resp.StatusCode)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("answered after %v, want about the 300ms budget", elapsed)
+	}
+}
+
+// TestRegisterRoutes_SlotWait_BusyRequestGets503AfterTheSlotWait pins that
+// registerRoutes gives the handler its decode slot wait. With one forward
+// slot and one decode slot, a first request holds the forward slot, a
+// second holds the decode slot while it waits for the forward slot, and a
+// third finds no decode slot.
+func TestRegisterRoutes_SlotWait_BusyRequestGets503AfterTheSlotWait(t *testing.T) {
+	setRouteTimings(t, time.Hour, 300*time.Millisecond)
+	backendURL, entered := blockingForwardBackend(t)
+	mux := http.NewServeMux()
+	fwd := mustRegisterRoutes(t, mux, routeConfig{
+		MaxDecodes: 1,
+		Forward:    forward.Config{URL: backendURL, MaxConcurrentForwards: 1, RequestTimeout: 1500 * time.Millisecond},
+	})
+	defer fwd.Shutdown(context.Background())
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	background := func() {
+		if resp, err := http.DefaultClient.Do(deltaRequest(t, server.URL)); err == nil {
+			resp.Body.Close()
+		}
+	}
+	go background()
+	<-entered
+	go background()
+	time.Sleep(100 * time.Millisecond)
+
+	start := time.Now()
+	client := &http.Client{Timeout: 4 * time.Second}
+	resp, err := client.Do(deltaRequest(t, server.URL))
+	if err != nil {
+		t.Fatalf("post: %v (no answer within 4s: the slot wait is not applied)", err)
+	}
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusServiceUnavailable || resp.Header.Get("Retry-After") != "1" {
+		t.Errorf("status = %d, Retry-After = %q, want 503 and 1", resp.StatusCode, resp.Header.Get("Retry-After"))
+	}
+	if elapsed := time.Since(start); elapsed < 200*time.Millisecond || elapsed > time.Second {
+		t.Errorf("answered after %v, want about the 300ms slot wait", elapsed)
 	}
 }

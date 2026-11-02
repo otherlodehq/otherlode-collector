@@ -162,13 +162,13 @@ A cleared case has no key, so Otherlode shows it unnamed and cannot match it acr
 
 While blanking is on, the collector sends the secret's fingerprint in an `Otherlode-Redaction` header on every request it forwards, for all four payloads. With blanking off it sends no such header.
 
-A tenant can have Otherlode require the header. Otherlode then refuses a payload that has no header, such as one an agent posted to it directly, with `403` and the error code `redaction_required`. It refuses a payload with another fingerprint with `403` and `redaction_secret_mismatch`. The collector does not retry a `403`. It drops the payload and logs a warning that carries the code as `backend_error`:
+A tenant can have Otherlode require the header. Otherlode then refuses a payload that has no header, such as one an agent posted to it directly, with `403` and the error code `redaction_required`. It refuses a payload with another fingerprint with `403` and `redaction_secret_mismatch`. The collector answers the agent with the same `403` and logs a warning that carries the code as `backend_error`:
 
 ```text
-{"time":"...","level":"WARN","msg":"dropping payload: permanent failure","namespace":"","service":"checkout","instance":"3f1c9a","path":"/v1/otherlode/deltas","error":"backend returned 403 Forbidden","backend_error":"redaction_secret_mismatch"}
+{"time":"...","level":"WARN","msg":"sink refused delta batch","error":"sink answered Forbidden: backend returned 403 Forbidden for service \"demo\" instance \"i1\"","status":403,"unlogged_sink_refusals":0,"backend_error":"redaction_secret_mismatch"}
 ```
 
-`redaction_required` means this collector has blanking off. `redaction_secret_mismatch` means its secret differs from the one Otherlode expects. Fix the setting and restart the collector. The dropped payloads do not come back. [Forwarding](forwarding#dropped-payloads) covers drops.
+`redaction_required` means this collector has blanking off. `redaction_secret_mismatch` means its secret differs from the one Otherlode expects. Fix the setting and restart the collector. The agent keeps its counts, so it sends the refused payloads again on its next flush. [Forwarding](forwarding#failed-forwards-in-the-log-and-the-counters) covers the log line.
 
 The header catches a setup mistake. It does not prove which collector sent a payload, because the fingerprint is in every forwarded request and in the startup log.
 

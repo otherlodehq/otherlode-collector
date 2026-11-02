@@ -40,7 +40,7 @@ const (
 	defaultAddr = ":4319"
 
 	// shutdownTimeout bounds the whole shutdown: stopping the HTTP server
-	// and draining the forwarder, which run at the same time. docker stop
+	// and waiting for the forwards in flight, which run at the same time. docker stop
 	// sends SIGKILL 10 seconds after SIGTERM, so a longer budget would be
 	// cut short there.
 	shutdownTimeout = 10 * time.Second
@@ -218,9 +218,10 @@ func listen(addr string, logger *slog.Logger) (net.Listener, error) {
 }
 
 // shutdown stops srv and runs drain, which may be nil, at the same time.
-// Both share one deadline of timeout. drain starts at once, so a slow HTTP
-// drain cannot use up the forwarder's time. A request that reaches the
-// forwarder after drain starts gets 503, and the agent sends it again.
+// Both share one deadline of timeout. drain starts at once, so a request
+// that reaches the forwarder after drain starts gets 503, and the agent
+// sends it again. A request already in the forwarder finishes within the
+// deadline.
 // shutdown waits for both and returns srv's error.
 func shutdown(srv *http.Server, drain func(context.Context), timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -335,7 +336,7 @@ func (k *forwardKey) store(tokens []string) {
 
 // checkHeaderValue returns an error when key holds a control character,
 // which an HTTP header value cannot carry. A request with such a key fails
-// in the HTTP client, and the forwarder would retry it until it gave up.
+// in the HTTP client, and every forward would fail.
 func checkHeaderValue(key string) error {
 	for i := 0; i < len(key); i++ {
 		if c := key[i]; c < 0x20 || c == 0x7f {
@@ -456,25 +457,15 @@ func resolveForwardConfig(getenv func(string) string) (forward.Config, *tokenfil
 	}
 
 	var err error
-	if cfg.Shards, err = positiveIntEnv(getenv, "OTHERLODE_COLLECTOR_FORWARD_SHARDS"); err != nil {
-		return forward.Config{}, nil, err
-	}
-	if cfg.QueueSize, err = positiveIntEnv(getenv, "OTHERLODE_COLLECTOR_FORWARD_QUEUE_SIZE"); err != nil {
-		return forward.Config{}, nil, err
-	}
-	if cfg.QueueBytes, err = positiveIntEnv(getenv, "OTHERLODE_COLLECTOR_FORWARD_QUEUE_BYTES"); err != nil {
-		return forward.Config{}, nil, err
-	}
 	if cfg.RequestTimeout, err = positiveDurationEnv(getenv, "OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT"); err != nil {
 		return forward.Config{}, nil, err
 	}
-	if cfg.RetryInitialInterval, err = positiveDurationEnv(getenv, "OTHERLODE_COLLECTOR_FORWARD_RETRY_INITIAL_INTERVAL"); err != nil {
-		return forward.Config{}, nil, err
+	if cfg.RequestTimeout >= requestBudget {
+		return forward.Config{}, nil, fmt.Errorf(
+			"OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT is %s, which is not below the %s time budget of one request; set it lower",
+			cfg.RequestTimeout, requestBudget)
 	}
-	if cfg.RetryMaxInterval, err = positiveDurationEnv(getenv, "OTHERLODE_COLLECTOR_FORWARD_RETRY_MAX_INTERVAL"); err != nil {
-		return forward.Config{}, nil, err
-	}
-	if cfg.RetryMaxElapsedTime, err = positiveDurationEnv(getenv, "OTHERLODE_COLLECTOR_FORWARD_RETRY_MAX_ELAPSED_TIME"); err != nil {
+	if cfg.MaxConcurrentForwards, err = positiveIntEnv(getenv, "OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS"); err != nil {
 		return forward.Config{}, nil, err
 	}
 	return cfg, file, nil

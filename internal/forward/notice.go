@@ -124,7 +124,7 @@ func wellFormedNotice(value string) bool {
 // for item, and logs a Warn for it unless the same notice of the same
 // service logged within the last hour. A value outside the closed set
 // counts as "unknown", and the log shows it only when it is well formed.
-func (s *ForwardingSink) noticed(item queuedItem, lines []string) {
+func (s *ForwardingSink) noticed(item outbound, lines []string) {
 	for _, value := range noticeValues(lines) {
 		notice := ingest.Notice(value)
 		known := notice.Known()

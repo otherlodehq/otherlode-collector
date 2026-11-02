@@ -1,10 +1,10 @@
 ---
 title: Rate and memory limits
-description: The per-address rate limit, the client IP header, the IPv6 prefix, the 16 MiB body limit, the element limit, the decode cap, and how to bound the collector's worst-case memory.
+description: The per-address rate limit, the client IP header, the IPv6 prefix, the 16 MiB body limit, the element limit, the decode cap, the forward limit, the request time budget, and how to bound the collector's worst-case memory.
 order: 70
 ---
 
-The collector limits how fast one client address can send, how large a request can be, and how many requests it decodes at once. This page lists each limit, what the collector answers when a request hits it, and how to bound memory. For the settings in one table, see [the configuration](configuration).
+The collector limits how fast one client address can send, how large a request can be, how many requests it decodes at once, and how many it forwards at once. This page lists each limit, what the collector answers when a request hits it, and how to bound memory. For the settings in one table, see [the configuration](configuration).
 
 ## Rate limit
 
@@ -117,29 +117,37 @@ A 16 MiB body has to arrive within the 10-second read timeout. A client on a slo
 
 ## Decode cap
 
-Decoding a payload can take far more memory than the body. The [element limit](#element-limit) bounds one decode. Otherlode's ingest used about 230 MiB at the limits. The decoded message also stays in memory until the collector hands it on.
+Decoding a payload can take far more memory than the body. The [element limit](#element-limit) bounds one decode. Otherlode's ingest used about 230 MiB at the limits. The decoded message also stays in memory until the collector has marshaled it and holds a forward slot.
 
 `OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES` caps how many requests the collector decodes at one time. It defaults to the number of CPUs the Go runtime uses, because decoding is CPU-bound and more parallel decodes add memory but no speed. The value must be an integer above 0. Anything else stops the collector at startup. You cannot turn the cap off.
 
-A request reads its body and counts its elements before it asks for a slot. A slow client therefore holds no slot while it uploads. A request that finds no free slot waits up to 5 seconds, then gets a 503 with `Retry-After: 1`. The collector counts it under reason `busy`. It also logs a warning, at most one a minute:
+A request reads its body and counts its elements before it asks for a slot. A slow client therefore holds no slot while it uploads. A request that finds no free slot waits up to 1 second, then gets a 503 with `Retry-After: 1`. The collector counts it under reason `busy`. It also logs a warning, at most one a minute:
 
 ```text
-{"time":"...","level":"WARN","msg":"refusing delta batch: no decode slot came free","wait":"5s","max_concurrent_decodes":4,"unlogged_busy_refusals":17}
+{"time":"...","level":"WARN","msg":"refusing delta batch: no decode slot came free","wait":"1s","max_concurrent_decodes":4,"unlogged_busy_refusals":17}
 ```
 
-`unlogged_busy_refusals` counts the refusals since the previous warning that got no line of their own. The counter counts every refusal. If the client disconnects while it waits, the collector writes no response and counts reason `canceled`. The agent retries a 503 within the send and again on the next flush.
+`unlogged_busy_refusals` counts the refusals since the previous warning that got no line of their own. The counter counts every refusal. If the client disconnects while it waits, the collector counts reason `canceled` and answers 503 with `Retry-After: 1`. The agent retries a 503 within the send and again on the next flush.
 
-The cap does not limit how many requests wait. Each waiting request holds its body, up to 16 MiB.
+The cap does not limit how many requests wait. Each waiting request holds its body, up to 16 MiB, for at most 1 second.
+
+A request keeps its decode slot until it holds a forward slot. When `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS` forwards are already in flight, requests wait for a forward slot with their decode slots held, so a slow Otherlode fills the decode cap and the refusals above start. Raising the decode cap raises the decode memory term below in the same proportion. See [the forward limit](forwarding#the-forward-limit).
+
+## Forward limit and time budget
+
+`OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS` caps the forwards in flight to Otherlode. It defaults to 32, and the value must be an integer above 0.
+
+A request has 9 seconds from the moment the collector starts on it. The wait for a decode slot and the forward share that time. `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT` defaults to 8 seconds, and startup refuses a value of 9 seconds or more. When the time runs out, the agent gets a 503 with `Retry-After: 5`. [Forwarding](forwarding#time-limits) covers the limits.
 
 ## Worst-case memory
 
 Three parts add up.
 
 - **Decoding.** The decode cap times the memory of the largest decode. Otherlode's ingest used about 230 MiB for the largest payload at the element limits.
-- **Waiting bodies.** The number of requests waiting for a slot, times 16 MiB each.
-- **Forwarding queues.** The number of shards times the larger of the queue byte limit and the largest payload.
+- **Waiting bodies.** The number of requests waiting for a decode slot, times 16 MiB each. A request waits at most 1 second.
+- **Forwards in flight.** `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS` times the largest marshaled payload. A forward holds its marshaled payload until Otherlode answers or the request time runs out. The collector marshals a payload after it processes it, so blanking and re-keying change its size from the body the agent sent.
 
-Each forwarding shard holds at most `OTHERLODE_COLLECTOR_FORWARD_QUEUE_BYTES` of payloads, counted from the moment a payload is queued until delivery ends. The defaults are 8 shards and 64 MiB, so queues take up to 512 MiB. A shard that holds nothing accepts any payload, so one payload above the byte limit can still pass through an idle shard. See [forwarding](forwarding) for the shard and queue settings.
+The collector keeps no queue, so no term grows with the time Otherlode is slow. A slow Otherlode fills the forward slots and then the decode slots. Requests past that wait at most 1 second and get a 503, so the three terms stay at their caps.
 
 The decode and waiting-body terms depend on traffic and payload content. Two steps keep them in bounds.
 
@@ -153,5 +161,5 @@ The code gives no rule for how many collectors to run or what values to use. Sta
 ## Related pages
 
 - [Configuration](configuration) lists every setting.
-- [Forwarding](forwarding) covers the queues that the memory estimate includes.
+- [Forwarding](forwarding) covers the forward limit and the time limits that the memory estimate includes.
 - [Troubleshooting](troubleshooting) covers agents that get 413, 415, 429 or 503.

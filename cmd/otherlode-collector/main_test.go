@@ -442,29 +442,20 @@ func TestResolveForwardConfig_Unset_LeavesZeroValues(t *testing.T) {
 
 func TestResolveForwardConfig_AllSet_ParsesEveryField(t *testing.T) {
 	cfg, _, err := resolveForwardConfig(envFrom(map[string]string{
-		"OTHERLODE_COLLECTOR_FORWARD_URL":                    "https://backend.example.com",
-		"OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN":             "backend-secret",
-		"OTHERLODE_COLLECTOR_FORWARD_SHARDS":                 "4",
-		"OTHERLODE_COLLECTOR_FORWARD_QUEUE_SIZE":             "128",
-		"OTHERLODE_COLLECTOR_FORWARD_QUEUE_BYTES":            "1048576",
-		"OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT":        "15s",
-		"OTHERLODE_COLLECTOR_FORWARD_RETRY_INITIAL_INTERVAL": "2s",
-		"OTHERLODE_COLLECTOR_FORWARD_RETRY_MAX_INTERVAL":     "1m",
-		"OTHERLODE_COLLECTOR_FORWARD_RETRY_MAX_ELAPSED_TIME": "10m",
+		"OTHERLODE_COLLECTOR_FORWARD_URL":             "https://backend.example.com",
+		"OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN":      "backend-secret",
+		"OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT": "5s",
+		"OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS": "12",
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := forward.Config{
-		URL:                  "https://backend.example.com",
-		AuthToken:            forward.StaticToken("backend-secret"),
-		Shards:               4,
-		QueueSize:            128,
-		QueueBytes:           1 << 20,
-		RequestTimeout:       15 * time.Second,
-		RetryInitialInterval: 2 * time.Second,
-		RetryMaxInterval:     time.Minute,
-		RetryMaxElapsedTime:  10 * time.Minute,
+		URL:            "https://backend.example.com",
+		AuthToken:      forward.StaticToken("backend-secret"),
+		RequestTimeout: 5 * time.Second,
+
+		MaxConcurrentForwards: 12,
 	}
 	if cfg != want {
 		t.Fatalf("config = %+v, want %+v", cfg, want)
@@ -810,17 +801,59 @@ func TestResolveForwardConfig_KeyFileReread_BadKeyKeepsLastGoodKey(t *testing.T)
 
 func TestResolveForwardConfig_BadValues_Error(t *testing.T) {
 	for name, value := range map[string]string{
-		"OTHERLODE_COLLECTOR_FORWARD_SHARDS":                 "0",
-		"OTHERLODE_COLLECTOR_FORWARD_QUEUE_SIZE":             "-1",
-		"OTHERLODE_COLLECTOR_FORWARD_QUEUE_BYTES":            "0",
-		"OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT":        "10",
-		"OTHERLODE_COLLECTOR_FORWARD_RETRY_INITIAL_INTERVAL": "soon",
-		"OTHERLODE_COLLECTOR_FORWARD_RETRY_MAX_INTERVAL":     "0s",
-		"OTHERLODE_COLLECTOR_FORWARD_RETRY_MAX_ELAPSED_TIME": "-5m",
+		"OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT": "10",
+		"OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS": "0",
 	} {
 		if _, _, err := resolveForwardConfig(envFrom(map[string]string{name: value})); err == nil {
 			t.Errorf("%s=%q: expected an error, got nil", name, value)
 		}
+	}
+}
+
+func TestResolveForwardConfig_BadMaxConcurrentForwards_Error(t *testing.T) {
+	for _, value := range []string{"0", "-1", "many", "1.5"} {
+		_, _, err := resolveForwardConfig(envFrom(map[string]string{"OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS": value}))
+		if err == nil || !strings.Contains(err.Error(), "OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS") {
+			t.Errorf("value %q: error = %v, want one naming the variable", value, err)
+		}
+	}
+}
+
+// TestResolveForwardConfig_RequestTimeoutNotBelowTheBudget_Error pins that
+// the collector refuses to start with a forward timeout that could outlast
+// the time one request has.
+func TestResolveForwardConfig_RequestTimeoutNotBelowTheBudget_Error(t *testing.T) {
+	for _, value := range []string{requestBudget.String(), (requestBudget + time.Second).String(), "15s", "1h"} {
+		_, _, err := resolveForwardConfig(envFrom(map[string]string{"OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT": value}))
+		if err == nil || !strings.Contains(err.Error(), "OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT") {
+			t.Errorf("value %q: error = %v, want one naming the variable", value, err)
+		}
+	}
+	below := (requestBudget - time.Millisecond).String()
+	if _, _, err := resolveForwardConfig(envFrom(map[string]string{"OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT": below})); err != nil {
+		t.Errorf("value %q: unexpected error %v", below, err)
+	}
+}
+
+// TestResolveForwardConfig_RemovedQueueSettings_AreIgnored pins that the
+// settings of the removed forward queue are not read, as with any
+// OTHERLODE_COLLECTOR_ variable the collector does not know, so an
+// existing deployment that still sets them starts.
+func TestResolveForwardConfig_RemovedQueueSettings_AreIgnored(t *testing.T) {
+	cfg, _, err := resolveForwardConfig(envFrom(map[string]string{
+		"OTHERLODE_COLLECTOR_FORWARD_URL":                    "https://backend.example.com",
+		"OTHERLODE_COLLECTOR_FORWARD_SHARDS":                 "0",
+		"OTHERLODE_COLLECTOR_FORWARD_QUEUE_SIZE":             "-1",
+		"OTHERLODE_COLLECTOR_FORWARD_QUEUE_BYTES":            "many",
+		"OTHERLODE_COLLECTOR_FORWARD_RETRY_INITIAL_INTERVAL": "soon",
+		"OTHERLODE_COLLECTOR_FORWARD_RETRY_MAX_INTERVAL":     "0s",
+		"OTHERLODE_COLLECTOR_FORWARD_RETRY_MAX_ELAPSED_TIME": "-5m",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := (forward.Config{URL: "https://backend.example.com"}); cfg != want {
+		t.Fatalf("config = %+v, want %+v", cfg, want)
 	}
 }
 
