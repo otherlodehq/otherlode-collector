@@ -18,7 +18,6 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/otherlodehq/otherlode-collector/ingest"
-	"github.com/otherlodehq/otherlode-collector/internal/auth"
 	"github.com/otherlodehq/otherlode-collector/internal/forward"
 	"github.com/otherlodehq/otherlode-collector/internal/processor"
 	"github.com/otherlodehq/otherlode-collector/metrics"
@@ -172,7 +171,7 @@ func TestResolveAuthTokens(t *testing.T) {
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			tokens, file, err := resolveAuthTokens(envFrom(tt.env))
+			tokens, file, err := resolveAuthTokens(envFrom(tt.env), nil)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected an error, got nil")
@@ -297,7 +296,7 @@ func TestShutdown_NoForwarder_StopsServer(t *testing.T) {
 // that a typo in the opt-out stops startup with a message that points at
 // it, instead of the generic "no token set" error.
 func TestResolveAuthTokens_UnparsableOptOut_ErrorNamesVariableAndValue(t *testing.T) {
-	_, _, err := resolveAuthTokens(envFrom(map[string]string{"OTHERLODE_COLLECTOR_INSECURE_NO_AUTH": "ture"}))
+	_, _, err := resolveAuthTokens(envFrom(map[string]string{"OTHERLODE_COLLECTOR_INSECURE_NO_AUTH": "ture"}), nil)
 	if err == nil {
 		t.Fatal("expected an error, got nil")
 	}
@@ -428,7 +427,7 @@ func envFrom(vars map[string]string) func(string) string {
 }
 
 func TestResolveForwardConfig_Unset_LeavesZeroValues(t *testing.T) {
-	cfg, file, err := resolveForwardConfig(envFrom(nil))
+	cfg, file, err := resolveForwardConfig(envFrom(nil), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -446,7 +445,7 @@ func TestResolveForwardConfig_AllSet_ParsesEveryField(t *testing.T) {
 		"OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN":      "backend-secret",
 		"OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT": "5s",
 		"OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS": "12",
-	}))
+	}), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -562,7 +561,7 @@ func TestResolveForwardConfig_AuthToken(t *testing.T) {
 			for k, v := range tt.env {
 				env[k] = v
 			}
-			cfg, file, err := resolveForwardConfig(envFrom(env))
+			cfg, file, err := resolveForwardConfig(envFrom(env), nil)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected an error, got nil")
@@ -782,7 +781,7 @@ func TestResolveForwardConfig_KeyFileReread_BadKeyKeepsLastGoodKey(t *testing.T)
 	cfg, file, err := resolveForwardConfig(envFrom(map[string]string{
 		"OTHERLODE_COLLECTOR_FORWARD_URL":             "http://backend.example.com",
 		"OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE": path,
-	}))
+	}), nil)
 	if err != nil {
 		t.Fatalf("resolveForwardConfig: %v", err)
 	}
@@ -804,7 +803,7 @@ func TestResolveForwardConfig_BadValues_Error(t *testing.T) {
 		"OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT": "10",
 		"OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS": "0",
 	} {
-		if _, _, err := resolveForwardConfig(envFrom(map[string]string{name: value})); err == nil {
+		if _, _, err := resolveForwardConfig(envFrom(map[string]string{name: value}), nil); err == nil {
 			t.Errorf("%s=%q: expected an error, got nil", name, value)
 		}
 	}
@@ -812,7 +811,7 @@ func TestResolveForwardConfig_BadValues_Error(t *testing.T) {
 
 func TestResolveForwardConfig_BadMaxConcurrentForwards_Error(t *testing.T) {
 	for _, value := range []string{"0", "-1", "many", "1.5"} {
-		_, _, err := resolveForwardConfig(envFrom(map[string]string{"OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS": value}))
+		_, _, err := resolveForwardConfig(envFrom(map[string]string{"OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS": value}), nil)
 		if err == nil || !strings.Contains(err.Error(), "OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS") {
 			t.Errorf("value %q: error = %v, want one naming the variable", value, err)
 		}
@@ -824,13 +823,13 @@ func TestResolveForwardConfig_BadMaxConcurrentForwards_Error(t *testing.T) {
 // the time one request has.
 func TestResolveForwardConfig_RequestTimeoutNotBelowTheBudget_Error(t *testing.T) {
 	for _, value := range []string{requestBudget.String(), (requestBudget + time.Second).String(), "15s", "1h"} {
-		_, _, err := resolveForwardConfig(envFrom(map[string]string{"OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT": value}))
+		_, _, err := resolveForwardConfig(envFrom(map[string]string{"OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT": value}), nil)
 		if err == nil || !strings.Contains(err.Error(), "OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT") {
 			t.Errorf("value %q: error = %v, want one naming the variable", value, err)
 		}
 	}
 	below := (requestBudget - time.Millisecond).String()
-	if _, _, err := resolveForwardConfig(envFrom(map[string]string{"OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT": below})); err != nil {
+	if _, _, err := resolveForwardConfig(envFrom(map[string]string{"OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT": below}), nil); err != nil {
 		t.Errorf("value %q: unexpected error %v", below, err)
 	}
 }
@@ -848,7 +847,7 @@ func TestResolveForwardConfig_RemovedQueueSettings_AreIgnored(t *testing.T) {
 		"OTHERLODE_COLLECTOR_FORWARD_RETRY_INITIAL_INTERVAL": "soon",
 		"OTHERLODE_COLLECTOR_FORWARD_RETRY_MAX_INTERVAL":     "0s",
 		"OTHERLODE_COLLECTOR_FORWARD_RETRY_MAX_ELAPSED_TIME": "-5m",
-	}))
+	}), nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -957,13 +956,11 @@ func TestResolveRedaction_AllLiteralsGarbage_Errors(t *testing.T) {
 // processor.CheckSecret.
 const testRedactSecret = "redact-secret-0123456789abcdef-0123456789"
 
-func TestResolveRedactionSecret(t *testing.T) {
+func TestReadRedactionSecret(t *testing.T) {
 	oneSecret := writeTokenFile(t, "# redaction secret\n  "+testRedactSecret+"  \n\n")
 	twoSecrets := writeTokenFile(t, testRedactSecret+"\n"+testRedactSecret+"x\n")
 	shortSecret := writeTokenFile(t, "short\n")
 	missing := filepath.Join(t.TempDir(), "missing")
-	agentToken := strings.Repeat("a", processor.MinSecretBytes)
-	forwardKey := strings.Repeat("f", processor.MinSecretBytes)
 
 	tests := map[string]struct {
 		env       map[string]string
@@ -1029,20 +1026,10 @@ func TestResolveRedactionSecret(t *testing.T) {
 			redacting: true,
 			errHas:    "control character at byte 10",
 		},
-		"equals an agent auth token": {
-			env:       map[string]string{"OTHERLODE_COLLECTOR_REDACT_SECRET": agentToken},
-			redacting: true,
-			errHas:    "equals an agent auth token",
-		},
-		"equals the forward key": {
-			env:       map[string]string{"OTHERLODE_COLLECTOR_REDACT_SECRET": forwardKey},
-			redacting: true,
-			errHas:    "equals the forward key",
-		},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			got, err := resolveRedactionSecret(envFrom(tt.env), tt.redacting, auth.NewTokenSet([]string{agentToken}), forwardKey)
+			got, err := readRedactionSecret(envFrom(tt.env), tt.redacting)
 			if tt.errHas != "" {
 				if err == nil {
 					t.Fatalf("got secret %q, want an error containing %q", got, tt.errHas)
@@ -1063,4 +1050,166 @@ func TestResolveRedactionSecret(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResolveAuthTokens_SecretEqualsToken_StartupRefused(t *testing.T) {
+	secret := []byte(testRedactSecret)
+	other := strings.Repeat("a", processor.MinSecretBytes)
+	for name, tt := range map[string]struct {
+		env    map[string]string
+		secret []byte
+		errHas string
+	}{
+		"variable list holds the secret": {
+			env:    map[string]string{"OTHERLODE_COLLECTOR_AUTH_TOKEN": other + ", " + testRedactSecret},
+			secret: secret,
+			errHas: "OTHERLODE_COLLECTOR_AUTH_TOKEN: the list holds the redaction secret, which equals an agent auth token",
+		},
+		"file holds the secret": {
+			env:    map[string]string{"OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE": writeTokenFile(t, other+"\n"+testRedactSecret+"\n")},
+			secret: secret,
+			errHas: "OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE: ",
+		},
+		"variable without the secret": {
+			env:    map[string]string{"OTHERLODE_COLLECTOR_AUTH_TOKEN": other},
+			secret: secret,
+		},
+		"redaction off": {
+			env: map[string]string{"OTHERLODE_COLLECTOR_AUTH_TOKEN": testRedactSecret},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := resolveAuthTokens(envFrom(tt.env), tt.secret)
+			if tt.errHas == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.errHas) || !strings.Contains(err.Error(), "equals an agent auth token") {
+				t.Fatalf("error = %v, want one containing %q and the agent auth token wording", err, tt.errHas)
+			}
+			if strings.Contains(err.Error(), testRedactSecret) {
+				t.Fatalf("error %q quotes the secret", err)
+			}
+		})
+	}
+}
+
+func TestResolveForwardConfig_SecretEqualsKey_StartupRefused(t *testing.T) {
+	secret := []byte(testRedactSecret)
+	for name, tt := range map[string]struct {
+		env    map[string]string
+		secret []byte
+		errHas string
+	}{
+		"variable holds the secret": {
+			env:    map[string]string{"OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN": " " + testRedactSecret + " "},
+			secret: secret,
+			errHas: "OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN: ",
+		},
+		"file holds the secret": {
+			env:    map[string]string{"OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE": writeTokenFile(t, testRedactSecret+"\n")},
+			secret: secret,
+			errHas: "OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE: ",
+		},
+		"variable without the secret": {
+			env:    map[string]string{"OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN": "backend-key"},
+			secret: secret,
+		},
+		"redaction off": {
+			env: map[string]string{"OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN": testRedactSecret},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			env := map[string]string{"OTHERLODE_COLLECTOR_FORWARD_URL": "http://backend.example.com"}
+			for k, v := range tt.env {
+				env[k] = v
+			}
+			_, _, err := resolveForwardConfig(envFrom(env), tt.secret)
+			if tt.errHas == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.errHas) || !strings.Contains(err.Error(), "equals the forward key") {
+				t.Fatalf("error = %v, want one containing %q and the forward key wording", err, tt.errHas)
+			}
+			if strings.Contains(err.Error(), testRedactSecret) {
+				t.Fatalf("error %q quotes the secret", err)
+			}
+		})
+	}
+}
+
+func TestAuthTokenFileReread_HoldsRedactionSecret_KeepsLastGoodTokens(t *testing.T) {
+	path := writeTokenFile(t, "old-token\n")
+	tokens, file, err := resolveAuthTokens(envFrom(map[string]string{"OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE": path}), []byte(testRedactSecret))
+	if err != nil {
+		t.Fatalf("resolveAuthTokens: %v", err)
+	}
+	watchFile(t, file)
+
+	failuresBefore := metrics.TokenReloadFailures.Value("auth")
+	replaceTokenFile(t, path, "new-token\n"+testRedactSecret+"\n")
+	waitUntil(t, 2*time.Second, func() bool { return metrics.TokenReloadFailures.Value("auth") > failuresBefore })
+	if tokens.Matches(testRedactSecret) || tokens.Matches("new-token") || !tokens.Matches("old-token") {
+		t.Fatal("the reload that held the secret changed the accepted tokens")
+	}
+
+	replaceTokenFile(t, path, "new-token\n")
+	waitUntil(t, 2*time.Second, func() bool { return tokens.Matches("new-token") })
+	if tokens.Matches("old-token") {
+		t.Fatal("a reload without the secret did not replace the tokens")
+	}
+}
+
+func TestAuthTokenFileReread_RedactionOff_AppliesAnySet(t *testing.T) {
+	path := writeTokenFile(t, "old-token\n")
+	tokens, file, err := resolveAuthTokens(envFrom(map[string]string{"OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE": path}), nil)
+	if err != nil {
+		t.Fatalf("resolveAuthTokens: %v", err)
+	}
+	watchFile(t, file)
+
+	replaceTokenFile(t, path, testRedactSecret+"\n")
+	waitUntil(t, 2*time.Second, func() bool { return tokens.Matches(testRedactSecret) })
+}
+
+func TestForwardKeyFileReread_HoldsRedactionSecret_KeepsLastGoodKey(t *testing.T) {
+	path := writeTokenFile(t, "key-1\n")
+	cfg, file, err := resolveForwardConfig(envFrom(map[string]string{
+		"OTHERLODE_COLLECTOR_FORWARD_URL":             "http://backend.example.com",
+		"OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE": path,
+	}), []byte(testRedactSecret))
+	if err != nil {
+		t.Fatalf("resolveForwardConfig: %v", err)
+	}
+	watchFile(t, file)
+
+	failuresBefore := metrics.TokenReloadFailures.Value("forward")
+	replaceTokenFile(t, path, testRedactSecret+"\n")
+	waitUntil(t, 2*time.Second, func() bool { return metrics.TokenReloadFailures.Value("forward") > failuresBefore })
+	if got := cfg.AuthToken.Token(); got != "key-1" {
+		t.Fatalf("key after the reload that held the secret = %q, want key-1", got)
+	}
+
+	replaceTokenFile(t, path, "key-2\n")
+	waitUntil(t, 2*time.Second, func() bool { return cfg.AuthToken.Token() == "key-2" })
+}
+
+func TestForwardKeyFileReread_RedactionOff_AppliesAnyKey(t *testing.T) {
+	path := writeTokenFile(t, "key-1\n")
+	cfg, file, err := resolveForwardConfig(envFrom(map[string]string{
+		"OTHERLODE_COLLECTOR_FORWARD_URL":             "http://backend.example.com",
+		"OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE": path,
+	}), nil)
+	if err != nil {
+		t.Fatalf("resolveForwardConfig: %v", err)
+	}
+	watchFile(t, file)
+
+	replaceTokenFile(t, path, testRedactSecret+"\n")
+	waitUntil(t, 2*time.Second, func() bool { return cfg.AuthToken.Token() == testRedactSecret })
 }

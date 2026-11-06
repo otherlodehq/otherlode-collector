@@ -696,7 +696,7 @@ func deltaStatus(t *testing.T, serverURL, token string) int {
 }
 
 func TestRegisterRoutes_TokenList_AnyListedTokenPasses(t *testing.T) {
-	tokens, _, err := resolveAuthTokens(envFrom(map[string]string{"OTHERLODE_COLLECTOR_AUTH_TOKEN": "old-token, new-token"}))
+	tokens, _, err := resolveAuthTokens(envFrom(map[string]string{"OTHERLODE_COLLECTOR_AUTH_TOKEN": "old-token, new-token"}), nil)
 	if err != nil {
 		t.Fatalf("resolveAuthTokens: %v", err)
 	}
@@ -721,7 +721,7 @@ func TestRegisterRoutes_TokenList_AnyListedTokenPasses(t *testing.T) {
 
 func TestRegisterRoutes_AuthTokenFile_ReReadChangesAcceptedTokens(t *testing.T) {
 	path := writeTokenFile(t, "old-token\n")
-	tokens, file, err := resolveAuthTokens(envFrom(map[string]string{"OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE": path}))
+	tokens, file, err := resolveAuthTokens(envFrom(map[string]string{"OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE": path}), nil)
 	if err != nil {
 		t.Fatalf("resolveAuthTokens: %v", err)
 	}
@@ -767,7 +767,7 @@ func TestRegisterRoutes_ForwardTokenFile_NextRequestSendsReloadedKey(t *testing.
 	cfg, file, err := resolveForwardConfig(envFrom(map[string]string{
 		"OTHERLODE_COLLECTOR_FORWARD_URL":             backend.URL,
 		"OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE": path,
-	}))
+	}), nil)
 	if err != nil {
 		t.Fatalf("resolveForwardConfig: %v", err)
 	}
