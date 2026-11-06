@@ -131,11 +131,9 @@ type Handler struct {
 	// sinkLog limits the log lines for sink failures. See sinkFailed.
 	sinkLog *ratelog.Limiter
 
-	// busyMu guards busyLogged and busyUnlogged. See logBusy.
-	busyMu       sync.Mutex
-	busyLogEvery time.Duration
-	busyLogged   time.Time
-	busyUnlogged int
+	// refuseLog limits the log lines for requests refused before a decode
+	// slot was taken, one key per kind of line. See refuse.
+	refuseLog *ratelog.Limiter
 }
 
 // maxSlotWait is how long a request waits for a decode slot. It is shorter
@@ -144,8 +142,7 @@ type Handler struct {
 // so a slow body upload can still use up the rest.
 const maxSlotWait = 5 * time.Second
 
-// busyLogInterval is the shortest gap between two log lines for requests
-// refused because no decode slot came free.
+// busyLogInterval is the shortest gap between two log lines of one kind.
 const busyLogInterval = time.Minute
 
 // HandlerOption configures a Handler. See NewHandler.
@@ -168,8 +165,10 @@ type HandlerOption func(*Handler)
 // one, for the slot wait (see WithSlotWait) or the time left in its
 // budget (see WithRequestBudget), whichever is shorter. If its context
 // ends first, the Handler counts the request as rejected with reason
-// "canceled". If the wait ends first, it counts reason "busy" and logs a
-// warning at most once a minute. Either way the Handler answers 503 with
+// "canceled". If its budget had already ended before the wait began, it
+// counts reason "timeout" and logs a warning at most once a minute. If the
+// wait ends first, it counts reason "busy" and logs a warning at most once
+// a minute. Either way the Handler answers 503 with
 // "Retry-After: 1", since a handler that writes nothing makes net/http
 // send 200.
 func WithMaxConcurrentDecodes(n int) HandlerOption {
@@ -231,7 +230,7 @@ func NewHandler(sink Sink, logger *slog.Logger, opts ...HandlerOption) *Handler 
 	if logger == nil {
 		logger = slog.Default()
 	}
-	h := &Handler{sink: sink, logger: logger, slotWait: maxSlotWait, busyLogEvery: busyLogInterval, sinkLog: ratelog.New(busyLogInterval, time.Now)}
+	h := &Handler{sink: sink, logger: logger, slotWait: maxSlotWait, sinkLog: ratelog.New(busyLogInterval, time.Now), refuseLog: ratelog.New(busyLogInterval, time.Now)}
 	for _, opt := range opts {
 		opt(h)
 	}
@@ -615,13 +614,29 @@ func (h *Handler) withinLimit(w http.ResponseWriter, body []byte, kind payloadKi
 	return false
 }
 
+// admission is the outcome of asking for a decode slot.
+type admission int
+
+const (
+	// acquired means the request holds a slot.
+	acquired admission = iota
+	// busy means the slot wait ended with every slot taken.
+	busy
+	// canceled means the client's own context ended.
+	canceled
+	// timeout means the request budget had ended before the wait began,
+	// while the client was still connected.
+	timeout
+)
+
 // acquire waits for a free decode slot. Without a cap it returns true at
 // once. It reports false when it took no slot, after answering 503 with
 // "Retry-After: 1". ctx carries the request budget, and requestCtx is the
 // client's own context. The wait is the slot wait or the time left in ctx,
 // whichever is shorter. If requestCtx ends first, it counts reason
-// "canceled". If the wait ends first, it counts reason "busy" and logs it
-// through logBusy.
+// "canceled". If ctx had ended before the wait began, it counts reason
+// "timeout". If the wait ends first, it counts reason "busy". The refusal
+// is logged through refuse.
 func (h *Handler) acquire(ctx, requestCtx context.Context, w http.ResponseWriter, kind payloadKind) bool {
 	if h.slots == nil {
 		return true
@@ -630,49 +645,68 @@ func (h *Handler) acquire(ctx, requestCtx context.Context, w http.ResponseWriter
 	if deadline, ok := ctx.Deadline(); ok {
 		wait = min(wait, time.Until(deadline))
 	}
-	if ctx.Err() == nil {
-		timer := time.NewTimer(max(wait, 0))
-		defer timer.Stop()
-		select {
-		case h.slots <- struct{}{}:
-			return true
-		case <-ctx.Done():
-		case <-timer.C:
-		}
+	outcome := h.admit(ctx, requestCtx, wait)
+	if outcome == acquired {
+		return true
 	}
-	w.Header().Set("Retry-After", "1")
-	if requestCtx.Err() != nil {
-		metrics.IngestRejected.Inc(kind.label, "canceled")
-	} else {
-		metrics.IngestRejected.Inc(kind.label, "busy")
-		h.logBusy(kind, max(wait, 0))
-	}
-	w.WriteHeader(http.StatusServiceUnavailable)
+	h.refuse(w, kind, outcome, max(wait, 0))
 	return false
 }
 
-// logBusy logs a request refused because no decode slot came free. Such
-// refusals come in bursts while the collector is overloaded, so it writes
-// at most one line per busyLogEvery. The line counts the refusals since
-// the previous line that wrote none of their own. wait is the time the
-// request waited.
-func (h *Handler) logBusy(kind payloadKind, wait time.Duration) {
-	h.busyMu.Lock()
-	now := time.Now()
-	if !h.busyLogged.IsZero() && now.Sub(h.busyLogged) < h.busyLogEvery {
-		h.busyUnlogged++
-		h.busyMu.Unlock()
-		return
+// admit decides the admission outcome. It takes a slot only for acquired.
+// wait is at most the time left in ctx, so a wait of zero or less means the
+// budget has ended even before ctx reports it.
+func (h *Handler) admit(ctx, requestCtx context.Context, wait time.Duration) admission {
+	if requestCtx.Err() != nil {
+		return canceled
 	}
-	unlogged := h.busyUnlogged
-	h.busyLogged = now
-	h.busyUnlogged = 0
-	h.busyMu.Unlock()
-	h.logger.Warn("refusing "+kind.name+": no decode slot came free",
-		"wait", wait.String(),
-		"max_concurrent_decodes", cap(h.slots),
-		"unlogged_busy_refusals", unlogged,
-	)
+	if ctx.Err() != nil || wait <= 0 {
+		return timeout
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case h.slots <- struct{}{}:
+		return acquired
+	case <-ctx.Done():
+	case <-timer.C:
+	}
+	if requestCtx.Err() != nil {
+		return canceled
+	}
+	return busy
+}
+
+// refuse answers 503 with "Retry-After: 1", counts the refusal under the
+// reason that outcome names, and logs it. Such refusals come in bursts while
+// the collector is overloaded or its clients are slow, so it writes at most
+// one line per busyLogInterval for each of busy and timeout. The line
+// counts the refusals since the previous line. wait is the time the request
+// waited.
+func (h *Handler) refuse(w http.ResponseWriter, kind payloadKind, outcome admission, wait time.Duration) {
+	w.Header().Set("Retry-After", "1")
+	switch outcome {
+	case canceled:
+		metrics.IngestRejected.Inc(kind.label, "canceled")
+	case timeout:
+		metrics.IngestRejected.Inc(kind.label, "timeout")
+		if unlogged, ok := h.refuseLog.Allow("timeout"); ok {
+			h.logger.Warn("refusing "+kind.name+": the request used its time budget before decoding started",
+				"budget", h.budget.String(),
+				"unlogged_timeout_refusals", unlogged,
+			)
+		}
+	default:
+		metrics.IngestRejected.Inc(kind.label, "busy")
+		if unlogged, ok := h.refuseLog.Allow("busy"); ok {
+			h.logger.Warn("refusing "+kind.name+": no decode slot came free",
+				"wait", wait.String(),
+				"max_concurrent_decodes", cap(h.slots),
+				"unlogged_busy_refusals", unlogged,
+			)
+		}
+	}
+	w.WriteHeader(http.StatusServiceUnavailable)
 }
 
 // free frees the slot that a successful acquire took.

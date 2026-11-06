@@ -13,7 +13,8 @@ var (
 	// Reasons: content_type, too_large, read, malformed, invalid, sink,
 	// canceled (the request context ended while it waited for a decode
 	// slot; the answer was 503), busy (no decode slot came free in time;
-	// the answer was 503),
+	// the answer was 503), timeout (the request budget ended before the wait
+	// for a decode slot began; the answer was 503),
 	// too_many_elements (the body held more elements than its payload's
 	// limit; the answer was 413).
 	IngestRejected = NewCounter("otherlode_collector_ingest_rejected_total",

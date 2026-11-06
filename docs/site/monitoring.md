@@ -83,6 +83,7 @@ The `reason` label on `ingest_rejected_total` takes these values:
 | `sink` | `503`, `429` or another `4xx` | Otherlode did not store the payload, so the collector did not answer `202`. It answers `429` or another `4xx` when Otherlode did, and `503` with `Retry-After: 5` for every other failure. `forward_failed_total` has the cause |
 | `busy` | `503` | No decode slot came free within 1 second. The response carries `Retry-After: 1` |
 | `canceled` | `503` | The client disconnected while it waited for a decode slot |
+| `timeout` | `503` | The request used its 9-second budget before decoding started, usually because the body arrived slowly. The response carries `Retry-After: 1` |
 
 A `401` or `429` never reaches the ingest counters. They count in `auth_rejected_total` and `rate_limited_total` only. For the limits behind `too_large`, `too_many_elements`, `busy` and `rate_limited_total`, see [rate and memory limits](limits).
 
@@ -190,6 +191,7 @@ Without `OTHERLODE_COLLECTOR_FORWARD_URL`, the collector logs every payload it r
 | `WARN` | `dropped fields this collector does not know; ...` | Redaction dropped unknown fields. It logs once per run |
 | `WARN` | `refusing delta batch with too many elements`, or the same with `manifest`, `static baseline` or `class listing` | A payload held more elements than the limit for its kind and got `413`. The line has the `limit` and the body size in `bytes` |
 | `WARN` | `refusing delta batch: no decode slot came free`, or the same with `manifest`, `static baseline` or `class listing` | A request waited 1 second for a decode slot and got `503`. At most one line a minute. `unlogged_busy_refusals` counts the refusals since the previous line that got no line of their own |
+| `WARN` | `refusing delta batch: the request used its time budget before decoding started`, or the same with `manifest`, `static baseline` or `class listing` | The body took the whole request budget to arrive and the request got `503`. The line has the `budget`. At most one line a minute. `unlogged_timeout_refusals` counts the refusals since the previous line |
 | `WARN` | `agent environment does not match the collector's configured environment` | The first payload of a service that names a given environment other than the collector's. Later payloads of that service with that environment log at `DEBUG` |
 | `WARN` | `agent namespace does not match the collector's configured namespace` | The same, for the service namespace |
 | `ERROR` | `sink rejected delta batch`, `sink rejected manifest`, `sink rejected static baseline` or `sink rejected class listing` | The collector answered `503` because Otherlode did not store the payload. The line has the `error`, the `reason` (a value of `forward_failed_total`) and `unlogged_sink_failures`. At most one line a minute for each payload type and reason, while the counter counts every failure |
