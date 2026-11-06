@@ -1518,6 +1518,8 @@ func TestHandler_MaxConcurrentDecodes_BusyRefusalsLogAtMostOncePerInterval(t *te
 	var logs bytes.Buffer
 	h := NewHandler(sink, slog.New(slog.NewJSONHandler(&logs, nil)), WithMaxConcurrentDecodes(1))
 	h.slotWait = 10 * time.Millisecond
+	now := time.Unix(1000, 0)
+	h.refuseLog = ratelog.New(busyLogInterval, func() time.Time { return now })
 	h.Register(mux)
 
 	first := make(chan struct{})
@@ -1550,9 +1552,7 @@ func TestHandler_MaxConcurrentDecodes_BusyRefusalsLogAtMostOncePerInterval(t *te
 
 	// Once the interval has passed, the next refusal logs again and counts
 	// the two that wrote no line.
-	h.busyMu.Lock()
-	h.busyLogged = time.Now().Add(-h.busyLogEvery)
-	h.busyMu.Unlock()
+	now = now.Add(busyLogInterval)
 	serveWithin(t, mux, httptest.NewRecorder(), manifestRequest(context.Background(), t))
 	lines = busyLines()
 	if len(lines) != 2 {
@@ -1979,5 +1979,158 @@ func TestHandler_MaxConcurrentDecodes_SlotFreedAfterRejection(t *testing.T) {
 	serveWithin(t, mux, rec, manifestRequest(context.Background(), t))
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status after a malformed request = %d, want %d", rec.Code, http.StatusAccepted)
+	}
+}
+
+// TestHandler_ExpiredBudget_CountsTimeoutNotBusy pins that a request whose
+// budget ended while the body arrived, with decode slots free, is counted
+// "timeout" and logged as such, and that no busy line is written.
+func TestHandler_ExpiredBudget_CountsTimeoutNotBusy(t *testing.T) {
+	mux := http.NewServeMux()
+	var logs bytes.Buffer
+	h := NewHandler(&ctxSink{fn: func(context.Context) ([]Notice, error) { return nil, nil }},
+		slog.New(slog.NewJSONHandler(&logs, nil)), WithMaxConcurrentDecodes(4), WithRequestBudget(20*time.Millisecond))
+	now := time.Unix(1000, 0)
+	h.refuseLog = ratelog.New(busyLogInterval, func() time.Time { return now })
+	h.Register(mux)
+
+	timeoutBefore := metrics.IngestRejected.Value("manifest", "timeout")
+	busyBefore := metrics.IngestRejected.Value("manifest", "busy")
+	serve := func() *httptest.ResponseRecorder {
+		req := manifestRequest(context.Background(), t)
+		req.Body = io.NopCloser(&slowBody{delay: 60 * time.Millisecond, r: req.Body})
+		rec := httptest.NewRecorder()
+		serveWithin(t, mux, rec, req)
+		return rec
+	}
+	rec := serve()
+	serve()
+	serve()
+
+	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") != "1" {
+		t.Errorf("status = %d, Retry-After = %q, want 503 and 1", rec.Code, rec.Header().Get("Retry-After"))
+	}
+	if got := metrics.IngestRejected.Value("manifest", "timeout"); got != timeoutBefore+3 {
+		t.Errorf("IngestRejected(manifest, timeout) = %d, want %d", got, timeoutBefore+3)
+	}
+	if got := metrics.IngestRejected.Value("manifest", "busy"); got != busyBefore {
+		t.Errorf("IngestRejected(manifest, busy) = %d, want %d", got, busyBefore)
+	}
+	if lines := logLines(&logs, "no decode slot came free"); len(lines) != 0 {
+		t.Errorf("busy lines = %q, want none", lines)
+	}
+	lines := logLines(&logs, "refusing manifest: the request used its time budget before decoding started")
+	if len(lines) != 1 {
+		t.Fatalf("timeout lines = %q, want 1", lines)
+	}
+	if !strings.Contains(lines[0], `"level":"WARN"`) || !strings.Contains(lines[0], `"budget":"20ms"`) || !strings.Contains(lines[0], `"unlogged_timeout_refusals":0`) {
+		t.Errorf("timeout line = %s, want a WARN with budget 20ms and unlogged_timeout_refusals 0", lines[0])
+	}
+
+	now = now.Add(busyLogInterval)
+	serve()
+	lines = logLines(&logs, "the request used its time budget before decoding started")
+	if len(lines) != 2 || !strings.Contains(lines[1], `"unlogged_timeout_refusals":2`) {
+		t.Errorf("timeout lines after the interval = %q, want 2 with unlogged_timeout_refusals 2 on the second", lines)
+	}
+}
+
+// TestHandler_SlotsFull_BudgetRemaining_CountsBusy pins that a request that
+// finds every slot taken and waits for one is counted "busy", not "timeout".
+func TestHandler_SlotsFull_BudgetRemaining_CountsBusy(t *testing.T) {
+	sink := newGateSink()
+	mux := http.NewServeMux()
+	NewHandler(sink, nil, WithMaxConcurrentDecodes(1), WithSlotWait(30*time.Millisecond), WithRequestBudget(time.Hour)).Register(mux)
+
+	first := make(chan struct{})
+	go func() {
+		mux.ServeHTTP(httptest.NewRecorder(), manifestRequest(context.Background(), t))
+		close(first)
+	}()
+	<-sink.entered
+
+	busyBefore := metrics.IngestRejected.Value("manifest", "busy")
+	timeoutBefore := metrics.IngestRejected.Value("manifest", "timeout")
+	rec := httptest.NewRecorder()
+	serveWithin(t, mux, rec, manifestRequest(context.Background(), t))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+	if got := metrics.IngestRejected.Value("manifest", "busy"); got != busyBefore+1 {
+		t.Errorf("IngestRejected(manifest, busy) = %d, want %d", got, busyBefore+1)
+	}
+	if got := metrics.IngestRejected.Value("manifest", "timeout"); got != timeoutBefore {
+		t.Errorf("IngestRejected(manifest, timeout) = %d, want %d", got, timeoutBefore)
+	}
+
+	sink.gate <- struct{}{}
+	<-first
+}
+
+// TestHandler_ClientCanceled_CountsCanceled pins that a request whose own
+// context ended is counted "canceled" while slots are free.
+func TestHandler_ClientCanceled_CountsCanceled(t *testing.T) {
+	mux := http.NewServeMux()
+	NewHandler(&ctxSink{fn: func(context.Context) ([]Notice, error) { return nil, nil }}, nil,
+		WithMaxConcurrentDecodes(4), WithRequestBudget(time.Hour)).Register(mux)
+
+	canceledBefore := metrics.IngestRejected.Value("manifest", "canceled")
+	busyBefore := metrics.IngestRejected.Value("manifest", "busy")
+	timeoutBefore := metrics.IngestRejected.Value("manifest", "timeout")
+	ctx, cancel := context.WithCancel(context.Background())
+	req := manifestRequest(ctx, t)
+	req.Body = io.NopCloser(&cancelBody{cancel: cancel, r: req.Body})
+	rec := httptest.NewRecorder()
+	serveWithin(t, mux, rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+	if got := metrics.IngestRejected.Value("manifest", "canceled"); got != canceledBefore+1 {
+		t.Errorf("IngestRejected(manifest, canceled) = %d, want %d", got, canceledBefore+1)
+	}
+	if got := metrics.IngestRejected.Value("manifest", "busy"); got != busyBefore {
+		t.Errorf("IngestRejected(manifest, busy) = %d, want %d", got, busyBefore)
+	}
+	if got := metrics.IngestRejected.Value("manifest", "timeout"); got != timeoutBefore {
+		t.Errorf("IngestRejected(manifest, timeout) = %d, want %d", got, timeoutBefore)
+	}
+}
+
+type cancelBody struct {
+	cancel context.CancelFunc
+	r      io.Reader
+}
+
+func (b *cancelBody) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p)
+	b.cancel()
+	return n, err
+}
+
+// pastDeadlineCtx reports a deadline that has passed while Err is still
+// nil, as a context.WithDeadline does until its timer fires.
+type pastDeadlineCtx struct{ context.Context }
+
+func (pastDeadlineCtx) Deadline() (time.Time, bool) { return time.Now().Add(-time.Millisecond), true }
+
+// TestHandler_DeadlinePassedBeforeErr_CountsTimeout pins that a request
+// whose budget deadline has passed is refused as "timeout" with free
+// slots, even before its context reports the deadline.
+func TestHandler_DeadlinePassedBeforeErr_CountsTimeout(t *testing.T) {
+	h := NewHandler(&ctxSink{fn: func(context.Context) ([]Notice, error) { return nil, nil }},
+		slog.New(slog.NewJSONHandler(io.Discard, nil)), WithMaxConcurrentDecodes(4))
+	timeoutBefore := metrics.IngestRejected.Value("manifest", "timeout")
+	ctx := pastDeadlineCtx{context.Background()}
+	for range 50 {
+		rec := httptest.NewRecorder()
+		if h.acquire(ctx, context.Background(), rec, manifestKind) {
+			h.free()
+			t.Fatal("acquire took a slot after the deadline passed")
+		}
+	}
+	if got := metrics.IngestRejected.Value("manifest", "timeout"); got != timeoutBefore+50 {
+		t.Errorf("IngestRejected(manifest, timeout) = %d, want %d", got, timeoutBefore+50)
 	}
 }
