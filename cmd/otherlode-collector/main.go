@@ -9,6 +9,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -76,7 +78,18 @@ func main() {
 
 	addr := resolveAddr(os.Getenv("OTHERLODE_COLLECTOR_ADDR"))
 
-	authTokens, authFile, err := resolveAuthTokens(os.Getenv)
+	redactCfg, err := resolveRedaction(os.Getenv("OTHERLODE_COLLECTOR_REDACT_BLOCKED_VALUES"), os.Getenv("OTHERLODE_COLLECTOR_REDACT_ALL_LITERALS"))
+	if err != nil {
+		logger.Error(err.Error())
+		os.Exit(1)
+	}
+	redactCfg.Secret, err = readRedactionSecret(os.Getenv, redactCfg.Enabled())
+	if err != nil {
+		logger.Error(err.Error())
+		os.Exit(1)
+	}
+
+	authTokens, authFile, err := resolveAuthTokens(os.Getenv, redactCfg.Secret)
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)
@@ -108,7 +121,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	forwardCfg, forwardFile, err := resolveForwardConfig(os.Getenv)
+	forwardCfg, forwardFile, err := resolveForwardConfig(os.Getenv, redactCfg.Secret)
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)
@@ -121,21 +134,6 @@ func main() {
 	}
 
 	nsCfg, err := resolveNamespace(os.Getenv("OTHERLODE_COLLECTOR_SERVICE_NAMESPACE"), os.Getenv("OTHERLODE_COLLECTOR_SERVICE_NAMESPACE_ACTION"))
-	if err != nil {
-		logger.Error(err.Error())
-		os.Exit(1)
-	}
-
-	redactCfg, err := resolveRedaction(os.Getenv("OTHERLODE_COLLECTOR_REDACT_BLOCKED_VALUES"), os.Getenv("OTHERLODE_COLLECTOR_REDACT_ALL_LITERALS"))
-	if err != nil {
-		logger.Error(err.Error())
-		os.Exit(1)
-	}
-	var forwardKey string
-	if forwardCfg.AuthToken != nil {
-		forwardKey = forwardCfg.AuthToken.Token()
-	}
-	redactCfg.Secret, err = resolveRedactionSecret(os.Getenv, redactCfg.Enabled(), authTokens, forwardKey)
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)
@@ -257,13 +255,17 @@ func resolveLogLevel(raw string) (slog.Level, error) {
 // which the caller re-reads through the returned tokenfile.File. Setting
 // both is an error.
 //
+// A non-nil secret is the redaction secret. A token equal to it is an
+// error at startup and on each re-read of the file, since every agent
+// holds an auth token.
+//
 // It fails closed. With neither variable set, it is an error unless
 // OTHERLODE_COLLECTOR_INSECURE_NO_AUTH explicitly opts out, and then both
 // results are nil. OTHERLODE_COLLECTOR_INSECURE_NO_AUTH takes
 // strconv.ParseBool syntax. A value it cannot parse is an error even when
 // a token is set, so a typo cannot pass for "off". A token file that cannot be read or holds no token is
 // an error even with the opt-out, since the operator asked for that file.
-func resolveAuthTokens(getenv func(string) string) (*auth.TokenSet, *tokenfile.File, error) {
+func resolveAuthTokens(getenv func(string) string, secret []byte) (*auth.TokenSet, *tokenfile.File, error) {
 	raw := getenv("OTHERLODE_COLLECTOR_AUTH_TOKEN")
 	path := getenv("OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE")
 	insecureNoAuth := false
@@ -279,7 +281,9 @@ func resolveAuthTokens(getenv func(string) string) (*auth.TokenSet, *tokenfile.F
 
 	if path != "" {
 		tokens := new(auth.TokenSet)
-		file, err := tokenfile.Open(path, authFileLabel, tokenfile.AtLeastOne, tokens.Store)
+		check := allOf(tokenfile.AtLeastOne, notSecret(secret,
+			"the file holds the redaction secret, which equals an agent auth token that every agent holds; use a secret of its own"))
+		file, err := tokenfile.Open(path, authFileLabel, check, tokens.Store)
 		if err != nil {
 			return nil, nil, fmt.Errorf("OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE: %w", err)
 		}
@@ -289,6 +293,10 @@ func resolveAuthTokens(getenv func(string) string) (*auth.TokenSet, *tokenfile.F
 	if raw != "" {
 		list, err := parseTokenList(raw)
 		if err != nil {
+			return nil, nil, fmt.Errorf("OTHERLODE_COLLECTOR_AUTH_TOKEN: %w", err)
+		}
+		if err := notSecret(secret, "the list holds the redaction secret, which equals an agent auth token that every agent holds; "+
+			"use a secret of its own")(list); err != nil {
 			return nil, nil, fmt.Errorf("OTHERLODE_COLLECTOR_AUTH_TOKEN: %w", err)
 		}
 		return auth.NewTokenSet(list), nil, nil
@@ -424,7 +432,11 @@ func resolveIPv6Prefix(raw string) (int, error) {
 //
 // Setting either key variable without OTHERLODE_COLLECTOR_FORWARD_URL is an
 // error, since the operator meant to forward.
-func resolveForwardConfig(getenv func(string) string) (forward.Config, *tokenfile.File, error) {
+//
+// A non-nil secret is the redaction secret. A key equal to it is an error
+// at startup and on each re-read of the file, since the backend holds the
+// key.
+func resolveForwardConfig(getenv func(string) string, secret []byte) (forward.Config, *tokenfile.File, error) {
 	cfg := forward.Config{URL: getenv("OTHERLODE_COLLECTOR_FORWARD_URL")}
 
 	raw := getenv("OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN")
@@ -445,12 +457,18 @@ func resolveForwardConfig(getenv func(string) string) (forward.Config, *tokenfil
 	case path != "":
 		key := new(forwardKey)
 		var err error
-		if file, err = tokenfile.Open(path, forwardFileLabel, checkForwardKeys, key.store); err != nil {
+		check := allOf(checkForwardKeys, notSecret(secret,
+			"the file holds the redaction secret, which equals the forward key that the backend holds; use a secret of its own"))
+		if file, err = tokenfile.Open(path, forwardFileLabel, check, key.store); err != nil {
 			return forward.Config{}, nil, fmt.Errorf("OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE: %w", err)
 		}
 		cfg.AuthToken = key
 	case token != "":
 		if err := checkHeaderValue(token); err != nil {
+			return forward.Config{}, nil, fmt.Errorf("OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN: %w", err)
+		}
+		if err := notSecret(secret, "the value is the redaction secret, which equals the forward key that the backend holds; "+
+			"use a secret of its own")([]string{token}); err != nil {
 			return forward.Config{}, nil, fmt.Errorf("OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN: %w", err)
 		}
 		cfg.AuthToken = forward.StaticToken(token)
@@ -632,7 +650,41 @@ func resolveRedaction(blockedRaw, allLiteralsRaw string) (processor.RedactionCon
 	return cfg, nil
 }
 
-// resolveRedactionSecret returns the secret that keys the HMAC over branch
+// allOf returns a check that runs checks in order and returns the first
+// error.
+func allOf(checks ...func([]string) error) func([]string) error {
+	return func(tokens []string) error {
+		for _, check := range checks {
+			if err := check(tokens); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
+// notSecret returns a check that fails with message when a token equals
+// secret. A nil secret, which means redaction is off, accepts every token.
+// The comparison takes the same time for any token.
+func notSecret(secret []byte, message string) func([]string) error {
+	if secret == nil {
+		return func([]string) error { return nil }
+	}
+	want := sha256.Sum256(secret)
+	return func(tokens []string) error {
+		match := 0
+		for _, token := range tokens {
+			got := sha256.Sum256([]byte(token))
+			match |= subtle.ConstantTimeCompare(got[:], want[:])
+		}
+		if match == 1 {
+			return errors.New(message)
+		}
+		return nil
+	}
+}
+
+// readRedactionSecret returns the secret that keys the HMAC over branch
 // and site keys while redaction is on (ADR 0007).
 // OTHERLODE_COLLECTOR_REDACT_SECRET holds the secret, with spaces around it
 // trimmed. OTHERLODE_COLLECTOR_REDACT_SECRET_FILE names a file that holds
@@ -641,12 +693,10 @@ func resolveRedaction(blockedRaw, allLiteralsRaw string) (processor.RedactionCon
 // change every key from then on.
 //
 // It fails closed. With redacting true, a missing secret is an error, and
-// so is a secret that fails processor.CheckSecret. A secret equal to an
-// agent auth token or to forwardKey is an error, since every agent holds
-// the first and the backend holds the second. With redacting false, a set
+// so is a secret that fails processor.CheckSecret. With redacting false, a set
 // variable is an error: the operator meant to protect the keys, and
 // redaction is off. No error quotes the secret.
-func resolveRedactionSecret(getenv func(string) string, redacting bool, authTokens *auth.TokenSet, forwardKey string) ([]byte, error) {
+func readRedactionSecret(getenv func(string) string, redacting bool) ([]byte, error) {
 	const (
 		valueVar = "OTHERLODE_COLLECTOR_REDACT_SECRET"
 		fileVar  = "OTHERLODE_COLLECTOR_REDACT_SECRET_FILE"
@@ -689,12 +739,6 @@ func resolveRedactionSecret(getenv func(string) string, redacting bool, authToke
 
 	if err := processor.CheckSecret([]byte(secret)); err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
-	}
-	if authTokens != nil && authTokens.Matches(secret) {
-		return nil, errors.New(name + " equals an agent auth token, which every agent holds; use a secret of its own")
-	}
-	if forwardKey != "" && secret == forwardKey {
-		return nil, errors.New(name + " equals the forward key, which the backend holds; use a secret of its own")
 	}
 	return []byte(secret), nil
 }

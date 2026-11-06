@@ -118,7 +118,7 @@ The secret must follow these rules, or the collector does not start:
 
 - It is at least 32 bytes long.
 - It holds no control character, such as a tab or a newline inside the value.
-- It differs from every agent token and from the forward key. Every agent holds an agent token, and Otherlode holds the forward key, so neither can keep the keys secret.
+- It differs from every agent token and from the forward key. Every agent holds an agent token, and Otherlode holds the forward key, so neither can keep the keys secret. The collector also checks this each time it re-reads a token file. A file that holds the secret is refused like any other bad re-read: the collector keeps the last good tokens and counts the failure in `otherlode_collector_token_reload_failures_total`.
 - It is set only while blanking is on. A secret with both blanking settings off stops startup, because you meant to protect the keys and nothing would.
 
 Make a secret with `openssl`. It prints 64 hex characters, which is 64 bytes.
@@ -183,8 +183,10 @@ Each of these stops startup with exit code 1, as one `ERROR` line whose `msg` fi
 | The secret is too short | `OTHERLODE_COLLECTOR_REDACT_SECRET: the secret is 5 bytes, want at least 32` |
 | The secret holds a control character | `OTHERLODE_COLLECTOR_REDACT_SECRET: the secret holds a control character at byte 16` |
 | The variable holds only spaces | `OTHERLODE_COLLECTOR_REDACT_SECRET holds only spaces` |
-| The secret is an agent token | `OTHERLODE_COLLECTOR_REDACT_SECRET equals an agent auth token, which every agent holds; use a secret of its own` |
-| The secret is the forward key | `OTHERLODE_COLLECTOR_REDACT_SECRET equals the forward key, which the backend holds; use a secret of its own` |
+| The secret is an agent token | `OTHERLODE_COLLECTOR_AUTH_TOKEN: the list holds the redaction secret, which equals an agent auth token that every agent holds; use a secret of its own` |
+| A token file holds the secret | `OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE: /run/secrets/collector-tokens: the file holds the redaction secret, which equals an agent auth token that every agent holds; use a secret of its own` |
+| The secret is the forward key | `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN: the value is the redaction secret, which equals the forward key that the backend holds; use a secret of its own` |
+| The forward key file holds the secret | `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE: /run/secrets/forward-key: the file holds the redaction secret, which equals the forward key that the backend holds; use a secret of its own` |
 | A secret is set and blanking is off | `OTHERLODE_COLLECTOR_REDACT_SECRET or OTHERLODE_COLLECTOR_REDACT_SECRET_FILE is set but redaction is off; set OTHERLODE_COLLECTOR_REDACT_BLOCKED_VALUES or OTHERLODE_COLLECTOR_REDACT_ALL_LITERALS, or unset the secret variable` |
 | The file holds two secrets | `OTHERLODE_COLLECTOR_REDACT_SECRET_FILE: /run/secrets/otherlode-redact-secret: found 2 tokens, want exactly one` |
 

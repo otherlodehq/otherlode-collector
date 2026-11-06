@@ -120,11 +120,13 @@ While redaction is on, the collector needs a secret in `OTHERLODE_COLLECTOR_REDA
 | `OTHERLODE_COLLECTOR_REDACT_SECRET: the secret is 5 bytes, want at least 32` | Use a secret of at least 32 bytes. |
 | `OTHERLODE_COLLECTOR_REDACT_SECRET: the secret holds a control character at byte 16` | Remove the tab, newline or other control character. |
 | `OTHERLODE_COLLECTOR_REDACT_SECRET holds only spaces` | Set the secret or unset the variable. |
-| `OTHERLODE_COLLECTOR_REDACT_SECRET equals an agent auth token, which every agent holds; use a secret of its own` | Use a separate secret. |
-| `OTHERLODE_COLLECTOR_REDACT_SECRET equals the forward key, which the backend holds; use a secret of its own` | Use a separate secret. |
+| `OTHERLODE_COLLECTOR_AUTH_TOKEN: the list holds the redaction secret, which equals an agent auth token that every agent holds; use a secret of its own` | Use a separate secret. |
+| `OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE: /run/secrets/collector-tokens: the file holds the redaction secret, which equals an agent auth token that every agent holds; use a secret of its own` | Use a separate secret. |
+| `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN: the value is the redaction secret, which equals the forward key that the backend holds; use a secret of its own` | Use a separate secret. |
+| `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE: /run/secrets/forward-key: the file holds the redaction secret, which equals the forward key that the backend holds; use a secret of its own` | Use a separate secret. |
 | `OTHERLODE_COLLECTOR_REDACT_SECRET or OTHERLODE_COLLECTOR_REDACT_SECRET_FILE is set but redaction is off; set OTHERLODE_COLLECTOR_REDACT_BLOCKED_VALUES or OTHERLODE_COLLECTOR_REDACT_ALL_LITERALS, or unset the secret variable` | Turn redaction on, or unset the secret variable. `OTHERLODE_COLLECTOR_REDACT_ALL_LITERALS=false` counts as off. |
 
-A secret file gives the same lines under `OTHERLODE_COLLECTOR_REDACT_SECRET_FILE`, plus the first three file errors in the token table above. A file with no secret gives `found 0 tokens, want exactly one`, and a file with two gives `found 2 tokens, want exactly one`. [Replace branch and site keys](redaction#replace-branch-and-site-keys) has the rules.
+A secret file gives the same `OTHERLODE_COLLECTOR_REDACT_SECRET` lines under `OTHERLODE_COLLECTOR_REDACT_SECRET_FILE`, plus the first three file errors in the token table above. A file with no secret gives `found 0 tokens, want exactly one`, and a file with two gives `found 2 tokens, want exactly one`. [Replace branch and site keys](redaction#replace-branch-and-site-keys) has the rules.
 
 ### The collector cannot listen
 

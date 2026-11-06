@@ -68,7 +68,7 @@ At startup the collector has no earlier value to fall back on. A file that canno
 {"level":"ERROR","msg":"OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE: open /run/secrets/collector-tokens: no such file or directory"}
 ```
 
-After startup, a re-read that fails keeps the tokens the collector last read. A failure is a file that is missing, unreadable, not a regular file, over 1 MiB, or empty of tokens. The empty case includes a file that holds only comments. Keeping the last good tokens means a bad re-read cannot lock every agent out. Each failed re-read logs a warning and adds 1 to `otherlode_collector_token_reload_failures_total{file="auth"}`.
+After startup, a re-read that fails keeps the tokens the collector last read. A failure is a file that is missing, unreadable, not a regular file, over 1 MiB, or empty of tokens. The empty case includes a file that holds only comments. With redaction on, a file that holds the redaction secret is a failure too. Keeping the last good tokens means a bad re-read cannot lock every agent out. Each failed re-read logs a warning and adds 1 to `otherlode_collector_token_reload_failures_total{file="auth"}`.
 
 ```text
 {"level":"WARN","msg":"token file re-read failed; keeping the last good value","file":"auth","error":"open /run/secrets/collector-tokens: no such file or directory"}
@@ -132,7 +132,7 @@ OTHERLODE_COLLECTOR_FORWARD_URL=https://ingest.otherlode.dev
 OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE=/run/secrets/forward-key
 ```
 
-The collector re-reads a forward key file every 30 seconds and sends the new key from the next request on. A re-read that fails keeps the last good key. A file with no key, two or more keys, or a control character counts as a failure. It logs the same warning as for an agent file, with `"file":"forward"`, and adds 1 to `otherlode_collector_token_reload_failures_total{file="forward"}`. [Change a mounted secret](#change-a-mounted-secret) applies to this file too.
+The collector re-reads a forward key file every 30 seconds and sends the new key from the next request on. A re-read that fails keeps the last good key. A file with no key, two or more keys, or a control character counts as a failure. With redaction on, so does a file that holds the redaction secret. It logs the same warning as for an agent file, with `"file":"forward"`, and adds 1 to `otherlode_collector_token_reload_failures_total{file="forward"}`. [Change a mounted secret](#change-a-mounted-secret) applies to this file too.
 
 ```text
 {"level":"WARN","msg":"token file re-read failed; keeping the last good value","file":"forward","error":"/run/secrets/forward-key: found 2 tokens, want exactly one"}
