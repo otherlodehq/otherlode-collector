@@ -14,15 +14,15 @@ To forward to Otherlode, see [send data from your collector](/docs/server/connec
 
 ## The forward URL
 
-The collector reads the URL once, at startup. Any invalid value stops startup with an ERROR line that names the problem.
+The collector reads the URL once, at startup. Any invalid value stops startup with an ERROR line that names the variable and the problem. The line quotes the value, unless the value holds an `@`, since that part can be a password.
 
 | Rule | If the URL breaks it |
 |---|---|
-| The scheme is `http` or `https` | Startup stops with `forward URL "<url>": scheme must be http or https` |
-| The URL has a host | Startup stops with `forward URL "<url>": missing host` |
-| The URL has no user info | Startup stops with `forward URL must not contain user info` |
-| The URL has no query | Startup stops with `forward URL must not contain a query` |
-| The URL has no fragment | Startup stops with `forward URL must not contain a fragment` |
+| The scheme is `http` or `https` | Startup stops with `OTHERLODE_COLLECTOR_FORWARD_URL: forward URL "<url>": scheme must be http or https` |
+| The URL has a host | Startup stops with `OTHERLODE_COLLECTOR_FORWARD_URL: forward URL "<url>": missing host` |
+| The URL has no user info | Startup stops with `OTHERLODE_COLLECTOR_FORWARD_URL: forward URL must not contain user info` |
+| The URL has no query | Startup stops with `OTHERLODE_COLLECTOR_FORWARD_URL: forward URL must not contain a query` |
+| The URL has no fragment | Startup stops with `OTHERLODE_COLLECTOR_FORWARD_URL: forward URL must not contain a fragment` |
 
 The collector removes trailing slashes. A path is allowed and the collector keeps it. It appends the four ingest paths to the URL. With `https://gateway.example.com/otherlode`, the collector posts to `https://gateway.example.com/otherlode/v1/otherlode/deltas`.
 

@@ -57,11 +57,12 @@ When `OTHERLODE_COLLECTOR_FORWARD_URL` is set, it must be an `http` or `https` U
 
 | Log line | Fix |
 |---|---|
-| `forward URL "collector.example.com": scheme must be http or https` | Add the scheme. The line quotes the value you set. |
-| `forward URL "https://": missing host` | Add the host. |
-| `forward URL must not contain user info` | Remove `user:password@`. Use the forward key instead. |
-| `forward URL must not contain a query` | Remove everything from `?`. |
-| `forward URL must not contain a fragment` | Remove everything from `#`. |
+| `OTHERLODE_COLLECTOR_FORWARD_URL: forward URL "collector.example.com": scheme must be http or https` | Add the scheme. The line quotes the value you set, unless it holds an `@`. |
+| `OTHERLODE_COLLECTOR_FORWARD_URL: forward URL "https://": missing host` | Add the host. |
+| `OTHERLODE_COLLECTOR_FORWARD_URL: forward URL must not contain user info` | Remove `user:password@`. Use the forward key instead. |
+| `OTHERLODE_COLLECTOR_FORWARD_URL: forward URL: cannot parse` | The value holds an `@` and is not a URL the collector can read. Remove any `user:password@` and use the forward key instead. |
+| `OTHERLODE_COLLECTOR_FORWARD_URL: forward URL must not contain a query` | Remove everything from `?`. |
+| `OTHERLODE_COLLECTOR_FORWARD_URL: forward URL must not contain a fragment` | Remove everything from `#`. |
 
 The URL to use for Otherlode is on Otherlode's [connect page](/docs/server/connect). [Forwarding](forwarding) describes what the collector does with a payload once it has processed it.
 
@@ -131,16 +132,16 @@ A secret file gives the same `OTHERLODE_COLLECTOR_REDACT_SECRET` lines under `OT
 ### The collector cannot listen
 
 ```text
-{"time":"2026-10-10T17:32:27.534316+01:00","level":"ERROR","msg":"listen tcp :4319: bind: address already in use"}
+{"time":"2026-10-10T17:32:27.534316+01:00","level":"ERROR","msg":"OTHERLODE_COLLECTOR_ADDR: listen tcp :4319: bind: address already in use"}
 ```
 
 The collector opens the port after it has checked every other setting. If it cannot, it logs the cause and exits with code 1. It does not log `otherlode-collector listening`, which appears only once the port is open.
 
 | Log line | Cause and fix |
 |---|---|
-| `listen tcp :4319: bind: address already in use` | Another process holds the port. Stop it, or set `OTHERLODE_COLLECTOR_ADDR` to a free port. |
-| `listen tcp: address bad: missing port in address` | `OTHERLODE_COLLECTOR_ADDR` has no port. Use `host:port` or `:port`. |
-| `listen tcp: address 99999: invalid port` | The port is out of range. |
+| `OTHERLODE_COLLECTOR_ADDR: listen tcp :4319: bind: address already in use` | Another process holds the port. Stop it, or set `OTHERLODE_COLLECTOR_ADDR` to a free port. |
+| `OTHERLODE_COLLECTOR_ADDR: listen tcp: address bad: missing port in address` | `OTHERLODE_COLLECTOR_ADDR` has no port. Use `host:port` or `:port`. |
+| `OTHERLODE_COLLECTOR_ADDR: listen tcp: address 99999: invalid port` | The port is out of range. |
 
 The image runs as `nonroot` and listens on `:4319` by default. [Deploy the collector](deploy) covers the listen address.
 

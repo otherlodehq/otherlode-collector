@@ -209,7 +209,7 @@ func main() {
 func listen(addr string, logger *slog.Logger) (net.Listener, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("OTHERLODE_COLLECTOR_ADDR: %w", err)
 	}
 	logger.Info("otherlode-collector listening", "addr", addr, "version", version)
 	return ln, nil
@@ -430,6 +430,7 @@ func resolveIPv6Prefix(raw string) (int, error) {
 // variable and for each read of a file. For a file, the caller re-reads it
 // through the returned tokenfile.File.
 //
+// A set OTHERLODE_COLLECTOR_FORWARD_URL must pass forward.ValidateURL.
 // Setting either key variable without OTHERLODE_COLLECTOR_FORWARD_URL is an
 // error, since the operator meant to forward.
 //
@@ -438,6 +439,11 @@ func resolveIPv6Prefix(raw string) (int, error) {
 // key.
 func resolveForwardConfig(getenv func(string) string, secret []byte) (forward.Config, *tokenfile.File, error) {
 	cfg := forward.Config{URL: getenv("OTHERLODE_COLLECTOR_FORWARD_URL")}
+	if cfg.URL != "" {
+		if _, _, err := forward.ValidateURL(cfg.URL); err != nil {
+			return forward.Config{}, nil, fmt.Errorf("OTHERLODE_COLLECTOR_FORWARD_URL: %w", err)
+		}
+	}
 
 	raw := getenv("OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN")
 	token := strings.TrimSpace(raw)

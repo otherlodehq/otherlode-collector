@@ -241,7 +241,7 @@ var _ ingest.Sink = (*ForwardingSink)(nil)
 func NewForwardingSink(cfg Config) (*ForwardingSink, error) {
 	cfg = cfg.withDefaults()
 
-	baseURL, scheme, err := validateURL(cfg.URL)
+	baseURL, scheme, err := ValidateURL(cfg.URL)
 	if err != nil {
 		return nil, err
 	}
@@ -266,24 +266,40 @@ func NewForwardingSink(cfg Config) (*ForwardingSink, error) {
 	}, nil
 }
 
-// validateURL checks that raw is an absolute http or https URL with a
+// ValidateURL checks that raw is an absolute http or https URL with a
 // host and no query, fragment or user info. The sink joins paths onto the
 // URL by string concatenation, so a query or fragment would end up in the
 // middle of the request URL. User info would be logged as written. It
 // returns raw with trailing slashes removed, and the lowercase scheme.
-func validateURL(raw string) (base, scheme string, err error) {
+//
+// An error quotes raw only when raw holds no "@". A value with one can
+// hold a password, even one that does not parse as user info, such as
+// "user:pass@host" with no scheme, and a parse error can quote part of it,
+// so such a value that does not parse gets a fixed message.
+func ValidateURL(raw string) (base, scheme string, err error) {
 	if raw == "" {
 		return "", "", errors.New("forward URL is empty")
 	}
+	label := "forward URL"
+	if !strings.Contains(raw, "@") {
+		label = fmt.Sprintf("forward URL %q", raw)
+	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return "", "", fmt.Errorf("forward URL %q: %w", raw, err)
+		if strings.Contains(raw, "@") {
+			return "", "", errors.New("forward URL: cannot parse")
+		}
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
+		return "", "", fmt.Errorf("%s: %w", label, err)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", "", fmt.Errorf("forward URL %q: scheme must be http or https", raw)
+		return "", "", fmt.Errorf("%s: scheme must be http or https", label)
 	}
 	if u.Host == "" {
-		return "", "", fmt.Errorf("forward URL %q: missing host", raw)
+		return "", "", fmt.Errorf("%s: missing host", label)
 	}
 	if u.User != nil {
 		return "", "", errors.New("forward URL must not contain user info")
