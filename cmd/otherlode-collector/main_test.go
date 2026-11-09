@@ -1213,3 +1213,85 @@ func TestForwardKeyFileReread_RedactionOff_AppliesAnyKey(t *testing.T) {
 	replaceTokenFile(t, path, testRedactSecret+"\n")
 	waitUntil(t, 2*time.Second, func() bool { return cfg.AuthToken.Token() == testRedactSecret })
 }
+
+func TestResolveForwardConfig_BadURL_ErrorNamesTheVariable(t *testing.T) {
+	const prefix = "OTHERLODE_COLLECTOR_FORWARD_URL: "
+	tests := []struct {
+		name string
+		url  string
+		want string
+	}{
+		{"bad scheme", "ftp://x", prefix + `forward URL "ftp://x": scheme must be http or https`},
+		{"missing host", "https://", prefix + `forward URL "https://": missing host`},
+		{"user info", "https://user:s3cret@backend.example.com", prefix + "forward URL must not contain user info"},
+		{"query", "https://backend.example.com/?a=b", prefix + "forward URL must not contain a query"},
+		{"fragment", "https://backend.example.com/#f", prefix + "forward URL must not contain a fragment"},
+		{"unparseable", "http://[::1", prefix + `forward URL "http://[::1": missing ']' in host`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := resolveForwardConfig(envFrom(map[string]string{
+				"OTHERLODE_COLLECTOR_FORWARD_URL": tt.url,
+			}), nil)
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			if err.Error() != tt.want {
+				t.Fatalf("error = %q, want %q", err.Error(), tt.want)
+			}
+			if tt.name == "user info" && (strings.Contains(err.Error(), "s3cret") || strings.Contains(err.Error(), tt.url)) {
+				t.Fatalf("error %q echoes the URL", err.Error())
+			}
+		})
+	}
+}
+
+func TestResolveForwardConfig_EmptyURL_NoError(t *testing.T) {
+	if _, _, err := resolveForwardConfig(envFrom(map[string]string{
+		"OTHERLODE_COLLECTOR_FORWARD_URL": "",
+	}), nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveForwardConfig_GoodURLWithPath_KeepsURL(t *testing.T) {
+	cfg, _, err := resolveForwardConfig(envFrom(map[string]string{
+		"OTHERLODE_COLLECTOR_FORWARD_URL": "https://backend.example.com/v1/",
+	}), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.URL != "https://backend.example.com/v1/" {
+		t.Fatalf("URL = %q, want the value as set", cfg.URL)
+	}
+}
+
+func TestListen_MissingPort_ErrorNamesTheVariable(t *testing.T) {
+	ln, err := listen("nonsense", slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	if err == nil {
+		ln.Close()
+		t.Fatal("expected an error for a missing port, got nil")
+	}
+	want := "OTHERLODE_COLLECTOR_ADDR: listen tcp: address nonsense: missing port in address"
+	if err.Error() != want {
+		t.Fatalf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+func TestListen_PortInUse_ErrorNamesTheVariable(t *testing.T) {
+	taken, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer taken.Close()
+
+	ln, err := listen(taken.Addr().String(), slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	if err == nil {
+		ln.Close()
+		t.Fatal("expected an error for a port in use, got nil")
+	}
+	want := "OTHERLODE_COLLECTOR_ADDR: listen tcp " + taken.Addr().String() + ": bind: address already in use"
+	if err.Error() != want {
+		t.Fatalf("error = %q, want %q", err.Error(), want)
+	}
+}

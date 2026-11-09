@@ -241,8 +241,8 @@ var invalidURLs = []string{
 
 func TestValidateURL(t *testing.T) {
 	for _, raw := range invalidURLs {
-		if _, _, err := validateURL(raw); err == nil {
-			t.Errorf("validateURL(%q): expected an error, got nil", raw)
+		if _, _, err := ValidateURL(raw); err == nil {
+			t.Errorf("ValidateURL(%q): expected an error, got nil", raw)
 		}
 	}
 
@@ -258,13 +258,13 @@ func TestValidateURL(t *testing.T) {
 		{"HTTP://h/base/", "HTTP://h/base", "http"},
 	}
 	for _, tt := range valid {
-		base, scheme, err := validateURL(tt.raw)
+		base, scheme, err := ValidateURL(tt.raw)
 		if err != nil {
-			t.Errorf("validateURL(%q): unexpected error: %v", tt.raw, err)
+			t.Errorf("ValidateURL(%q): unexpected error: %v", tt.raw, err)
 			continue
 		}
 		if base != tt.wantBase || scheme != tt.wantScheme {
-			t.Errorf("validateURL(%q) = %q, %q, want %q, %q", tt.raw, base, scheme, tt.wantBase, tt.wantScheme)
+			t.Errorf("ValidateURL(%q) = %q, %q, want %q, %q", tt.raw, base, scheme, tt.wantBase, tt.wantScheme)
 		}
 	}
 }
@@ -1182,5 +1182,43 @@ func TestConfig_MaxConcurrentForwards_DefaultsAndSizesTheClient(t *testing.T) {
 	defer sink.Shutdown(context.Background())
 	if cap(sink.slots) != 7 {
 		t.Errorf("slots = %d, want 7", cap(sink.slots))
+	}
+}
+
+func TestValidateURL_NeverQuotesAValueWithUserInfo(t *testing.T) {
+	for _, raw := range []string{
+		"user:s3cret@backend.example.com",
+		"https://user:s3cret@",
+		"http://user:s3cret@[::1",
+		"ftp://user:s3cret@backend.example.com",
+		"https://user:s3cret@backend.example.com",
+		"https://user:s3/cret@backend.example.com",
+		"https://user:s3?cret@backend.example.com",
+		"https://user:s3#cret@backend.example.com",
+		"https://user:s3%zzcret@backend.example.com",
+	} {
+		_, _, err := ValidateURL(raw)
+		if err == nil {
+			t.Fatalf("ValidateURL(%q): expected an error, got nil", raw)
+		}
+		for _, part := range []string{"s3", "cret", "zz"} {
+			if strings.Contains(err.Error(), part) {
+				t.Errorf("ValidateURL(%q) error %q holds part of the password", raw, err.Error())
+			}
+		}
+	}
+}
+
+func TestValidateURL_QuotesAValueWithoutUserInfo(t *testing.T) {
+	tests := []struct{ raw, want string }{
+		{"collector.example.com", `forward URL "collector.example.com": scheme must be http or https`},
+		{"https://", `forward URL "https://": missing host`},
+		{"http://[::1", `forward URL "http://[::1": missing ']' in host`},
+	}
+	for _, tt := range tests {
+		_, _, err := ValidateURL(tt.raw)
+		if err == nil || err.Error() != tt.want {
+			t.Errorf("ValidateURL(%q) error = %v, want %q", tt.raw, err, tt.want)
+		}
 	}
 }

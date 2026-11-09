@@ -196,7 +196,7 @@ Without `OTHERLODE_COLLECTOR_FORWARD_URL`, the collector logs every payload it r
 | `WARN` | `agent namespace does not match the collector's configured namespace` | The same, for the service namespace |
 | `ERROR` | `sink rejected delta batch`, `sink rejected manifest`, `sink rejected static baseline` or `sink rejected class listing` | The collector answered `503` because Otherlode did not store the payload. The line has the `error`, the `reason` (a value of `forward_failed_total`) and `unlogged_sink_failures`. At most one line a minute for each payload type and reason, while the counter counts every failure |
 | `ERROR` | `backend answered 2xx other than 202, so the payload is not counted as stored; check OTHERLODE_COLLECTOR_FORWARD_URL` | Otherlode, or something in front of it, answered a `2xx` other than `202`. The line has the `status`, `path` and `owner`. At most one line a minute for each status |
-| `ERROR` | `listen tcp ...` | The collector could not open its listen address at startup, and the process exits |
+| `ERROR` | `OTHERLODE_COLLECTOR_ADDR: listen tcp ...` | The collector could not open its listen address at startup, and the process exits |
 | `ERROR` | `server stopped` or `graceful shutdown failed` | The server stopped with an error after it started, or shutdown did not finish, and the process exits |
 
 At `info` the collector also logs startup, shutdown, the stamping and redaction settings it applied, and the token file events `token file changed` and `token file re-read recovered`. The token file line gives a count of tokens, never a token. The redaction line gives the secret's fingerprint as `secret_fingerprint`, never the secret.

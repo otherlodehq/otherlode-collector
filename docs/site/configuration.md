@@ -31,14 +31,14 @@ An invalid value logs a line like these. The `msg` field carries the text.
 
 | Variable | Default | Accepted values | If the value is invalid |
 |---|---|---|---|
-| `OTHERLODE_COLLECTOR_ADDR` | `:4319` | A `host:port` the collector can listen on. The host can be empty. It serves plain HTTP, with no TLS | Startup logs the listen error and exits with code 1 |
+| `OTHERLODE_COLLECTOR_ADDR` | `:4319` | A `host:port` the collector can listen on. The host can be empty. It serves plain HTTP, with no TLS | Startup logs the listen error after `OTHERLODE_COLLECTOR_ADDR:` and exits with code 1 |
 | `OTHERLODE_COLLECTOR_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`, in any letter case. A level can take a signed offset, such as `warn+1` or `info-2`, to set a threshold between two named levels, which sit 4 apart | Startup fails. `warning` is invalid |
 
 The collector checks the listen address when it opens the port, after it has checked every other setting. If the port is taken or the address is malformed, it logs the failure and exits. It logs the `otherlode-collector listening` line only after it has opened the port.
 
 ```text
-{"time":"...","level":"ERROR","msg":"listen tcp: address bad: missing port in address"}
-{"time":"...","level":"ERROR","msg":"listen tcp :4319: bind: address already in use"}
+{"time":"...","level":"ERROR","msg":"OTHERLODE_COLLECTOR_ADDR: listen tcp: address bad: missing port in address"}
+{"time":"...","level":"ERROR","msg":"OTHERLODE_COLLECTOR_ADDR: listen tcp :4319: bind: address already in use"}
 ```
 
 The collector writes logs as JSON lines to standard output. See [monitoring](monitoring) for the log format and the metrics.
@@ -81,7 +81,7 @@ These settings control where the collector sends payloads and how long it waits 
 
 | Variable | Default | Accepted values | If the value is invalid |
 |---|---|---|---|
-| `OTHERLODE_COLLECTOR_FORWARD_URL` | None, so the collector only logs payloads | An absolute `http` or `https` URL with a host, no user info, no query and no fragment. A path is allowed. The collector removes trailing slashes | Startup fails with a `forward URL` error that names the problem |
+| `OTHERLODE_COLLECTOR_FORWARD_URL` | None, so the collector only logs payloads | An absolute `http` or `https` URL with a host, no user info, no query and no fragment. A path is allowed. The collector removes trailing slashes | Startup fails with an error that names the variable and the problem, such as `OTHERLODE_COLLECTOR_FORWARD_URL: forward URL must not contain a query` |
 | `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN` | None | The key the collector sends to the forward URL. The collector trims spaces around it. It cannot hold a control character | Startup fails for a value of only spaces or a control character |
 | `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE` | None | The path of a file that holds exactly one key. Blank lines and `#` lines do not count | Startup fails if the file is missing, is not a regular file, is larger than 1 MiB, holds no key or more than one, or holds a control character |
 | `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT` | `8s` | A positive duration below `9s`, the time budget of one request. The limit for the one attempt to Otherlode | Startup fails. A value of `9s` or more fails with `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT is 9s, which is not below the 9s time budget of one request; set it lower` |
