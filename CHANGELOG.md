@@ -9,6 +9,10 @@ the section being read.
 
 ## [Unreleased]
 
+### Changed
+
+- The collector knows the agent's `manifest_confirmed` resource attribute. With redaction on, an older collector drops the field once the agent sets it, which is after the run's first confirmed manifest, and marks each payload `fields_stripped` from then on. Run this collector before an agent that sends the field.
+
 ## [0.1.0] - 2026-11-01
 
 The first release of the Otherlode collector. It receives what Otherlode agents send, checks each payload, can redact it, and forwards it to Otherlode. It stores nothing. Docs: https://otherlode.dev/docs.

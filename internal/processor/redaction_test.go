@@ -821,6 +821,38 @@ func TestRedaction_On_FlushCompleteKept(t *testing.T) {
 	}
 }
 
+func TestRedaction_On_ManifestConfirmedKept(t *testing.T) {
+	next := &recordingSink{}
+	r := NewRedaction(next, allLiterals(), nil)
+
+	resource := resourceFor("run-1")
+	resource.ManifestConfirmed = true
+	sent := &otherlodepb.ProbeManifest{
+		Resource: resource,
+		Probes:   []*otherlodepb.ProbeLocation{{ClassName: "com.example.Wrapped", MethodName: "describe"}},
+	}
+	wire, err := proto.Marshal(sent)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	manifest := &otherlodepb.ProbeManifest{}
+	if err := proto.Unmarshal(wire, manifest); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if _, err := r.AcceptManifest(context.Background(), manifest); err != nil {
+		t.Fatalf("accept manifest: %v", err)
+	}
+
+	got := next.manifests[0]
+	if got.GetResource().GetFieldsStripped() {
+		t.Error("fields_stripped set on a manifest whose fields the bindings know")
+	}
+	if !got.GetResource().GetManifestConfirmed() {
+		t.Error("manifest_confirmed lost")
+	}
+}
+
 // Class names are not string literals, so redaction keeps every name and
 // the include rules, even with every literal redacted.
 func TestRedaction_On_ClassListingNamesAndRulesKept(t *testing.T) {
