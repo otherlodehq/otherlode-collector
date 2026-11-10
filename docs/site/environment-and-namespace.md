@@ -79,6 +79,8 @@ OTHERLODE_COLLECTOR_SERVICE_NAMESPACE=payments
 
 Add `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE_ACTION=upsert` to overwrite a namespace an agent set. The two actions work as the table above shows.
 
+Restart the agents after you change the collector's namespace. A run that keeps reporting arrives under the new service without the class data it sent before, and Otherlode holds that service's findings back until the run expires. [Scope and environments](/docs/server/scope#runs-that-are-not-settled) has the detail.
+
 A namespace of `.` or `..` is refused. The ingest endpoints reject it from an agent for the same reason, because a service is read at a URL path and browsers drop those segments.
 
 ## Serve every namespace from one collector
