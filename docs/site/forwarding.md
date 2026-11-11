@@ -72,7 +72,7 @@ Two more cases get a `503` with `Retry-After: 5` and never reach Otherlode: the 
 
 Every answer has an empty body. The collector passes on a `Retry-After` from Otherlode only for a `429`, and only when the value is up to 64 printable ASCII characters. It does not follow redirects, so a `3xx` is a failure. A `2xx` other than `202` comes from a wrong forward URL or from a proxy, not from Otherlode, so the collector does not count the payload as stored.
 
-The agent resends a failed payload by itself. It ends a send at once when `Retry-After` is over 2 seconds, and sends the payload again on its next flush. It keeps its counts in memory, so nothing is lost while Otherlode is down unless the agent's process stops. A process that stops during an outage reads in Otherlode as one that went silent. See [when the collector is down or refuses a payload](/docs/agent/data-sent#when-the-collector-is-down-or-refuses-a-payload).
+The agent resends a failed payload by itself. It ends a send at once when `Retry-After` is over 2 seconds, and sends the payload again on its next flush. It keeps its counts in memory, so nothing is lost while Otherlode is down unless the agent's process stops. A process that stops during an outage reads in Otherlode as one that went silent. See [when the collector is down or refuses a payload](/docs/agent/data-sent#when-the-receiver-is-down-or-refuses-a-payload).
 
 ### Order
 

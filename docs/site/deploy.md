@@ -4,7 +4,7 @@ description: Run the container image with an agent token, put a TLS proxy in fro
 order: 10
 ---
 
-The collector is a single container image that sits between your agents and Otherlode. It listens for the agents' pushes on port 4319, and it needs one setting to start: a token the agents send. This page takes you from pulling the image to a collector your agents report to.
+The collector is a single container image that sits between your agents and Otherlode. It's optional: [Add a collector](add) says when you need one. It listens for the agents' pushes on port 4319, and it needs one setting to start: a token the agents send. This page takes you from pulling the image to a collector your agents report to.
 
 ## Run the image
 

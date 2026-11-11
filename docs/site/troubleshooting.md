@@ -147,7 +147,7 @@ The image runs as `nonroot` and listens on `:4319` by default. [Deploy the colle
 
 ## Agents get a 401, 404, 405, 413, 415, 429, 400 or 503
 
-This section covers what the collector answers. For what the agent logs and does about each status, see the agent's [Nothing reaches the collector](/docs/agent/troubleshooting#nothing-reaches-the-collector).
+This section covers what the collector answers. For what the agent logs and does about each status, see the agent's [Nothing reaches the collector](/docs/agent/troubleshooting#nothing-reaches-otherlode-or-the-collector).
 
 The collector checks a request in this order. A path outside `/v1/otherlode/` gets a 404 or 405 at once. Inside it, the rate limit comes first, then the token, then the path, method, content type, size and body. So a request with a wrong token to a wrong path gets a 401, not a 404.
 

@@ -4,11 +4,11 @@ description: Why the collector sits in your network and keeps nothing, why it an
 order: 100
 ---
 
-The collector is a small HTTP service between your agents and Otherlode. This page explains the choices behind it, so you can judge what it does with your data and how it behaves when something is wrong. For the settings, see [forwarding](forwarding), [redaction](redaction), [tokens](tokens) and [limits](limits).
+The collector is a small, optional HTTP service between your agents and Otherlode. [Add a collector](add) says when you need one. This page explains the choices behind it, so you can judge what it does with your data and how it behaves when something is wrong. For the settings, see [forwarding](forwarding), [redaction](redaction), [tokens](tokens) and [limits](limits).
 
 ## The collector is the last stop before data leaves your network
 
-Agents send to the collector, and only the collector sends to Otherlode. Your applications never need a route to the internet. Everything that decides what leaves happens in one place that you run and configure.
+When agents send through the collector, only the collector sends to Otherlode, and your applications never need a route to the internet. Everything that decides what leaves happens in one place that you run and configure.
 
 That place does four things with each payload. It decodes the protobuf body and checks that it names a service, an instance and a run. It processes the payload by stamping the environment and service namespace, and by blanking string literals and replacing branch and site keys, if you turned those on. It forwards the result and waits for Otherlode's answer. Then it forgets it.
 
@@ -25,7 +25,7 @@ The consequence is that nothing at rest in the collector can leak, be backed up 
 
 The collector forwards each payload to Otherlode while the agent's request waits. It makes one attempt and answers from Otherlode's answer. A `202` from Otherlode becomes `202`. A `429` stays `429`, with Otherlode's `Retry-After`. Any other `4xx` keeps its status. A `5xx`, a timeout, no connection, a full forward limit or a shutdown becomes `503` with `Retry-After: 5`. [Forwarding](forwarding) has the full table.
 
-The reason is what the agent does with the answer. The agent sends running totals, not changes, and it remembers the total the collector last confirmed for each probe. A probe goes into a payload only when its total differs from that remembered value. See [what the agent sends](/docs/agent/data-sent#when-the-collector-is-down-or-refuses-a-payload).
+The reason is what the agent does with the answer. The agent sends running totals, not changes, and it remembers the total the collector last confirmed for each probe. A probe goes into a payload only when its total differs from that remembered value. See [what the agent sends](/docs/agent/data-sent#when-the-receiver-is-down-or-refuses-a-payload).
 
 So the answer decides what the agent does next.
 
@@ -60,7 +60,7 @@ The code shows what happens in each direction.
 
 - **A newer collector, an older agent.** The older agent's payload decodes as before. A field the agent does not send is absent, which protobuf reads as unset. Nothing is stripped and nothing is flagged.
 - **An older collector, a newer agent, blanking off.** The collector decodes the payload and forwards it with the new fields intact. It changes nothing it does not know.
-- **An older collector, a newer agent, blanking on.** The collector drops the fields it does not know, sets `fields_stripped` on the payload and logs one WARN per run. Otherlode stores the run and makes no claim from it, because a dropped field may be one it judges by. See [a run from an older collector makes no claim](/docs/server/how-it-works#a-run-from-an-older-collector-makes-no-claim).
+- **An older collector, a newer agent, blanking on.** The collector drops the fields it does not know, sets `fields_stripped` on the payload and logs one WARN per run. Otherlode stores the run and makes no claim from it, because a dropped field may be one it judges by. See [a run from an older collector makes no claim](/docs/server/how-it-works#a-run-with-dropped-or-unknown-fields-makes-no-claim).
 
 The code gives no promise beyond that. Upgrading the collector fixes the third case on the next run. See [redaction](redaction) for the log line and the fix.
 
