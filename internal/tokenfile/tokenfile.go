@@ -1,6 +1,5 @@
 // Package tokenfile reads secret tokens from a file and re-reads the file
-// on a fixed interval. A mounted Kubernetes secret changes in place and
-// sends no signal, so a signal handler alone would miss a new value.
+// on a fixed interval.
 package tokenfile
 
 import (

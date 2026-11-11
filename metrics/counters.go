@@ -4,7 +4,7 @@ package metrics
 // "static_baseline" or "class_listing", unless the counter says otherwise.
 var (
 	// IngestAccepted counts payloads that decoded, passed validation and
-	// reached the sink.
+	// that the sink accepted.
 	IngestAccepted = NewCounter("otherlode_collector_ingest_accepted_total",
 		"Payloads decoded, validated, and handed to the sink.", "payload")
 
@@ -32,7 +32,7 @@ var (
 	RateLimited = NewCounter("otherlode_collector_rate_limited_total",
 		"Requests refused because the client's rate limit was exceeded.")
 
-	// ForwardDelivered counts payloads the backend answered with a 2xx and
+	// ForwardDelivered counts payloads the backend answered with 202 and
 	// the collector answered 202.
 	ForwardDelivered = NewCounter("otherlode_collector_forward_delivered_total",
 		"Payloads the backend stored, answered 202.", "payload")
