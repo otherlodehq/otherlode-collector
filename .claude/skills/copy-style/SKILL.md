@@ -12,7 +12,8 @@ Customer-facing writing has a voice of its own on top of the plain-writing basel
 | Web UI strings | `otherlode-server/web/src` | `ui.md` |
 | Customer docs | `docs/site/` in `otherlode-agent`, `otherlode-collector` and `otherlode-server`, and `src/content/docs/start/` in `otherlode.dev` | `docs.md` |
 | Site pages, marketing and emails | `otherlode.dev/src/pages`, `otherlode.dev/src/components`, early-access emails, anything that sells the product | `marketing.md` |
-| Replies, code comments, ADRs, commit messages, `STATUS.md` | Anywhere | `unslop` alone, plus `technical-writing` for ADRs and READMEs |
+| Replies, ADRs, commit messages, `STATUS.md` | Anywhere | `unslop` alone, plus `technical-writing` for ADRs and READMEs |
+| Code comments and doc comments | Source files | `unslop`, then the comment rule in the repo's `CLAUDE.md`, which says where a comment is allowed and how long it may be |
 
 The `agent/`, `collector/` and `server/` folders under `otherlode.dev/src/content/docs/` are copies, so edit the source repo's `docs/site/`. A copy and style pass leaves `src/pages/privacy.md` alone.
 

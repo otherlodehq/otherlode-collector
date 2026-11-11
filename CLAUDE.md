@@ -60,12 +60,18 @@ A change that breaks one of these needs an ADR first.
 
 ## Comments
 
-- Doc comments on exported types and functions.
-- Avoid code comments. Do not write comments that restate what the code
-  does, and do not write comments that explain why a choice was made or
-  why one construct was picked over another (e.g. "use X, not Y"). Write
-  one only for a hard constraint or surprising consequence that the code
-  and its tests cannot convey, and keep it short.
+- **Code comments are rare.** Write one only for a hard constraint or
+  surprising consequence that the code and its tests cannot convey. Keep
+  it to one line where it fits, and never more than three. Never restate
+  what the code does. Never explain why a choice was made or why one
+  construct was picked over another (e.g. "use X, not Y"). That reasoning
+  goes in an ADR.
+- **Doc comments go on exported types and functions only.** An unexported
+  identifier and test code get none. The rule above covers them.
+- **A doc comment states the contract and stops.** Say what it does or
+  returns, what the caller must supply, and any edge a caller would get
+  wrong. Most fit in one to three lines. Leave out design history,
+  rejected options, how the body works and who calls it.
 - Write in simplified technical English: short sentences, one main clause
   each, plain words, no idioms. Prefer the concrete verb ("this rejects bad
   input") to the nominalization ("this handles rejection of invalid input").
