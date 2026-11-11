@@ -43,8 +43,8 @@ func Parse(data []byte) []string {
 }
 
 // Read reads the file at path and returns its tokens, as Parse does. It
-// returns an error for anything but a regular file, or for a file larger
-// than 1 MiB.
+// follows a symlink. It returns an error for anything but a regular file, or
+// for a file larger than 1 MiB.
 func Read(path string) ([]string, error) {
 	// O_NONBLOCK keeps the open from waiting on a named pipe with no writer.
 	// The type check must run on the open handle, so the path cannot change

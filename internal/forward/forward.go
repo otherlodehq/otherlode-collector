@@ -147,8 +147,8 @@ var ErrShuttingDown = errors.New("forward: sink is shutting down")
 // log.
 //
 // A 4xx answer comes back as an *ingest.StatusError with the backend's
-// status. Any other failure, including another 2xx, a 5xx, a redirect, a
-// timeout and a transport error, comes back as a plain error.
+// status. A 5xx, another 2xx, a redirect, a timeout or a transport error
+// comes back as a plain error.
 //
 // An Accept method releases its decode slot before the network call, once it
 // holds a forward slot.

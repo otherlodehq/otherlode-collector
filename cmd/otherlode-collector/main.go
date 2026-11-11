@@ -37,7 +37,8 @@ import (
 const (
 	defaultAddr = ":4319"
 
-	// docker stop sends SIGKILL 10 seconds after SIGTERM.
+	// shutdownTimeout must not exceed the 10 seconds docker stop waits between
+	// SIGTERM and SIGKILL.
 	shutdownTimeout = 10 * time.Second
 
 	defaultRateLimitRPS   = 5

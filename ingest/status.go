@@ -47,7 +47,8 @@ func (e *reasonError) Error() string { return e.err.Error() }
 func (e *reasonError) Unwrap() error { return e.err }
 
 // WithReason returns err marked with reason, a short word such as "timeout"
-// or "server_error". An empty reason becomes "error". It returns nil for a nil
+// or "server_error". The handler rate-limits and labels its sink-failure log
+// lines by reason. An empty reason becomes "error". It returns nil for a nil
 // err.
 func WithReason(err error, reason string) error {
 	if err == nil {

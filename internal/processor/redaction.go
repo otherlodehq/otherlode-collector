@@ -50,10 +50,10 @@ func (c RedactionConfig) Validate() error {
 // It replaces the text of each blocked literal ConditionPart with
 // RedactedText. A part counts as a literal unless its kind is CODE or
 // PLACEHOLDER, so a part of an unknown kind counts as a literal. It replaces
-// each branch key and site key with a keyed HMAC-SHA256 digest. It clears
-// every case key of a site marked string_hash_code_switch, and each case key
-// that equals the Java hash code of a literal it redacted in the same method.
-// It drops unknown fields. When a payload loses a field, the processor sets
+// each non-empty branch key and site key with a keyed HMAC-SHA256 digest. It
+// clears every case key of a site marked string_hash_code_switch, and each
+// case key that equals the Java hash code of a literal it redacted in the
+// same method. It drops unknown fields. When a payload loses a field, the processor sets
 // fields_stripped on the payload's resource and never clears it.
 type Redaction struct {
 	next   ingest.Sink
