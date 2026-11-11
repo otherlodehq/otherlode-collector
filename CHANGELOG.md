@@ -15,7 +15,7 @@ the section being read.
 
 ## [0.1.0] - 2026-11-01
 
-The first release of the Otherlode collector. It receives what Otherlode agents send, checks each payload, can redact it, and forwards it to Otherlode. It stores nothing. Docs: https://otherlode.dev/docs.
+The first release of the Otherlode collector, an optional service that receives what Otherlode agents send. It checks each payload, can redact it, and forwards it to Otherlode. It stores nothing. Docs: https://otherlode.dev/docs.
 
 ### Added
 
