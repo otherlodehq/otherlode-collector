@@ -12,8 +12,6 @@ import (
 	otherlodepb "buf.build/gen/go/otherlode/otherlode/protocolbuffers/go/otherlode/v1"
 )
 
-// logLevels decodes buf as JSON log lines and returns the level of each
-// line whose message holds msg.
 func logLevels(t *testing.T, buf *bytes.Buffer, msg string) []string {
 	t.Helper()
 	var levels []string
@@ -46,16 +44,13 @@ func mismatchResource(service, environment, namespace string) *otherlodepb.Resou
 	return res
 }
 
-// TestEnvironment_Mismatch_WarnsOncePerServiceAndValue pins that a
-// mismatch reaches an operator at the default log level without a line
-// at that level for every payload.
 func TestEnvironment_Mismatch_WarnsOncePerServiceAndValue(t *testing.T) {
 	var logs bytes.Buffer
 	env := NewEnvironment(&recordingSink{}, EnvironmentConfig{Value: "prod"}, debugLogger(&logs))
 
 	for _, res := range []*otherlodepb.ResourceAttributes{
 		mismatchResource("billing", "uat", ""),
-		mismatchResource("billing", " UAT", ""), // the same environment to the server
+		mismatchResource("billing", " UAT", ""),
 		mismatchResource("billing", "dev", ""),
 		mismatchResource("search", "uat", ""),
 	} {
@@ -78,7 +73,7 @@ func TestNamespace_Mismatch_WarnsOncePerServiceAndValue(t *testing.T) {
 	for _, res := range []*otherlodepb.ResourceAttributes{
 		mismatchResource("billing", "", "team-b"),
 		mismatchResource("billing", "", " team-b "),
-		mismatchResource("billing", "", "Team-B"), // namespaces keep case
+		mismatchResource("billing", "", "Team-B"),
 		mismatchResource("search", "", "team-b"),
 	} {
 		if _, err := ns.AcceptDeltaBatch(context.Background(), &otherlodepb.DeltaBatch{Resource: res}); err != nil {

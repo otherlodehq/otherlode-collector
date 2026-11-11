@@ -18,7 +18,6 @@ func validResource() *otherlodepb.ResourceAttributes {
 	return &otherlodepb.ResourceAttributes{ServiceName: "demo-service", ServiceInstanceId: "instance-1", RunId: "run-1"}
 }
 
-// post sends msg to path and returns the status, the body and the sink.
 func post(t *testing.T, path string, msg proto.Message) (int, string, *fakeSink) {
 	t.Helper()
 	sink := &fakeSink{}

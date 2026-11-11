@@ -25,24 +25,17 @@ import (
 	"github.com/otherlodehq/otherlode-collector/metrics"
 )
 
-// Sink receives decoded payloads. A real backend implements this to persist
-// or forward them; the collector itself stays stateless.
+// Sink receives decoded payloads.
 //
-// ctx is the request's context, so middleware such as an auth or tenant
-// resolver can attach request scope for the sink to read back. A non-nil
-// error means the payload was not taken: the handler answers 503 with
-// "Retry-After: 5" and the sender is expected to retry. The handler then
-// ignores the notices. When the payload was taken, the handler sends each
-// notice in NoticeHeader on the 202. A sink with nothing to say returns nil.
+// ctx is the request's context. The handler answers 202 only after the sink
+// returns a nil error, so a nil error means the sink holds the payload. The
+// handler then sends each notice in NoticeHeader on the 202. A sink with no
+// notices returns nil.
 //
-// A sink that wants the sender to see a client-error status of its own, for
-// example the status a backend gave, returns a *StatusError. The handler
-// answers with that status and sends the sender's Retry-After if the error
-// holds one. Every other error is a 503, so a sink that returns plain
-// errors works as before.
-//
-// The handler answers 202 only after the sink returns without an error, so
-// a sink that returns nil is saying it holds the payload.
+// A non-nil error means the sink did not take the payload, and the handler
+// ignores the notices. A *StatusError with a status from 400 to 499 gets that
+// status and its Retry-After. Any other error gets 503 with "Retry-After: 5",
+// and the sender retries.
 type Sink interface {
 	AcceptDeltaBatch(ctx context.Context, batch *otherlodepb.DeltaBatch) ([]Notice, error)
 	AcceptManifest(ctx context.Context, manifest *otherlodepb.ProbeManifest) ([]Notice, error)
@@ -50,23 +43,15 @@ type Sink interface {
 	AcceptClassListing(ctx context.Context, listing *otherlodepb.ClassListing) ([]Notice, error)
 }
 
-// maxBodyBytes caps a single request body. A static baseline chunk can
-// hold up to 20000 method entries and reach several MiB. The agent does
-// not retry a 413 within one send. It keeps the chunk and the chunks after
-// it, and resends one after each flush the collector confirms. The limit
-// is fixed, so a false 413 holds back that scan for the life of the
-// process. This limit exists to bound memory use from a bad or hostile
-// sender, not to fit any expected payload size.
-const maxBodyBytes = 16 << 20 // 16 MiB
+// The agent does not retry a 413 within one send, so a limit too low holds
+// back a static baseline scan for the life of the agent process.
+const maxBodyBytes = 16 << 20
 
-// contentType is the only media type the ingest routes accept.
 const contentType = "application/x-protobuf"
 
-// DeltaBatchPath, ManifestPath, StaticBaselinePath and ClassListingPath
-// are the agent-facing ingest routes. A Sink that relays payloads onward (see
-// forward.ForwardingSink) posts to the same paths on the backend, so
-// both sides share these constants instead of each holding its own copy
-// of the literal.
+// DeltaBatchPath, ManifestPath, StaticBaselinePath and ClassListingPath are
+// the agent-facing ingest routes. A Sink that relays payloads posts to the
+// same paths on the backend.
 const (
 	DeltaBatchPath     = "/v1/otherlode/deltas"
 	ManifestPath       = "/v1/otherlode/manifest"
@@ -74,15 +59,10 @@ const (
 	ClassListingPath   = "/v1/otherlode/class-listing"
 )
 
-// payloadKind names one payload type for logging and metrics: label is
-// the metrics label value, name is the text used in log lines and error
-// bodies.
 type payloadKind struct {
 	label string
 	name  string
 
-	// message describes the payload's message, and limit is the most
-	// elements it may hold.
 	message protoreflect.MessageDescriptor
 	limit   int
 }
@@ -110,67 +90,44 @@ func PayloadLabel(path string) string {
 	}
 }
 
-// Handler implements the agent-facing HTTP surface described in the
-// Otherlode agent's "Transport" design: one POST per flush interval, body
-// is a serialized protobuf message, no gRPC.
+// Handler serves the agent-facing ingest routes. Each route takes one POST of
+// a serialized protobuf message.
 type Handler struct {
 	sink   Sink
 	logger *slog.Logger
 
-	// slots is a counting semaphore for concurrent decodes. It is nil
-	// when decodes are not capped.
 	slots chan struct{}
 
-	// slotWait is the longest a request waits for a slot.
 	slotWait time.Duration
 
-	// budget is the time one request may take from handler entry. Zero
-	// means no budget.
 	budget time.Duration
 
-	// sinkLog limits the log lines for sink failures. See sinkFailed.
 	sinkLog *ratelog.Limiter
 
-	// refuseLog limits the log lines for requests refused before a decode
-	// slot was taken, one key per kind of line. See refuse.
 	refuseLog *ratelog.Limiter
 }
 
-// maxSlotWait is how long a request waits for a decode slot. It is shorter
-// than the collector's 10 second write timeout, so in most cases the 503
-// reaches the client. The write deadline starts when the headers are read,
-// so a slow body upload can still use up the rest.
+// maxSlotWait must stay below the server's WriteTimeout in
+// cmd/otherlode-collector, or the 503 does not reach the client.
 const maxSlotWait = 5 * time.Second
 
-// busyLogInterval is the shortest gap between two log lines of one kind.
 const busyLogInterval = time.Minute
 
 // HandlerOption configures a Handler. See NewHandler.
 type HandlerOption func(*Handler)
 
-// WithMaxConcurrentDecodes caps how many requests the Handler decodes
-// and passes to the sink at one time. A request holds its slot until the
-// sink returns, unless the sink calls ReleaseDecodeSlot first. A value of
-// zero or less means no cap, which is the default.
+// WithMaxConcurrentDecodes caps how many requests the Handler decodes and
+// passes to the sink at one time. A request holds its slot until the sink
+// returns, unless the sink calls ReleaseDecodeSlot first. A value of zero or
+// less means no cap, which is the default.
 //
-// Decoding a protobuf can take far more memory than the body. The handler
-// refuses a body over its element limit before it decodes it. The decoded
-// message stays alive until the sink returns, so the cap bounds decode
-// memory at about n times the largest decode. A request reads its body
-// before it takes a slot, so bodies waiting for a slot are held as read,
-// up to 16 MiB each.
-//
-// A slow client holds no slot while it sends, and the cap counts only the
-// work that needs the memory. A request that finds no free slot waits for
-// one, for the slot wait (see WithSlotWait) or the time left in its
-// budget (see WithRequestBudget), whichever is shorter. If its context
-// ends first, the Handler counts the request as rejected with reason
-// "canceled". If its budget had already ended before the wait began, it
-// counts reason "timeout" and logs a warning at most once a minute. If the
-// wait ends first, it counts reason "busy" and logs a warning at most once
-// a minute. Either way the Handler answers 503 with
-// "Retry-After: 1", since a handler that writes nothing makes net/http
-// send 200.
+// A request that finds no free slot waits for one, for the slot wait (see
+// WithSlotWait) or the time left in its budget (see WithRequestBudget),
+// whichever is shorter. If it gets no slot, the Handler answers 503 with
+// "Retry-After: 1" and counts the request as rejected with reason "canceled"
+// (its context ended), "timeout" (its budget ended before the wait began) or
+// "busy" (the wait ended). It logs "timeout" and "busy" at most once a minute
+// each.
 func WithMaxConcurrentDecodes(n int) HandlerOption {
 	return func(h *Handler) {
 		if n > 0 {
@@ -190,11 +147,9 @@ func WithSlotWait(d time.Duration) HandlerOption {
 }
 
 // WithRequestBudget sets the time one request may take, measured from the
-// moment the handler starts on it. The slot wait and the sink's work share
-// it: the context passed to the sink ends when the budget ends, and a wait
-// for a decode slot ends then too. When the budget ends before the sink
-// takes the payload, the Handler answers 503 with "Retry-After". A value
-// of zero or less means no budget, which is the default.
+// moment the handler starts on it. The slot wait and the sink share it. The
+// context passed to the sink ends when the budget ends. A value of zero or
+// less means no budget, which is the default.
 func WithRequestBudget(d time.Duration) HandlerOption {
 	return func(h *Handler) {
 		if d > 0 {
@@ -205,7 +160,6 @@ func WithRequestBudget(d time.Duration) HandlerOption {
 
 type slotKey struct{}
 
-// slotRelease frees a decode slot once, however often it is called.
 type slotRelease struct {
 	once sync.Once
 	free func()
@@ -215,9 +169,8 @@ func (s *slotRelease) release() { s.once.Do(s.free) }
 
 // ReleaseDecodeSlot frees the decode slot of the request that ctx belongs
 // to. A sink calls it when it no longer needs the memory of the decoded
-// payload, for example before a network call. It is safe to call more than
-// once, and does nothing for a context the Handler did not make. A sink
-// that never calls it keeps the slot until it returns.
+// payload. It is safe to call more than once, and does nothing for a context
+// the Handler did not make.
 func ReleaseDecodeSlot(ctx context.Context) {
 	if s, ok := ctx.Value(slotKey{}).(*slotRelease); ok {
 		s.release()
@@ -238,8 +191,7 @@ func NewHandler(sink Sink, logger *slog.Logger, opts ...HandlerOption) *Handler 
 }
 
 // Register adds POST routes for DeltaBatchPath, ManifestPath,
-// StaticBaselinePath and ClassListingPath to mux. They match the paths
-// HttpExporter posts to.
+// StaticBaselinePath and ClassListingPath to mux.
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST "+DeltaBatchPath, h.handleDeltaBatch)
 	mux.HandleFunc("POST "+ManifestPath, h.handleManifest)
@@ -263,13 +215,6 @@ func (h *Handler) handleClassListing(w http.ResponseWriter, r *http.Request) {
 	handle(h, w, r, classListingKind, validateClassListing, h.sink.AcceptClassListing)
 }
 
-// handle serves one ingest request. It reads the body, counts its
-// elements, takes a decode slot, decodes the body into a new T, validates
-// it, passes it to accept, and answers 202 with one NoticeHeader value for
-// each notice accept returned. It holds the slot until accept returns or
-// calls ReleaseDecodeSlot. With a request budget, the context passed to
-// accept ends when the budget does. T is the pointer type of the payload
-// message.
 func handle[T proto.Message](h *Handler, w http.ResponseWriter, r *http.Request, kind payloadKind, validate func(T) error, accept func(context.Context, T) ([]Notice, error)) {
 	start := time.Now()
 	ctx := r.Context()
@@ -309,8 +254,6 @@ func handle[T proto.Message](h *Handler, w http.ResponseWriter, r *http.Request,
 	w.WriteHeader(http.StatusAccepted)
 }
 
-// writeNotices adds one NoticeHeader value to header for each distinct
-// notice, in the order given.
 func writeNotices(header http.Header, notices []Notice) {
 	for i, n := range notices {
 		if slices.Contains(notices[:i], n) {
@@ -320,28 +263,17 @@ func writeNotices(header http.Header, notices []Notice) {
 	}
 }
 
-// newMessage returns a new, empty message of the type T points to.
 func newMessage[T proto.Message]() T {
 	var zero T
 	return zero.ProtoReflect().New().Interface().(T)
 }
 
 // MaxResourceValueBytes is the longest value, in bytes, that a payload's
-// resource may carry in service_name, service_version,
-// service_instance_id, environment, run_id, service_namespace or
-// agent_version. The handler rejects a longer value.
+// resource may carry in service_name, service_version, service_instance_id,
+// environment, run_id, service_namespace or agent_version. The handler
+// rejects a longer value.
 const MaxResourceValueBytes = 1024
 
-// validateResource checks the identity a Sink needs: a service name that
-// is not blank, an instance ID and a run ID. It rejects a value longer
-// than MaxResourceValueBytes, or one that holds a NUL byte, in any of the
-// seven identity strings. It measures the value as sent, before any trimming, and never quotes it.
-// It rejects a service name or namespace of "." or ".." (see
-// isDotSegment). class_id and
-// cumulative totals mean something only within one run of one instance,
-// so the run ID is required. The agent makes a fresh run ID per process,
-// so a restarted instance with a pinned instance ID still names a
-// different run.
 func validateResource(res *otherlodepb.ResourceAttributes) error {
 	if res == nil {
 		return errors.New("missing resource")
@@ -381,21 +313,10 @@ func validateResource(res *otherlodepb.ResourceAttributes) error {
 	return nil
 }
 
-// isDotSegment reports whether v is "." or "..". A service is read at a
-// URL path that holds its namespace and name as segments, and browsers
-// remove a dot segment even when it is percent-escaped. So a service
-// named that way could never be opened, and a namespace ".." would lead
-// to another service. Backends key a service by the trimmed values, so
-// callers pass trimmed values.
 func isDotSegment(v string) bool {
 	return v == "." || v == ".."
 }
 
-// validateDeltaBatch checks the resource a Sink needs to attribute the
-// batch. The agent always sends it, even on an empty heartbeat batch,
-// so a batch without it is a broken or foreign sender, not a quiet
-// instance. It also rejects a first-seen or first-loaded time outside
-// the range of MaxTimestampMillis.
 func validateDeltaBatch(batch *otherlodepb.DeltaBatch) error {
 	if err := validateResource(batch.GetResource()); err != nil {
 		return err
@@ -419,28 +340,18 @@ func validateDeltaBatch(batch *otherlodepb.DeltaBatch) error {
 }
 
 // MaxTimestampMillis is the latest time, in milliseconds since the epoch,
-// that a payload's timestamp may hold: the end of the year 9999. The
-// earliest is 0, the start of 1970.
+// that a payload's timestamp may hold: the end of the year 9999. The earliest
+// is 0.
 const MaxTimestampMillis = 253402300799999
 
-// timestampInRange reports whether ms is from 0 to MaxTimestampMillis.
 func timestampInRange(ms int64) bool {
 	return ms >= 0 && ms <= MaxTimestampMillis
 }
 
-// timestampError names the field at list[index].field, never its value.
 func timestampError(list string, index int, field string) error {
 	return fmt.Errorf("%s[%d].%s is out of range", list, index, field)
 }
 
-// validateManifest checks that the manifest's resource names the
-// service, instance and run it describes. class_id is assigned per
-// run in load order, so the same class_id can mean a different class in
-// two instances of the same service, or in two runs of one instance. A
-// backend that keys on less than all three would misattribute probes.
-// It also rejects a timestamp outside the range of MaxTimestampMillis, a
-// class that failed to initialize with no reason, and a dependency with no
-// identity.
 func validateManifest(manifest *otherlodepb.ProbeManifest) error {
 	if err := validateResource(manifest.GetResource()); err != nil {
 		return err
@@ -488,10 +399,6 @@ func validateManifest(manifest *otherlodepb.ProbeManifest) error {
 	return nil
 }
 
-// validateStaticBaseline checks the fields a backend cannot do without:
-// the resource and scanned_at name the scan, and the chunk fields say
-// whether the scan is complete. A chunk missing any of them can never be
-// attributed or diffed.
 func validateStaticBaseline(baseline *otherlodepb.StaticBaseline) error {
 	if err := validateResource(baseline.GetResource()); err != nil {
 		return err
@@ -511,10 +418,6 @@ func validateStaticBaseline(baseline *otherlodepb.StaticBaseline) error {
 	return nil
 }
 
-// validateClassListing checks the fields a backend cannot do without: the
-// resource and listed_at name the listing, and the chunk fields say
-// whether the listing is complete. A chunk missing any of them can never
-// be attributed or read as a whole.
 func validateClassListing(listing *otherlodepb.ClassListing) error {
 	if err := validateResource(listing.GetResource()); err != nil {
 		return err
@@ -534,28 +437,14 @@ func validateClassListing(listing *otherlodepb.ClassListing) error {
 	return nil
 }
 
-// reject answers a decoded but unusable payload with 400.
 func (h *Handler) reject(w http.ResponseWriter, kind payloadKind, err error) {
 	h.logger.Warn("rejecting invalid "+kind.name, "error", err)
 	metrics.IngestRejected.Inc(kind.label, "invalid")
 	http.Error(w, "invalid "+kind.name+": "+err.Error(), http.StatusBadRequest)
 }
 
-// sinkRetryAfter is the Retry-After value, in seconds, on a 503 for a
-// payload the sink did not take. A sender that honours the header waits
-// longer than after a busy refusal.
 const sinkRetryAfter = "5"
 
-// sinkFailed answers a valid payload the sink did not take. A
-// *StatusError with a client-error status gets that status, with its
-// Retry-After when it has one. Any other error gets 503, "Retry-After: 5"
-// and no body. Either way the sender keeps the payload and retries instead
-// of the data being lost.
-//
-// It writes the first log line of each kind in an interval: one per
-// payload type, status and cause class. A sink marks the cause class with
-// WithReason, using the reasons of the forward failure metric; an error
-// without one is class "error". The metric counts every failure.
 func (h *Handler) sinkFailed(w http.ResponseWriter, kind payloadKind, err error) {
 	metrics.IngestRejected.Inc(kind.label, "sink")
 	reason := reasonOf(err)
@@ -581,10 +470,6 @@ func (h *Handler) sinkFailed(w http.ResponseWriter, kind payloadKind, err error)
 	w.WriteHeader(http.StatusServiceUnavailable)
 }
 
-// readRequest reads r's body. It reports false after writing the error
-// response itself: 415 for the wrong media type or a content encoding
-// other than identity, 413 for a body over maxBodyBytes, 400 for a body
-// that cannot be read. kind names the payload in metrics labels.
 func (h *Handler) readRequest(w http.ResponseWriter, r *http.Request, kind payloadKind) ([]byte, bool) {
 	if !checkContentType(w, r) {
 		metrics.IngestRejected.Inc(kind.label, "content_type")
@@ -598,12 +483,6 @@ func (h *Handler) readRequest(w http.ResponseWriter, r *http.Request, kind paylo
 	return body, true
 }
 
-// withinLimit counts the elements of body from the wire format, before
-// anything decodes it. It reports false after answering 413 "payload has
-// too many elements" and counting reason "too_many_elements", for a body
-// over the limit of its kind. A body that is not valid protobuf passes
-// unless the count passed the limit first, and unmarshal refuses it. The
-// log line never quotes the body.
 func (h *Handler) withinLimit(w http.ResponseWriter, body []byte, kind payloadKind) bool {
 	if _, err := countElements(body, kind.message, kind.limit); !errors.Is(err, errTooManyElements) {
 		return true
@@ -614,29 +493,15 @@ func (h *Handler) withinLimit(w http.ResponseWriter, body []byte, kind payloadKi
 	return false
 }
 
-// admission is the outcome of asking for a decode slot.
 type admission int
 
 const (
-	// acquired means the request holds a slot.
 	acquired admission = iota
-	// busy means the slot wait ended with every slot taken.
 	busy
-	// canceled means the client's own context ended.
 	canceled
-	// timeout means the request budget had ended before the wait began,
-	// while the client was still connected.
 	timeout
 )
 
-// acquire waits for a free decode slot. Without a cap it returns true at
-// once. It reports false when it took no slot, after answering 503 with
-// "Retry-After: 1". ctx carries the request budget, and requestCtx is the
-// client's own context. The wait is the slot wait or the time left in ctx,
-// whichever is shorter. If requestCtx ends first, it counts reason
-// "canceled". If ctx had ended before the wait began, it counts reason
-// "timeout". If the wait ends first, it counts reason "busy". The refusal
-// is logged through refuse.
 func (h *Handler) acquire(ctx, requestCtx context.Context, w http.ResponseWriter, kind payloadKind) bool {
 	if h.slots == nil {
 		return true
@@ -653,9 +518,6 @@ func (h *Handler) acquire(ctx, requestCtx context.Context, w http.ResponseWriter
 	return false
 }
 
-// admit decides the admission outcome. It takes a slot only for acquired.
-// wait is at most the time left in ctx, so a wait of zero or less means the
-// budget has ended even before ctx reports it.
 func (h *Handler) admit(ctx, requestCtx context.Context, wait time.Duration) admission {
 	if requestCtx.Err() != nil {
 		return canceled
@@ -677,12 +539,6 @@ func (h *Handler) admit(ctx, requestCtx context.Context, wait time.Duration) adm
 	return busy
 }
 
-// refuse answers 503 with "Retry-After: 1", counts the refusal under the
-// reason that outcome names, and logs it. Such refusals come in bursts while
-// the collector is overloaded or its clients are slow, so it writes at most
-// one line per busyLogInterval for each of busy and timeout. The line
-// counts the refusals since the previous line. wait is the time the request
-// waited.
 func (h *Handler) refuse(w http.ResponseWriter, kind payloadKind, outcome admission, wait time.Duration) {
 	w.Header().Set("Retry-After", "1")
 	switch outcome {
@@ -709,16 +565,12 @@ func (h *Handler) refuse(w http.ResponseWriter, kind payloadKind, outcome admiss
 	w.WriteHeader(http.StatusServiceUnavailable)
 }
 
-// free frees the slot that a successful acquire took.
 func (h *Handler) free() {
 	if h.slots != nil {
 		<-h.slots
 	}
 }
 
-// unmarshal decodes body into msg. It reports false after writing a 400
-// for anything that is not valid protobuf. kind names the payload in log
-// lines, error bodies, and metrics labels.
 func (h *Handler) unmarshal(w http.ResponseWriter, body []byte, msg proto.Message, kind payloadKind) bool {
 	if err := proto.Unmarshal(body, msg); err != nil {
 		h.logger.Warn("rejecting malformed "+kind.name, "error", err)
@@ -729,12 +581,6 @@ func (h *Handler) unmarshal(w http.ResponseWriter, body []byte, msg proto.Messag
 	return true
 }
 
-// checkContentType accepts application/x-protobuf with any parameters,
-// so a client that appends a charset is not turned away. It rejects a
-// Content-Encoding other than identity, since the handler does not
-// decompress and would misread the body as malformed protobuf. All
-// Content-Encoding lines are joined, and every entry must be empty or
-// identity.
 func checkContentType(w http.ResponseWriter, r *http.Request) bool {
 	for _, enc := range strings.Split(strings.Join(r.Header.Values("Content-Encoding"), ","), ",") {
 		if enc = strings.TrimSpace(enc); enc != "" && !strings.EqualFold(enc, "identity") {
@@ -750,8 +596,6 @@ func checkContentType(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
-// readBody reads the request body up to maxBodyBytes. On failure it
-// writes the error response and returns the metrics reason label.
 func readBody(w http.ResponseWriter, r *http.Request) (body []byte, reason string, err error) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	body, err = io.ReadAll(r.Body)

@@ -11,8 +11,6 @@ import (
 	"github.com/otherlodehq/otherlode-collector/metrics"
 )
 
-// recordingSink records every payload it receives. It stands in for the
-// real sink a processor wraps.
 type recordingSink struct {
 	deltaBatches []*otherlodepb.DeltaBatch
 	manifests    []*otherlodepb.ProbeManifest
@@ -190,9 +188,6 @@ func TestEnvironment_EqualValue_CounterUnchanged(t *testing.T) {
 	}
 }
 
-// TestEnvironment_SameNameAsTheServerReadsIt_NoMismatch pins that the
-// processor compares environments as the server does: trimmed and
-// lowercased. " Prod " and "prod" are one environment there.
 func TestEnvironment_SameNameAsTheServerReadsIt_NoMismatch(t *testing.T) {
 	tests := map[Action]string{Insert: " Prod ", Upsert: "prod"}
 	for action, want := range tests {

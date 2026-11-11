@@ -34,8 +34,6 @@ func placeholder(text string) *otherlodepb.ConditionPart {
 	return part(otherlodepb.ConditionPartKind_PLACEHOLDER, text)
 }
 
-// site builds a branch site with the given condition and one CASE
-// outcome carrying caseLabel.
 func site(condition []*otherlodepb.ConditionPart, caseLabel []*otherlodepb.ConditionPart) *otherlodepb.BranchSite {
 	return &otherlodepb.BranchSite{
 		Condition: condition,
@@ -82,10 +80,8 @@ func listingWith(names ...string) *otherlodepb.ClassListing {
 	}
 }
 
-// testSecret is a redaction secret of exactly MinSecretBytes.
 var testSecret = []byte("0123456789abcdef0123456789abcdef")
 
-// allLiterals is a config that redacts every literal.
 func allLiterals() RedactionConfig {
 	return RedactionConfig{AllLiterals: true, Secret: testSecret}
 }
@@ -287,7 +283,6 @@ func TestRedaction_Counter_CountsReplacedPartsPerPayload(t *testing.T) {
 	}
 }
 
-// unknownBytes is one field that no message in the schema declares.
 func unknownBytes() []byte {
 	b := protowire.AppendTag(nil, 9999, protowire.BytesType)
 	return protowire.AppendString(b, "a newer literal")
@@ -394,8 +389,6 @@ func TestRedactionConfig_Enabled(t *testing.T) {
 	}
 }
 
-// strippedCase builds one payload type, with or without an unknown field
-// on a nested message, and reads back the resource that reached next.
 type strippedCase struct {
 	name    string
 	payload string
@@ -573,9 +566,6 @@ func TestRedaction_StrippedPayloads_CounterIncrementsPerPayload(t *testing.T) {
 	}
 }
 
-// The bindings know a probe's outside caller and a manifest's failed
-// classes (agent ADRs 0064 and 0065), so redaction keeps both and does
-// not mark the payload stripped.
 func TestRedaction_On_OutsideCallerAndFailedClassesKept(t *testing.T) {
 	next := &recordingSink{}
 	r := NewRedaction(next, allLiterals(), nil)
@@ -605,9 +595,6 @@ func TestRedaction_On_OutsideCallerAndFailedClassesKept(t *testing.T) {
 	}
 }
 
-// The bindings know an endpoint's template kind (agent ADR 0073), so
-// redaction keeps a regex endpoint's mark and template and does not mark
-// the payload stripped.
 func TestRedaction_On_RegexTemplateKindKept(t *testing.T) {
 	next := &recordingSink{}
 	r := NewRedaction(next, allLiterals(), nil)
@@ -631,9 +618,6 @@ func TestRedaction_On_RegexTemplateKindKept(t *testing.T) {
 	}
 }
 
-// The bindings know the servlet pattern template kind (agent ADR 0074), so
-// redaction keeps a servlet pattern endpoint's kind and template and does
-// not mark the payload stripped.
 func TestRedaction_On_ServletPatternTemplateKindKept(t *testing.T) {
 	next := &recordingSink{}
 	r := NewRedaction(next, allLiterals(), nil)
@@ -659,8 +643,6 @@ func TestRedaction_On_ServletPatternTemplateKindKept(t *testing.T) {
 	}
 }
 
-// The bindings know framework markers (agent ADR 0072), so redaction keeps
-// each marker's id, classes and time and does not mark the payload stripped.
 func TestRedaction_On_FrameworkMarkersKept(t *testing.T) {
 	next := &recordingSink{}
 	r := NewRedaction(next, allLiterals(), nil)
@@ -688,8 +670,6 @@ func TestRedaction_On_FrameworkMarkersKept(t *testing.T) {
 	}
 }
 
-// The bindings know the ROUTES_NOT_COUNTED module kind (agent ADR 0017), so
-// redaction keeps it and does not mark the payload stripped.
 func TestRedaction_On_RoutesNotCountedModuleKindKept(t *testing.T) {
 	next := &recordingSink{}
 	r := NewRedaction(next, allLiterals(), nil)
@@ -716,8 +696,6 @@ func TestRedaction_On_RoutesNotCountedModuleKindKept(t *testing.T) {
 	}
 }
 
-// The bindings know the CONFIGURED_OFF module kind (agent ADR 0017), so
-// redaction keeps it and does not mark the payload stripped.
 func TestRedaction_On_ConfiguredOffModuleKindKept(t *testing.T) {
 	next := &recordingSink{}
 	r := NewRedaction(next, allLiterals(), nil)
@@ -744,10 +722,6 @@ func TestRedaction_On_ConfiguredOffModuleKindKept(t *testing.T) {
 	}
 }
 
-// The bindings know a disabled module's kind (agent ADR 0017) and the
-// payload sequence and pending-since stamp on a delta batch and a manifest
-// (agent ADR 0068), so redaction keeps them and does not mark either
-// payload stripped.
 func TestRedaction_On_ModuleKindAndPendingCountsFieldsKept(t *testing.T) {
 	next := &recordingSink{}
 	r := NewRedaction(next, allLiterals(), nil)
@@ -795,8 +769,6 @@ func TestRedaction_On_ModuleKindAndPendingCountsFieldsKept(t *testing.T) {
 	}
 }
 
-// The bindings know a delta batch's flush_complete (agent ADR 0077), so
-// redaction keeps it and does not mark the batch stripped.
 func TestRedaction_On_FlushCompleteKept(t *testing.T) {
 	next := &recordingSink{}
 	r := NewRedaction(next, allLiterals(), nil)
@@ -853,8 +825,6 @@ func TestRedaction_On_ManifestConfirmedKept(t *testing.T) {
 	}
 }
 
-// Class names are not string literals, so redaction keeps every name and
-// the include rules, even with every literal redacted.
 func TestRedaction_On_ClassListingNamesAndRulesKept(t *testing.T) {
 	next := &recordingSink{}
 	r := NewRedaction(next, allLiterals(), nil)
@@ -916,11 +886,6 @@ func TestRedaction_On_UnknownFieldsDroppedFromClassListing(t *testing.T) {
 	}
 }
 
-// TestRedaction_On_ClassesFailedToInitializeKept pins that the bindings
-// know a manifest's classes that failed to initialize, its unplaced
-// verification failure count, whether the verifier was watched and the
-// initializer slot kinds, so redaction
-// passes them on and marks nothing stripped (agent ADR 0071).
 func TestRedaction_On_ClassesFailedToInitializeKept(t *testing.T) {
 	next := &recordingSink{}
 	r := NewRedaction(next, blocked(t, "never-matches"), nil)

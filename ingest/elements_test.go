@@ -19,8 +19,6 @@ import (
 	"github.com/otherlodehq/otherlode-collector/metrics"
 )
 
-// referenceCount counts the messages and repeated elements of m by
-// walking the decoded message, as countElements does from the wire.
 func referenceCount(m protoreflect.Message) int {
 	n := 0
 	m.Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
@@ -203,8 +201,6 @@ func elementCases() []elementCase {
 	}
 }
 
-// bodyWithElements returns a valid payload of c's kind that holds exactly
-// total elements, by appending empty elements to the marshaled message.
 func bodyWithElements(t *testing.T, c elementCase, total int) []byte {
 	t.Helper()
 	wire, err := proto.Marshal(c.valid)

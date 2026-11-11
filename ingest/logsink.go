@@ -22,9 +22,8 @@ func NewLogSink(logger *slog.Logger) *LogSink {
 	return &LogSink{logger: logger}
 }
 
-// AcceptDeltaBatch logs the batch's identity and the size of each list
-// it carries, and the time its run's counts have been pending since when
-// there are pending counts. It never fails.
+// AcceptDeltaBatch logs the batch's identity and the size of each list it
+// carries. It never fails.
 func (s *LogSink) AcceptDeltaBatch(_ context.Context, batch *otherlodepb.DeltaBatch) ([]Notice, error) {
 	attrs := []any{
 		"namespace", batch.GetResource().GetServiceNamespace(),
@@ -45,9 +44,8 @@ func (s *LogSink) AcceptDeltaBatch(_ context.Context, batch *otherlodepb.DeltaBa
 	return nil, nil
 }
 
-// AcceptManifest logs the manifest's identity and the size of each list
-// it carries, and the time its run's counts have been pending since when
-// there are pending counts. It never fails.
+// AcceptManifest logs the manifest's identity and the size of each list it
+// carries. It never fails.
 func (s *LogSink) AcceptManifest(_ context.Context, manifest *otherlodepb.ProbeManifest) ([]Notice, error) {
 	attrs := []any{
 		"namespace", manifest.GetResource().GetServiceNamespace(),

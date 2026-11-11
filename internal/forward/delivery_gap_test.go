@@ -17,8 +17,6 @@ import (
 	"github.com/otherlodehq/otherlode-collector/ingest"
 )
 
-// flakyUpstream refuses requests while refuse returns a status other than
-// zero, and stores the body of every request it accepts.
 type flakyUpstream struct {
 	*httptest.Server
 	attempts atomic.Int32
@@ -52,8 +50,6 @@ func (u *flakyUpstream) storedCount() int {
 	return u.stored
 }
 
-// postDelta sends a one-probe delta batch, the shape an agent sends for code
-// that ran once, and returns the collector's status.
 func postDelta(t *testing.T, frontURL string) int {
 	t.Helper()
 	body, err := proto.Marshal(&otherlodepb.DeltaBatch{
@@ -71,11 +67,6 @@ func postDelta(t *testing.T, frontURL string) int {
 	return resp.StatusCode
 }
 
-// requireNotLost fails when the collector answered 202 and the upstream
-// has not stored the payload. An agent that gets 202 never sends the batch
-// again, so a 202 is a promise that the payload is kept. The collector
-// answers only once it has the upstream's answer, so the check needs no
-// wait.
 func requireNotLost(t *testing.T, status int, up *flakyUpstream) {
 	t.Helper()
 	if status == http.StatusAccepted && up.storedCount() == 0 {

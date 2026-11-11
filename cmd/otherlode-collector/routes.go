@@ -14,69 +14,24 @@ import (
 	"github.com/otherlodehq/otherlode-collector/metrics"
 )
 
-// The two timings are variables so a test can shorten them.
 var (
-	// requestBudget is the time the ingest handler gives one request, from
-	// the moment it starts on it. It is below the server's 10 second write
-	// timeout, so the agent gets the collector's answer.
+	// requestBudget must stay below the 10 second server write timeout.
 	requestBudget = 9 * time.Second
 
-	// decodeSlotWait is the longest a request waits for a decode slot.
 	decodeSlotWait = time.Second
 )
 
-// routeConfig holds what registerRoutes wires together. Every field may be
-// left as its zero value.
 type routeConfig struct {
-	// Logger receives the route and processor logs. Nil means slog.Default.
-	Logger *slog.Logger
-	// AuthTokens, when non-nil, makes the ingest routes require an
-	// "Authorization: Bearer <token>" header whose token is in the set.
-	// Each request reads the current set, so a token file re-read applies
-	// without a restart.
-	AuthTokens *auth.TokenSet
-	// Limiter, when non-nil, throttles the ingest routes per client IP. It
-	// runs before auth, so a flood is capped whether or not it carries a
-	// valid token.
-	Limiter *ratelimit.Limiter
-	// MaxDecodes caps concurrent request decodes. Zero or less means no
-	// cap.
-	MaxDecodes int
-	// Forward configures the backend relay. An empty Forward.URL logs
-	// payloads instead of forwarding them.
-	Forward forward.Config
-	// Environment, when its Value is non-empty, adds a processor.Environment.
+	Logger      *slog.Logger
+	AuthTokens  *auth.TokenSet
+	Limiter     *ratelimit.Limiter
+	MaxDecodes  int
+	Forward     forward.Config
 	Environment processor.EnvironmentConfig
-	// Namespace, when its Value is non-empty, adds a processor.Namespace.
-	Namespace processor.NamespaceConfig
-	// Redaction, when enabled, adds a processor.Redaction. It must pass
-	// Validate.
-	Redaction processor.RedactionConfig
+	Namespace   processor.NamespaceConfig
+	Redaction   processor.RedactionConfig
 }
 
-// registerRoutes wires the ingest handler and health check onto mux as cfg
-// describes. /healthz and /metrics stay open, unauthenticated and
-// unthrottled: the first for liveness and readiness probes, the second for
-// a Prometheus scraper. /metrics exposes only counts.
-//
-// When cfg.Forward.URL is non-empty, ingested payloads are relayed to that
-// backend by a forward.ForwardingSink. registerRoutes returns it so the
-// caller can shut it down. An empty URL logs payloads instead of
-// forwarding them, so local, development and CI runs work with no backend.
-// registerRoutes then returns a nil *forward.ForwardingSink. A URL that
-// cannot be used is returned as an error.
-//
-// A processor.Environment wraps the chosen sink. It writes the environment
-// onto delta batches, manifests, static baselines and class listings
-// before the sink sees them. A processor.Namespace wraps the sink
-// outside it and writes the service namespace onto the same four
-// payloads. A processor.Redaction wraps the sink outside both. It hides string literals, re-keys branch
-// and site keys and drops unknown fields before any payload is forwarded.
-// It logs a fingerprint of its secret, never the secret, and the
-// forwarder sends the same fingerprint in the forward.RedactionHeader
-// header of every request. A redaction
-// config that fails Validate is returned as an error. A zero config
-// leaves the matching processor out of the chain.
 func registerRoutes(mux *http.ServeMux, cfg routeConfig) (*forward.ForwardingSink, error) {
 	logger := cfg.Logger
 	if logger == nil {

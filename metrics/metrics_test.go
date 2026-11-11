@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-// renderOne renders a single unregistered counter, so tests do not touch
-// the process-wide registry and can run more than once per process.
 func renderOne(c *Counter) string {
 	var b strings.Builder
 	c.render(&b)
@@ -77,7 +75,6 @@ func TestCounter_WrongLabelCount_Panics(t *testing.T) {
 }
 
 func TestNewCounter_DuplicateName_Panics(t *testing.T) {
-	// A fresh name per run, since registration is process-wide.
 	name := fmt.Sprintf("test_dup_%d_total", time.Now().UnixNano())
 	NewCounter(name, "Dup.")
 	defer func() {

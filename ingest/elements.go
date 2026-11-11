@@ -7,30 +7,9 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-// The most elements that a payload of each kind may hold. An element is
-// every embedded message and every element of a repeated field, at every
-// depth, so a call edge inside a branch site inside a probe location
-// counts three times and a referenced class name counts once. The
-// resource counts as one.
-//
-// The handler counts a body's elements before it decodes the body, since a
-// protobuf body decodes to far more memory than its size. It refuses a
-// payload over its limit with 413.
-//
-// The limits bound the decoded message, and the sink's write takes more
-// memory on top of it. Peaks measured through the hosted server's ingest
-// route, as the heap above the idle heap with the body, the decoded message
-// and the write included, at one element under each limit:
-//
-//   - delta batch: 499990 deltas in 8 MiB, 140 MiB
-//   - manifest: 99990 probe locations in 4 MiB, 165 MiB, and with long
-//     method descriptors in 14 MiB, 230 MiB
-//   - static baseline: 199990 declared methods in 3 MiB, 167 MiB
-//   - class listing: 99990 names in 2 MiB, 12 MiB
-//
-// A 16 MiB body of long strings costs about as much as the manifest above,
-// whatever its element count, so the largest peak of one payload is about
-// 230 MiB.
+// The limits on elements per payload kind. An element is every embedded
+// message and every element of a repeated field, at every depth. The resource
+// counts as one. The handler refuses a payload over its limit with 413.
 const (
 	// MaxDeltaBatchElements is the most elements a delta batch may hold.
 	MaxDeltaBatchElements = 500_000
@@ -44,12 +23,8 @@ const (
 	MaxClassListingElements = 100_000
 )
 
-// tooManyElementsReason is the metrics reason label for a payload refused
-// for its element count.
 const tooManyElementsReason = "too_many_elements"
 
-// maxNestingDepth bounds the walk of nested messages. The schema nests five
-// levels deep, so a payload deeper than this is not an agent's.
 const maxNestingDepth = 32
 
 var (
@@ -57,12 +32,6 @@ var (
 	errBadWire         = errors.New("payload is not valid protobuf")
 )
 
-// countElements walks body as the wire form of a message described by md
-// and returns the number of embedded messages and repeated elements in it,
-// at every depth. It allocates none of them. It stops at once when the
-// count passes limit and returns errTooManyElements, with the count so far.
-// A body that is not valid protobuf gives errBadWire. Fields the descriptor
-// does not name are not counted, since the decoder keeps them as raw bytes.
 func countElements(body []byte, md protoreflect.MessageDescriptor, limit int) (int, error) {
 	w := elementWalker{left: limit}
 	err := w.message(body, md, 0)
@@ -147,8 +116,6 @@ func scalarKind(kind protoreflect.Kind) bool {
 	return true
 }
 
-// packedValues returns how many values a packed repeated field of kind
-// holds in content.
 func packedValues(kind protoreflect.Kind, content []byte) int {
 	switch kind {
 	case protoreflect.Fixed32Kind, protoreflect.Sfixed32Kind, protoreflect.FloatKind:

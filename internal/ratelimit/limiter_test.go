@@ -111,7 +111,6 @@ func TestLimiter_ClientIPHeader_KeysOnHeaderNotRemoteAddr(t *testing.T) {
 	defer l.Stop()
 	handler, reached := newTestHandler(l)
 
-	// Same proxy address for both, different clients behind it.
 	rec1 := doRequestWithHeader(handler, "10.0.0.1:1234", "X-Forwarded-For", "203.0.113.5")
 	rec2 := doRequestWithHeader(handler, "10.0.0.1:1234", "X-Forwarded-For", "203.0.113.6")
 	rec3 := doRequestWithHeader(handler, "10.0.0.1:1234", "X-Forwarded-For", "203.0.113.5")
@@ -132,8 +131,6 @@ func TestLimiter_ClientIPHeader_UsesLastForwardedEntry(t *testing.T) {
 	defer l.Stop()
 	handler, _ := newTestHandler(l)
 
-	// A client can prepend anything it likes; only the entry added by the
-	// nearest proxy (the last one) may be trusted.
 	doRequestWithHeader(handler, "10.0.0.1:1234", "X-Forwarded-For", "1.1.1.1, 203.0.113.5")
 	rec := doRequestWithHeader(handler, "10.0.0.1:1234", "X-Forwarded-For", "2.2.2.2, 203.0.113.5")
 	if rec.Code != http.StatusTooManyRequests {
@@ -146,7 +143,6 @@ func TestLimiter_ClientIPHeader_SeparateHeaderLinesShareProxyEntry(t *testing.T)
 	defer l.Stop()
 	handler, _ := newTestHandler(l)
 
-	// The client sends the first line. The proxy adds the second line.
 	codes := make([]int, 5)
 	for i := range codes {
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
@@ -300,7 +296,6 @@ func TestLimiter_IdleClientIsEvicted(t *testing.T) {
 		t.Fatal("visitor not tracked after its first request")
 	}
 
-	// Two ticks is enough for the idle threshold to pass and be observed.
 	deadline := time.Now().Add(time.Second)
 	for l.hasVisitor("10.0.0.1") {
 		if time.Now().After(deadline) {
@@ -311,7 +306,7 @@ func TestLimiter_IdleClientIsEvicted(t *testing.T) {
 }
 
 func TestLimiter_EvictedClientStartsWithAFullBucket(t *testing.T) {
-	l := New(rate.Limit(0.001), 1, withStaleAfter(20*time.Millisecond)) // refill far slower than the test
+	l := New(rate.Limit(0.001), 1, withStaleAfter(20*time.Millisecond))
 	defer l.Stop()
 	handler, _ := newTestHandler(l)
 

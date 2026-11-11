@@ -21,9 +21,6 @@ import (
 	"github.com/otherlodehq/otherlode-collector/ingest"
 )
 
-// captureSink records what it receives. It sits behind a real
-// ingest.Handler, so these tests prove a backend decodes ForwardingSink's
-// output into the message the front Handler started with.
 type captureSink struct {
 	mu           sync.Mutex
 	deltaBatches []*otherlodepb.DeltaBatch
@@ -102,10 +99,6 @@ func (c *captureSink) baselinesSnapshot() []*otherlodepb.StaticBaseline {
 	return append([]*otherlodepb.StaticBaseline(nil), c.baselines...)
 }
 
-// newReferenceBackend stands up a real ingest.Handler, the same one the
-// collector runs, in front of a capturing Sink. It is not a storage
-// backend. It shows that ForwardingSink's output is valid input to the
-// collector's own protobuf-over-HTTP surface.
 func newReferenceBackend() (*httptest.Server, *captureSink) {
 	sink := &captureSink{}
 	mux := http.NewServeMux()
@@ -113,9 +106,6 @@ func newReferenceBackend() (*httptest.Server, *captureSink) {
 	return httptest.NewServer(mux), sink
 }
 
-// newFrontCollector stands up the agent-facing side: a real ingest.Handler
-// backed by a ForwardingSink pointed at backendURL, the same wiring
-// cmd/otherlode-collector uses when OTHERLODE_COLLECTOR_FORWARD_URL is set.
 func newFrontCollector(t *testing.T, backendURL string) *httptest.Server {
 	t.Helper()
 	fwd := mustNewSink(t, testConfig(backendURL))
@@ -349,8 +339,6 @@ func TestIntegration_ClassListing_RoundTripsThroughRealHandlerOnBothEnds(t *test
 	}
 }
 
-// frontCollectorWith stands up a real ingest.Handler with a decode cap in
-// front of a ForwardingSink, like newFrontCollector.
 func frontCollectorWith(t *testing.T, cfg Config, maxDecodes int, opts ...ingest.HandlerOption) (*httptest.Server, *ForwardingSink) {
 	t.Helper()
 	fwd := mustNewSink(t, cfg)
@@ -376,8 +364,6 @@ func postManifest(t *testing.T, frontURL, serviceName string) *http.Response {
 	return resp
 }
 
-// TestIntegration_BackendStatus_IsWhatTheAgentSees pins the status mapping
-// end to end through a real ingest.Handler.
 func TestIntegration_BackendStatus_IsWhatTheAgentSees(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -435,9 +421,6 @@ func TestIntegration_BackendTimeout_AnswersServiceUnavailable(t *testing.T) {
 	}
 }
 
-// TestIntegration_DecodeSlot_ReleasedBeforeTheNetworkCall proves a slow
-// backend does not hold decode slots: with one decode slot, a second
-// request still reaches the backend while the first waits for it.
 func TestIntegration_DecodeSlot_ReleasedBeforeTheNetworkCall(t *testing.T) {
 	url, entered, release := blockingBackend(t)
 	cfg := testConfig(url)
@@ -458,9 +441,6 @@ func TestIntegration_DecodeSlot_ReleasedBeforeTheNetworkCall(t *testing.T) {
 	}
 }
 
-// TestIntegration_DecodeSlot_HeldByASinkThatNeverReleases proves the decode cap still
-// bounds the work before the network call: a sink that keeps its slot
-// makes the next request wait and then get 503.
 func TestIntegration_DecodeSlot_HeldByASinkThatNeverReleases(t *testing.T) {
 	gate := make(chan struct{})
 	entered := make(chan struct{}, 4)
@@ -479,8 +459,6 @@ func TestIntegration_DecodeSlot_HeldByASinkThatNeverReleases(t *testing.T) {
 	}
 }
 
-// holdingSink keeps every manifest in AcceptManifest until gate closes and
-// never releases the decode slot.
 type holdingSink struct {
 	captureSink
 	entered chan struct{}
@@ -493,9 +471,6 @@ func (h *holdingSink) AcceptManifest(context.Context, *otherlodepb.ProbeManifest
 	return nil, nil
 }
 
-// TestIntegration_ForwardCap_AnswersServiceUnavailable proves requests in
-// flight to the backend are capped apart from the decode slots, and that a
-// request past the cap gets 503 with Retry-After.
 func TestIntegration_ForwardCap_AnswersServiceUnavailable(t *testing.T) {
 	url, entered, release := blockingBackend(t)
 	cfg := testConfig(url)
@@ -529,10 +504,6 @@ func TestIntegration_ForwardCap_AnswersServiceUnavailable(t *testing.T) {
 	}
 }
 
-// TestIntegration_Budget_SlowForwardGets503BeforeTheBudgetEnds proves the
-// forward's deadline is the time left in the request budget when that is
-// shorter than the request timeout, and that the answer is a 503 the agent
-// can read.
 func TestIntegration_Budget_SlowForwardGets503BeforeTheBudgetEnds(t *testing.T) {
 	url, entered, release := blockingBackend(t)
 	defer release()
@@ -554,8 +525,6 @@ func TestIntegration_Budget_SlowForwardGets503BeforeTheBudgetEnds(t *testing.T) 
 	}
 }
 
-// TestIntegration_Budget_SlotWaitAndForwardShareIt proves the time a
-// request waits for a decode slot comes off the time its forward has.
 func TestIntegration_Budget_SlotWaitAndForwardShareIt(t *testing.T) {
 	entered := make(chan struct{}, 4)
 	url, _, release := blockingBackend(t)
@@ -595,15 +564,12 @@ func TestIntegration_Budget_SlotWaitAndForwardShareIt(t *testing.T) {
 	}
 }
 
-// slotHoldSink keeps the first manifest's decode slot for hold, then
-// passes it on. Later manifests go straight to the sink.
 type slotHoldSink struct {
 	ingest.Sink
 	hold    time.Duration
 	entered chan struct{}
 	once    sync.Once
 
-	// deadline is the deadline of the context the second manifest carried.
 	deadline atomic.Pointer[time.Time]
 }
 
@@ -621,9 +587,6 @@ func (s *slotHoldSink) AcceptManifest(ctx context.Context, m *otherlodepb.ProbeM
 	return s.Sink.AcceptManifest(ctx, m)
 }
 
-// TestIntegration_Shutdown_FinishesInFlightAndRefusesNew proves a request
-// in flight when shutdown starts is answered from the backend, and a
-// request after it gets 503.
 func TestIntegration_Shutdown_FinishesInFlightAndRefusesNew(t *testing.T) {
 	url, entered, release := blockingBackend(t)
 	cfg := testConfig(url)
@@ -656,9 +619,6 @@ func TestIntegration_Shutdown_FinishesInFlightAndRefusesNew(t *testing.T) {
 	<-shutdownDone
 }
 
-// TestIntegration_ForwardCapPushesBackOnDecoding proves a request that
-// waits for a forward slot still holds its decode slot, so the requests
-// holding a marshaled body never outnumber the decode cap.
 func TestIntegration_ForwardCapPushesBackOnDecoding(t *testing.T) {
 	url, entered, release := blockingBackend(t)
 	defer release()
@@ -691,8 +651,6 @@ func TestIntegration_ForwardCapPushesBackOnDecoding(t *testing.T) {
 	}
 	wg.Wait()
 
-	// One request holds the forward slot and has given its decode slot
-	// back. The others wait for the forward slot, each with a decode slot.
 	if got := counting.maxActive.Load(); got > decodes+1 {
 		t.Errorf("requests inside the sink at once = %d, want at most %d: the decode cap %d plus the one holding the forward slot", got, decodes+1, decodes)
 	}
@@ -701,7 +659,6 @@ func TestIntegration_ForwardCapPushesBackOnDecoding(t *testing.T) {
 	}
 }
 
-// countingSink counts the requests inside AcceptManifest at once.
 type countingSink struct {
 	ingest.Sink
 	active    atomic.Int32
@@ -720,8 +677,6 @@ func (c *countingSink) AcceptManifest(ctx context.Context, m *otherlodepb.ProbeM
 	return c.Sink.AcceptManifest(ctx, m)
 }
 
-// TestIntegration_SinkFailureLogs_KeepApartByCause proves a 5xx from the
-// backend does not hold back the first log line of a shutdown refusal.
 func TestIntegration_SinkFailureLogs_KeepApartByCause(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

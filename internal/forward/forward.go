@@ -1,9 +1,6 @@
-// Package forward relays decoded ingest payloads to a backend. It uses the
-// shape this collector accepts from the agent: the same content type and
-// paths, with a protobuf body. It plays the role of an OTel Collector
-// exporter. It marshals the decoded message again, so the body it sends
-// holds what the processors left, not the bytes the agent sent. It changes
-// no field itself.
+// Package forward relays decoded ingest payloads to a backend. It marshals
+// each decoded message again, so the body it sends holds what the processors
+// left, not the bytes the agent sent.
 package forward
 
 import (
@@ -33,90 +30,59 @@ import (
 const (
 	defaultRequestTimeout = 8 * time.Second
 
-	// defaultMaxConcurrentForwards is how many requests may be in flight to
-	// the backend at once. The default client keeps that many idle
-	// connections.
 	defaultMaxConcurrentForwards = 32
 
-	// unexpectedStatusLogInterval is the shortest gap between two log lines
-	// for a 2xx answer other than 202.
 	unexpectedStatusLogInterval = time.Minute
 
-	// maxResponseBytes bounds how much of a backend response body is read
-	// before the connection is released. A 2xx carries no body worth
-	// reading; the read only exists to let the connection be reused.
 	maxResponseBytes = 64 << 10
 
-	// maxErrorCodeBytes bounds the backend error code a failure log carries.
 	maxErrorCodeBytes = 64
 
-	// maxRetryAfterBytes bounds the Retry-After value passed on to the
-	// agent.
 	maxRetryAfterBytes = 64
 
-	// RedactionHeader is the request header that carries the redaction
-	// secret's fingerprint while redaction is on (ADR 0007).
+	// RedactionHeader is the request header that carries the redaction secret's
+	// fingerprint.
 	RedactionHeader = "Otherlode-Redaction"
 )
 
 // Config configures a ForwardingSink. URL is required. Every other field
 // falls back to a default when left zero.
 type Config struct {
-	// URL is the backend's base URL, with an http or https scheme and a
-	// host. NewForwardingSink rejects a URL with a query, a fragment or
-	// user info. ForwardingSink posts the re-marshaled payload to
-	// URL+ingest.DeltaBatchPath, URL+ingest.ManifestPath,
-	// URL+ingest.StaticBaselinePath and URL+ingest.ClassListingPath.
-	// Trailing slashes are removed so the joined path has a single
-	// separator.
+	// URL is the backend's base URL, with an http or https scheme and a host
+	// and no query, fragment or user info. The sink removes trailing slashes
+	// and posts to URL plus the ingest path of each payload.
 	URL string
 
 	// AuthToken yields the key that authenticates the collector to the
-	// backend. The sink asks for it before every request and sends it as
-	// "Authorization: Bearer <key>" when it is not empty. A nil AuthToken
-	// sends no header. This is a separate trust boundary from the
-	// agent-facing bearer token the collector itself checks: the agent
-	// authenticates to the collector, the collector authenticates to the
-	// backend, and the two need not share a secret.
+	// backend. The sink reads it before every request and sends a non-empty
+	// key as "Authorization: Bearer <key>". Nil sends no header.
 	AuthToken TokenSource
 
-	// RedactionFingerprint, when not empty, goes on every request in the
-	// RedactionHeader header. It is the fingerprint of the redaction
-	// secret, which the collector computes once at startup, never the
-	// secret. A backend can then refuse a payload that no redacting
-	// collector sent, such as one an agent posted to it directly. Leave it
-	// empty while redaction is off, so no header is sent. It must be a
-	// valid header value.
+	// RedactionFingerprint, when not empty, is sent in the RedactionHeader
+	// header of every request. It must be a valid header value.
 	RedactionFingerprint string
 
-	// HTTPClient sends the relayed requests. Defaults to a client that
-	// keeps idle connections to the backend. Each request carries its own
-	// timeout via context, so the client itself does not need one. The
-	// default client does not follow redirects: a 3xx response is a
-	// failure. A client you supply should do the same, because a followed
-	// redirect can turn the POST into a GET and a 2xx from the target
-	// would count as stored.
+	// HTTPClient sends the requests. The default client keeps idle
+	// connections to the backend and does not follow redirects. A client you
+	// supply must not follow them either, or a redirected POST can turn into
+	// a GET whose 2xx counts as stored.
 	HTTPClient *http.Client
 
-	// Logger receives the Warn logs for the notices the backend sends
-	// with an accepted payload. Defaults to slog.Default().
+	// Logger receives the logs for backend notices and unexpected statuses.
+	// The default is slog.Default().
 	Logger *slog.Logger
 
-	// RequestTimeout bounds the one HTTP attempt made for a payload.
-	// Defaults to defaultRequestTimeout.
+	// RequestTimeout bounds the one HTTP attempt made for a payload. It also
+	// bounds the wait for a forward slot. The default is 8 seconds.
 	RequestTimeout time.Duration
 
-	// MaxConcurrentForwards caps the requests in flight to the backend. A
-	// forward that finds no free slot waits for one until its context ends
-	// or RequestTimeout passes, then fails. Defaults to
-	// defaultMaxConcurrentForwards. The default client keeps this many idle
-	// connections to the backend.
+	// MaxConcurrentForwards caps the requests in flight to the backend. The
+	// default is 32.
 	MaxConcurrentForwards int
 }
 
-// TokenSource yields the key a ForwardingSink sends to the backend.
-// The sink calls Token before every request, so the key can change
-// while the sink runs. Token must be safe for concurrent use.
+// TokenSource yields the key a ForwardingSink sends to the backend. The sink
+// calls Token before every request. Token must be safe for concurrent use.
 type TokenSource interface {
 	Token() string
 }
@@ -127,7 +93,6 @@ type StaticToken string
 // Token returns the fixed key.
 func (t StaticToken) Token() string { return string(t) }
 
-// authToken returns the key to send, or "" when there is none.
 func (c Config) authToken() string {
 	if c.AuthToken == nil {
 		return ""
@@ -151,11 +116,6 @@ func (c Config) withDefaults() Config {
 	return c
 }
 
-// newHTTPClient returns a client for one backend host that keeps up to
-// conns idle connections to it. It keeps
-// http.DefaultTransport's proxy function, so HTTPS_PROXY, HTTP_PROXY and
-// NO_PROXY apply. It does not follow redirects, so a 3xx response reaches
-// send as a failure.
 func newHTTPClient(conns int) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.MaxIdleConnsPerHost = conns
@@ -170,62 +130,41 @@ func newHTTPClient(conns int) *http.Client {
 	}
 }
 
-// outbound is a payload already marshaled to wire bytes, ready to POST.
-// owner names the instance in errors, so an operator can tell whose data
-// was not stored.
 type outbound struct {
 	owner instance
 	path  string
 	body  []byte
 }
 
-// ErrShuttingDown is the error AcceptDeltaBatch, AcceptManifest,
-// AcceptStaticBaseline and AcceptClassListing return once Shutdown has
-// started. The ingest handler answers 503 for it, so the agent keeps its
-// counts and sends the payload again on its next flush.
+// ErrShuttingDown is the error an Accept method returns once Shutdown has
+// started. The ingest handler answers 503 for it.
 var ErrShuttingDown = errors.New("forward: sink is shutting down")
 
-// ForwardingSink is a Sink that relays decoded payloads to a backend. An
-// Accept method posts the payload and waits for the backend's answer, in
-// one attempt bounded by Config.RequestTimeout. It returns nil only when
-// the backend answered 202, so the handler tells the agent the payload is
-// stored only when it is. Any other 2xx is an error: it comes from a wrong
-// URL or a proxy, not from Otherlode.
+// ForwardingSink is an ingest.Sink that posts each decoded payload to a
+// backend and waits for the answer. An Accept method makes one attempt,
+// bounded by Config.RequestTimeout, and retries nothing. It returns nil only
+// for a 202 answer. It returns no notices, since backend notices go to the
+// log.
 //
-// An Accept method marshals the payload, waits for a forward slot and then
-// calls ingest.ReleaseDecodeSlot, so the request holds no decode slot
-// during the network call. A request that waits for a forward slot still
-// holds its decode slot, so a full forward cap pushes back on decoding.
-// Requests in flight to the backend are capped by
-// Config.MaxConcurrentForwards.
+// A 4xx answer comes back as an *ingest.StatusError with the backend's
+// status. Any other failure, including another 2xx, a 5xx, a redirect, a
+// timeout and a transport error, comes back as a plain error.
 //
-// For any other outcome the Accept method returns an error. A 429 or any
-// other 4xx from the backend comes back as an *ingest.StatusError with the
-// backend's status, and the handler answers with that status. A 5xx, a
-// redirect, a timeout or a transport error comes back as a plain error,
-// and the handler answers 503 with Retry-After. The sink retries
-// nothing: the agent sends the payload again on its next flush. An Accept
-// method returns no notices, since the backend's notices go to the log.
+// An Accept method releases its decode slot before the network call, once it
+// holds a forward slot.
 type ForwardingSink struct {
 	cfg Config
 
-	// ctx bounds every attempt. Shutdown cancels it once its own deadline
-	// passes, so a slow in-flight request cannot outlive the shutdown
-	// budget.
 	ctx    context.Context
 	cancel context.CancelFunc
 
 	noticeLog *noticeLog
 
-	// slots is a counting semaphore for requests in flight to the backend.
 	slots chan struct{}
 
-	// statusLog limits the log lines for a 2xx answer other than 202.
 	statusLog *ratelog.Limiter
 
-	// mu holds begin's shutdown check and its wg.Add together against
-	// Shutdown setting closed. A request that passed the check is counted
-	// before Shutdown starts waiting, not after it.
+	// mu makes begin's closed check and wg.Add atomic against Shutdown.
 	mu           sync.RWMutex
 	closed       bool
 	shutdownOnce sync.Once
@@ -234,10 +173,9 @@ type ForwardingSink struct {
 
 var _ ingest.Sink = (*ForwardingSink)(nil)
 
-// NewForwardingSink returns a ready-to-use ForwardingSink. Call Shutdown
-// to wait for the requests in flight. It returns an error for a cfg.URL
-// that could never reach a backend, so a bad setting stops the collector
-// at startup rather than failing every payload.
+// NewForwardingSink returns a ForwardingSink. It returns an error for a
+// cfg.URL that fails ValidateURL or a RedactionFingerprint that is not a
+// valid header value. Call Shutdown to wait for the requests in flight.
 func NewForwardingSink(cfg Config) (*ForwardingSink, error) {
 	cfg = cfg.withDefaults()
 
@@ -266,16 +204,10 @@ func NewForwardingSink(cfg Config) (*ForwardingSink, error) {
 	}, nil
 }
 
-// ValidateURL checks that raw is an absolute http or https URL with a
-// host and no query, fragment or user info. The sink joins paths onto the
-// URL by string concatenation, so a query or fragment would end up in the
-// middle of the request URL. User info would be logged as written. It
-// returns raw with trailing slashes removed, and the lowercase scheme.
-//
-// An error quotes raw only when raw holds no "@". A value with one can
-// hold a password, even one that does not parse as user info, such as
-// "user:pass@host" with no scheme, and a parse error can quote part of it,
-// so such a value that does not parse gets a fixed message.
+// ValidateURL checks that raw is an absolute http or https URL with a host
+// and no query, fragment or user info. It returns raw with trailing slashes
+// removed and the lowercase scheme. An error never quotes a raw that holds
+// "@", since such a value can hold a password.
 func ValidateURL(raw string) (base, scheme string, err error) {
 	if raw == "" {
 		return "", "", errors.New("forward URL is empty")
@@ -313,18 +245,12 @@ func ValidateURL(raw string) (base, scheme string, err error) {
 	return strings.TrimRight(raw, "/"), u.Scheme, nil
 }
 
-// instance names the service instance a payload came from: the service's
-// identity, which is its namespace and name, plus the instance ID. An
-// empty namespace is the unspecified one.
 type instance struct {
 	namespace string
 	service   string
 	id        string
 }
 
-// instanceOf reads the instance from res. It trims the namespace and
-// service name, as the backend does when it keys a service, so one
-// service never splits in two. A nil res gives the zero instance.
 func instanceOf(res *otherlodepb.ResourceAttributes) instance {
 	return instance{
 		namespace: strings.TrimSpace(res.GetServiceNamespace()),
@@ -333,8 +259,6 @@ func instanceOf(res *otherlodepb.ResourceAttributes) instance {
 	}
 }
 
-// String names the instance for people to read in errors and logs. It
-// quotes each part, so a reader can tell where one part ends.
 func (i instance) String() string {
 	if i.namespace == "" {
 		return fmt.Sprintf("service %q instance %q", i.service, i.id)
@@ -352,20 +276,16 @@ func (s *ForwardingSink) AcceptManifest(ctx context.Context, manifest *otherlode
 	return nil, s.forward(ctx, manifest, instanceOf(manifest.GetResource()), ingest.ManifestPath)
 }
 
-// AcceptStaticBaseline posts baseline to the backend and waits for its
-// answer.
+// AcceptStaticBaseline posts baseline to the backend and waits for its answer.
 func (s *ForwardingSink) AcceptStaticBaseline(ctx context.Context, baseline *otherlodepb.StaticBaseline) ([]ingest.Notice, error) {
 	return nil, s.forward(ctx, baseline, instanceOf(baseline.GetResource()), ingest.StaticBaselinePath)
 }
 
-// AcceptClassListing posts listing to the backend and waits for its
-// answer.
+// AcceptClassListing posts listing to the backend and waits for its answer.
 func (s *ForwardingSink) AcceptClassListing(ctx context.Context, listing *otherlodepb.ClassListing) ([]ingest.Notice, error) {
 	return nil, s.forward(ctx, listing, instanceOf(listing.GetResource()), ingest.ClassListingPath)
 }
 
-// begin counts a request in flight. It reports false once Shutdown has
-// started.
 func (s *ForwardingSink) begin() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -376,10 +296,6 @@ func (s *ForwardingSink) begin() bool {
 	return true
 }
 
-// forward marshals msg and posts it to path. It returns nil when the
-// backend answered 202. ctx is the agent's request: when it ends, the post
-// ends. The forward ends by the deadline of ctx too, so it shares the
-// request's time budget.
 func (s *ForwardingSink) forward(ctx context.Context, msg proto.Message, owner instance, path string) error {
 	payload := ingest.PayloadLabel(path)
 	if !s.begin() {
@@ -415,9 +331,6 @@ func (s *ForwardingSink) forward(ctx context.Context, msg proto.Message, owner i
 	return nil
 }
 
-// acquire waits for a free forward slot until ctx ends or
-// cfg.RequestTimeout passes. It returns the reason the failure is counted
-// under and the error when it took no slot.
 func (s *ForwardingSink) acquire(ctx context.Context, owner instance) (reason string, err error) {
 	select {
 	case s.slots <- struct{}{}:
@@ -440,17 +353,8 @@ func (s *ForwardingSink) acquire(ctx context.Context, owner instance) (reason st
 	return reason, fmt.Errorf("forward for %s: no forward slot came free (max %d): %w", owner, cap(s.slots), errNoForwardSlot)
 }
 
-// errNoForwardSlot is the cause of a forward that waited in vain for a
-// free slot.
 var errNoForwardSlot = errors.New("max concurrent forwards reached")
 
-// send makes the one HTTP attempt, bounded by cfg.RequestTimeout and by
-// ctx. It returns nil for a 202 answer. For anything else it returns the
-// error the handler answers with and the reason the failure is counted
-// under: "rate_limited" for a 429 and "rejected" for another 4xx, both as
-// an *ingest.StatusError; "server_error" for any other status; "timeout",
-// "canceled" or "transport" when no answer came; "unexpected_status" for another 2xx;
-// "request" when the request could not be built.
 func (s *ForwardingSink) send(ctx context.Context, item outbound) (reason string, err error) {
 	reqCtx, cancel := context.WithTimeout(ctx, s.cfg.RequestTimeout)
 	defer cancel()
@@ -506,9 +410,6 @@ func (s *ForwardingSink) send(ctx context.Context, item outbound) (reason string
 	}
 }
 
-// logUnexpectedStatus logs a 2xx answer other than 202 at ERROR, at most
-// once per status in an interval. Such an answer comes from a wrong URL or
-// a proxy, not from Otherlode, so the payload is not known to be stored.
 func (s *ForwardingSink) logUnexpectedStatus(item outbound, status int) {
 	unlogged, ok := s.statusLog.Allow(strconv.Itoa(status))
 	if !ok {
@@ -518,9 +419,6 @@ func (s *ForwardingSink) logUnexpectedStatus(item outbound, status int) {
 		"status", status, "path", item.path, "owner", item.owner.String(), "unlogged_unexpected_statuses", unlogged)
 }
 
-// backendError is a response from the backend outside 2xx. code is the
-// "error" field of the backend's JSON body, as errorCode cleans it, or ""
-// when the body has none.
 type backendError struct {
 	status string
 	code   string
@@ -531,11 +429,6 @@ func (e *backendError) Error() string {
 	return "backend returned " + e.status + " for " + e.owner.String()
 }
 
-// errorCode returns the "error" string of body, a JSON object such as
-// {"error":"redaction_required"}, or "" when body is not such an object.
-// The backend's code goes into a log line, so errorCode keeps at most
-// maxErrorCodeBytes and replaces each byte outside printable ASCII with
-// '?'.
 func errorCode(body []byte) string {
 	var parsed struct {
 		Error string `json:"error"`
@@ -555,8 +448,6 @@ func errorCode(body []byte) string {
 	return string(code)
 }
 
-// cleanRetryAfter returns v when it is a short run of printable ASCII, and
-// "" otherwise. The handler passes it to the agent as written.
 func cleanRetryAfter(v string) string {
 	v = strings.TrimSpace(v)
 	if len(v) > maxRetryAfterBytes {
@@ -570,14 +461,10 @@ func cleanRetryAfter(v string) string {
 	return v
 }
 
-// Shutdown stops accepting new payloads and waits for the requests in
-// flight. A payload that arrives after Shutdown starts gets
-// ErrShuttingDown, so the handler answers 503.
-//
-// ctx bounds the wait. When it ends, Shutdown cancels the requests still
-// in flight, so each answers 503, and waits for them to return.
-//
-// Only the first call does anything. Later calls return at once.
+// Shutdown stops accepting payloads and waits for the requests in flight. A
+// payload that arrives later gets ErrShuttingDown. When ctx ends, Shutdown
+// cancels the requests still in flight, so each fails, and waits for them to
+// return. Only the first call does anything.
 func (s *ForwardingSink) Shutdown(ctx context.Context) {
 	first := false
 	s.shutdownOnce.Do(func() { first = true })

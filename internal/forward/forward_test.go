@@ -24,7 +24,6 @@ import (
 	"github.com/otherlodehq/otherlode-collector/metrics"
 )
 
-// mustNewSink constructs a sink for a config the test expects to be valid.
 func mustNewSink(t *testing.T, cfg Config) *ForwardingSink {
 	t.Helper()
 	sink, err := NewForwardingSink(cfg)
@@ -221,7 +220,7 @@ func TestForwardingSink_Shutdown_SecondCallIsANoOp(t *testing.T) {
 
 	sink := mustNewSink(t, testConfig(backend.URL))
 	sink.Shutdown(context.Background())
-	sink.Shutdown(context.Background()) // must not panic on the closed stop channel
+	sink.Shutdown(context.Background())
 }
 
 func TestNewForwardingSink_InvalidURL_ReturnsError(t *testing.T) {
@@ -298,15 +297,6 @@ func TestInstanceOf_NilResource_ZeroInstance(t *testing.T) {
 	}
 }
 
-// TestDefaultHTTPClient_UsesTheEnvironmentProxy pins that the default
-// forwarding client honours HTTPS_PROXY, HTTP_PROXY and NO_PROXY, since a
-// backend outside the network may be reachable only through a proxy. The
-// healthcheck client must do the opposite; see
-// TestHealthcheckClient_NeverUsesAProxy in cmd/otherlode-collector.
-//
-// The test compares functions instead of setting the variables, because
-// http.ProxyFromEnvironment reads them once per process and an earlier
-// test may already have made it do so.
 func TestDefaultHTTPClient_UsesTheEnvironmentProxy(t *testing.T) {
 	client := Config{}.withDefaults().HTTPClient
 	transport, ok := client.Transport.(*http.Transport)
@@ -316,6 +306,7 @@ func TestDefaultHTTPClient_UsesTheEnvironmentProxy(t *testing.T) {
 	if transport.Proxy == nil {
 		t.Fatal("forward transport has no proxy function; HTTPS_PROXY would be ignored")
 	}
+	// http.ProxyFromEnvironment reads the proxy variables once per process, so t.Setenv cannot test this.
 	if reflect.ValueOf(transport.Proxy).Pointer() != reflect.ValueOf(http.ProxyFromEnvironment).Pointer() {
 		t.Fatal("forward transport's proxy function is not http.ProxyFromEnvironment")
 	}
@@ -327,7 +318,6 @@ func TestForwardingSink_LargeResponseBody_DoesNotBlockDelivery(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		received.Store(true)
 		w.WriteHeader(http.StatusAccepted)
-		// Several times the read bound; the sink must not try to drain it all.
 		chunk := bytes.Repeat([]byte("x"), 1<<20)
 		for i := 0; i < 4; i++ {
 			if _, err := w.Write(chunk); err != nil {
@@ -358,7 +348,6 @@ func TestForwardingSink_LargeResponseBody_DoesNotBlockDelivery(t *testing.T) {
 	}
 }
 
-// swappableToken is a TokenSource a test can change while the sink runs.
 type swappableToken struct {
 	v atomic.Value
 }
@@ -463,8 +452,6 @@ func TestNewForwardingSink_PlainHTTPWithKey_Warns(t *testing.T) {
 	}
 }
 
-// blockingBackend starts a backend that holds every request until the
-// returned release function runs. entered receives one value per request.
 func blockingBackend(t *testing.T) (url string, entered chan struct{}, release func()) {
 	t.Helper()
 	gate := make(chan struct{})
@@ -490,7 +477,6 @@ func waitEntered(t *testing.T, entered chan struct{}) {
 	}
 }
 
-// sendEveryKind passes one payload of each kind to sink.
 func sendEveryKind(t *testing.T, sink *ForwardingSink) {
 	t.Helper()
 	res := &otherlodepb.ResourceAttributes{ServiceName: "demo-service", ServiceInstanceId: "instance-1", RunId: "run-1"}
@@ -508,8 +494,6 @@ func sendEveryKind(t *testing.T, sink *ForwardingSink) {
 	}
 }
 
-// redactionHeaders runs a sink with fingerprint over every payload
-// kind and returns the RedactionHeader values each path received.
 func redactionHeaders(t *testing.T, fingerprint string) map[string][]string {
 	t.Helper()
 	var mu sync.Mutex
@@ -560,7 +544,6 @@ func TestNewForwardingSink_FingerprintNotAHeaderValue_ReturnsError(t *testing.T)
 	}
 }
 
-// syncBuffer is a bytes.Buffer safe for the sink's worker and the test.
 type syncBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -594,9 +577,6 @@ func (b *syncBuffer) String() string {
 	return b.buf.String()
 }
 
-// testConfig returns a Config with a short request timeout in place of the
-// multi-second default. Its logger discards the Warn lines these tests
-// trigger on purpose.
 func testConfig(url string) Config {
 	return Config{
 		URL:            url,
@@ -609,8 +589,6 @@ func failedCount(payload, reason string) int64 {
 	return metrics.ForwardFailed.Value(payload, reason)
 }
 
-// statusBackend starts a backend that answers every request with status,
-// the given headers and body, and counts the requests it gets.
 func statusBackend(t *testing.T, status int, headers map[string]string, body string) (*httptest.Server, *atomic.Int32) {
 	t.Helper()
 	var attempts atomic.Int32
@@ -643,9 +621,6 @@ func TestForwardingSink_202_ReturnsNilAndCountsDelivered(t *testing.T) {
 	}
 }
 
-// TestForwardingSink_Non202_2xx_IsNotAConfirmation pins that a 2xx other
-// than 202 returns a plain error, which the handler answers with 503, and
-// is counted as a failure, not a delivery.
 func TestForwardingSink_Non202_2xx_IsNotAConfirmation(t *testing.T) {
 	for _, status := range []int{http.StatusOK, http.StatusNoContent, http.StatusPartialContent} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
@@ -677,8 +652,6 @@ func TestForwardingSink_Non202_2xx_IsNotAConfirmation(t *testing.T) {
 	}
 }
 
-// TestForwardingSink_Non202_2xx_LogsAtErrorOncePerStatus pins that the log
-// line is an ERROR with the status, and that a burst writes one line.
 func TestForwardingSink_Non202_2xx_LogsAtErrorOncePerStatus(t *testing.T) {
 	backend, _ := statusBackend(t, http.StatusOK, nil, "")
 	var logs syncBuffer

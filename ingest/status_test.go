@@ -13,7 +13,6 @@ import (
 	"github.com/otherlodehq/otherlode-collector/metrics"
 )
 
-// errSink fails every payload with err.
 type errSink struct{ err error }
 
 func (s errSink) AcceptDeltaBatch(context.Context, *otherlodepb.DeltaBatch) ([]Notice, error) {

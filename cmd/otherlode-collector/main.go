@@ -1,10 +1,6 @@
-// Command otherlode-collector is the ingest/decode layer for the
-// Otherlode agent's OTLP-style push export. It has no storage of its own:
-// decoded payloads go to an ingest.Sink, either a forward.ForwardingSink
-// that relays them to a backend or, with no backend configured, a LogSink
-// that only logs them. With no arguments it serves; "healthcheck" probes
-// the collector's own /healthz and exits 0 or 1, for use as the container
-// image's HEALTHCHECK. Any other argument list exits 2 with a usage line.
+// Command otherlode-collector receives the Otherlode agent's payloads, runs its
+// processors and forwards them to a backend. With no backend it only logs them.
+// The argument "healthcheck" probes /healthz and exits 0 or 1.
 package main
 
 import (
@@ -41,22 +37,12 @@ import (
 const (
 	defaultAddr = ":4319"
 
-	// shutdownTimeout bounds the whole shutdown: stopping the HTTP server
-	// and waiting for the forwards in flight, which run at the same time. docker stop
-	// sends SIGKILL 10 seconds after SIGTERM, so a longer budget would be
-	// cut short there.
+	// docker stop sends SIGKILL 10 seconds after SIGTERM.
 	shutdownTimeout = 10 * time.Second
 
-	// defaultRateLimitRPS and defaultRateLimitBurst set the per-client-IP
-	// token bucket. An agent flushes every 60 seconds by default, so
-	// several instances behind one shared address stay far below 5
-	// requests per second. A request storm from one address is still
-	// capped.
 	defaultRateLimitRPS   = 5
 	defaultRateLimitBurst = 20
 
-	// authFileLabel and forwardFileLabel name the two token files in logs
-	// and in the reload failure counter.
 	authFileLabel    = "auth"
 	forwardFileLabel = "forward"
 )
@@ -204,8 +190,6 @@ func main() {
 	}
 }
 
-// listen binds addr. It logs that the collector is listening only after
-// the bind succeeds, so a port in use never logs a false start.
 func listen(addr string, logger *slog.Logger) (net.Listener, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -215,12 +199,6 @@ func listen(addr string, logger *slog.Logger) (net.Listener, error) {
 	return ln, nil
 }
 
-// shutdown stops srv and runs drain, which may be nil, at the same time.
-// Both share one deadline of timeout. drain starts at once, so a request
-// that reaches the forwarder after drain starts gets 503, and the agent
-// sends it again. A request already in the forwarder finishes within the
-// deadline.
-// shutdown waits for both and returns srv's error.
 func shutdown(srv *http.Server, drain func(context.Context), timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -236,8 +214,6 @@ func shutdown(srv *http.Server, drain func(context.Context), timeout time.Durati
 	return err
 }
 
-// resolveLogLevel parses OTHERLODE_COLLECTOR_LOG_LEVEL (debug, info, warn,
-// or error, in any case). Unset means info.
 func resolveLogLevel(raw string) (slog.Level, error) {
 	if raw == "" {
 		return slog.LevelInfo, nil
@@ -249,22 +225,6 @@ func resolveLogLevel(raw string) (slog.Level, error) {
 	return level, nil
 }
 
-// resolveAuthTokens decides the tokens (if any) the ingest routes require.
-// OTHERLODE_COLLECTOR_AUTH_TOKEN holds one token or a comma-separated list.
-// OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE names a file with one token per line,
-// which the caller re-reads through the returned tokenfile.File. Setting
-// both is an error.
-//
-// A non-nil secret is the redaction secret. A token equal to it is an
-// error at startup and on each re-read of the file, since every agent
-// holds an auth token.
-//
-// It fails closed. With neither variable set, it is an error unless
-// OTHERLODE_COLLECTOR_INSECURE_NO_AUTH explicitly opts out, and then both
-// results are nil. OTHERLODE_COLLECTOR_INSECURE_NO_AUTH takes
-// strconv.ParseBool syntax. A value it cannot parse is an error even when
-// a token is set, so a typo cannot pass for "off". A token file that cannot be read or holds no token is
-// an error even with the opt-out, since the operator asked for that file.
 func resolveAuthTokens(getenv func(string) string, secret []byte) (*auth.TokenSet, *tokenfile.File, error) {
 	raw := getenv("OTHERLODE_COLLECTOR_AUTH_TOKEN")
 	path := getenv("OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE")
@@ -309,8 +269,6 @@ func resolveAuthTokens(getenv func(string) string, secret []byte) (*auth.TokenSe
 		"refusing to start without auth (set OTHERLODE_COLLECTOR_INSECURE_NO_AUTH=1 to run unauthenticated)")
 }
 
-// parseTokenList splits a comma-separated token list and trims spaces
-// around each token. An empty entry is an error that gives its position.
 func parseTokenList(raw string) ([]string, error) {
 	parts := strings.Split(raw, ",")
 	tokens := make([]string, 0, len(parts))
@@ -324,12 +282,10 @@ func parseTokenList(raw string) ([]string, error) {
 	return tokens, nil
 }
 
-// forwardKey is a forward.TokenSource whose key a token file replaces.
 type forwardKey struct {
 	key atomic.Pointer[string]
 }
 
-// Token returns the last key stored, or "" before the first store.
 func (k *forwardKey) Token() string {
 	if p := k.key.Load(); p != nil {
 		return *p
@@ -337,14 +293,10 @@ func (k *forwardKey) Token() string {
 	return ""
 }
 
-// store keeps the first of tokens. The file check allows only one.
 func (k *forwardKey) store(tokens []string) {
 	k.key.Store(&tokens[0])
 }
 
-// checkHeaderValue returns an error when key holds a control character,
-// which an HTTP header value cannot carry. A request with such a key fails
-// in the HTTP client, and every forward would fail.
 func checkHeaderValue(key string) error {
 	for i := 0; i < len(key); i++ {
 		if c := key[i]; c < 0x20 || c == 0x7f {
@@ -354,8 +306,6 @@ func checkHeaderValue(key string) error {
 	return nil
 }
 
-// checkForwardKeys accepts a key file only when it holds exactly one key
-// that is usable as a header value.
 func checkForwardKeys(tokens []string) error {
 	if err := tokenfile.ExactlyOne(tokens); err != nil {
 		return err
@@ -363,10 +313,6 @@ func checkForwardKeys(tokens []string) error {
 	return checkHeaderValue(tokens[0])
 }
 
-// resolveRateLimit returns the per-client-IP rate and burst for the ingest
-// routes. An unset variable takes its default. A rate of 0 turns limiting
-// off. A value that does not parse, a negative or non-finite rate, or a
-// burst below 1 with limiting on is an error.
 func resolveRateLimit(rpsRaw, burstRaw string) (rate.Limit, int, error) {
 	rps := float64(defaultRateLimitRPS)
 	if rpsRaw != "" {
@@ -399,9 +345,6 @@ func resolveRateLimit(rpsRaw, burstRaw string) (rate.Limit, int, error) {
 	return rate.Limit(rps), burst, nil
 }
 
-// resolveIPv6Prefix returns the IPv6 prefix length, in bits, that the rate
-// limiter keys on. An unset variable gives 128, one bucket per address.
-// A value that is not an integer from 1 to 128 is an error.
 func resolveIPv6Prefix(raw string) (int, error) {
 	if raw == "" {
 		return ratelimit.DefaultIPv6Prefix, nil
@@ -416,27 +359,6 @@ func resolveIPv6Prefix(raw string) (int, error) {
 	return bits, nil
 }
 
-// resolveForwardConfig reads the forwarding settings from the environment
-// via getenv. Only OTHERLODE_COLLECTOR_FORWARD_URL decides whether
-// forwarding is on; the rest tune it and fall back to the forward package's
-// defaults when unset. A value that is present but not a positive number or
-// duration is an error.
-//
-// The backend key comes from OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN, with
-// spaces around it trimmed, or from the file that
-// OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE names, which must hold
-// exactly one token. Setting both is an error, and so is a variable that
-// holds only spaces. A key with a control character is an error, for a
-// variable and for each read of a file. For a file, the caller re-reads it
-// through the returned tokenfile.File.
-//
-// A set OTHERLODE_COLLECTOR_FORWARD_URL must pass forward.ValidateURL.
-// Setting either key variable without OTHERLODE_COLLECTOR_FORWARD_URL is an
-// error, since the operator meant to forward.
-//
-// A non-nil secret is the redaction secret. A key equal to it is an error
-// at startup and on each re-read of the file, since the backend holds the
-// key.
 func resolveForwardConfig(getenv func(string) string, secret []byte) (forward.Config, *tokenfile.File, error) {
 	cfg := forward.Config{URL: getenv("OTHERLODE_COLLECTOR_FORWARD_URL")}
 	if cfg.URL != "" {
@@ -495,10 +417,6 @@ func resolveForwardConfig(getenv func(string) string, secret []byte) (forward.Co
 	return cfg, file, nil
 }
 
-// resolveMaxConcurrentDecodes returns the cap on concurrent request
-// decodes from OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES. It defaults to
-// runtime.GOMAXPROCS(0), because decoding is CPU-bound and more parallel
-// decodes than CPUs add memory but no throughput.
 func resolveMaxConcurrentDecodes(getenv func(string) string) (int, error) {
 	n, err := positiveIntEnv(getenv, "OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES")
 	if err != nil {
@@ -510,8 +428,6 @@ func resolveMaxConcurrentDecodes(getenv func(string) string) (int, error) {
 	return n, nil
 }
 
-// positiveIntEnv returns the named variable as an int greater than zero,
-// or zero when it is unset.
 func positiveIntEnv(getenv func(string) string, name string) (int, error) {
 	raw := getenv(name)
 	if raw == "" {
@@ -527,8 +443,6 @@ func positiveIntEnv(getenv func(string) string, name string) (int, error) {
 	return n, nil
 }
 
-// positiveDurationEnv returns the named variable as a duration greater
-// than zero (Go syntax such as "30s" or "5m"), or zero when it is unset.
 func positiveDurationEnv(getenv func(string) string, name string) (time.Duration, error) {
 	raw := getenv(name)
 	if raw == "" {
@@ -544,15 +458,6 @@ func positiveDurationEnv(getenv func(string) string, name string) (time.Duration
 	return d, nil
 }
 
-// resolveEnvironment builds the processor.EnvironmentConfig from
-// OTHERLODE_COLLECTOR_ENVIRONMENT and
-// OTHERLODE_COLLECTOR_ENVIRONMENT_ACTION. It trims space around both. A
-// value that is blank after trimming turns the processor off. An action
-// with no value is an error: the operator meant to label payloads, and
-// starting without the label would hide that mistake. A value longer than
-// ingest.MaxResourceValueBytes is an error, since the ingest handler rejects
-// that environment from an agent too. A value that is not valid UTF-8 is an
-// error, since a payload that carries it cannot be encoded for forwarding.
 func resolveEnvironment(valueRaw, actionRaw string) (processor.EnvironmentConfig, error) {
 	value := strings.TrimSpace(valueRaw)
 	actionRaw = strings.TrimSpace(actionRaw)
@@ -581,17 +486,6 @@ func resolveEnvironment(valueRaw, actionRaw string) (processor.EnvironmentConfig
 	return processor.EnvironmentConfig{Value: value, Action: action}, nil
 }
 
-// resolveNamespace builds the processor.NamespaceConfig from
-// OTHERLODE_COLLECTOR_SERVICE_NAMESPACE and
-// OTHERLODE_COLLECTOR_SERVICE_NAMESPACE_ACTION. It trims space around
-// both. A value that is blank after trimming turns the processor off, so
-// each agent's namespace passes through unchanged. An action with no value
-// is an error: the operator meant to set a namespace, and starting without
-// it would hide that mistake. A value of "." or ".." is an error, since
-// the ingest handler rejects that namespace from an agent too. So is a
-// value longer than ingest.MaxResourceValueBytes. So is a value that is
-// not valid UTF-8, since a payload that carries it cannot be encoded for
-// forwarding.
 func resolveNamespace(valueRaw, actionRaw string) (processor.NamespaceConfig, error) {
 	value := strings.TrimSpace(valueRaw)
 	actionRaw = strings.TrimSpace(actionRaw)
@@ -623,15 +517,6 @@ func resolveNamespace(valueRaw, actionRaw string) (processor.NamespaceConfig, er
 	return processor.NamespaceConfig{Value: value, Action: action}, nil
 }
 
-// resolveRedaction builds the processor.RedactionConfig from
-// OTHERLODE_COLLECTOR_REDACT_BLOCKED_VALUES and
-// OTHERLODE_COLLECTOR_REDACT_ALL_LITERALS. The first holds one regular
-// expression per line, since a comma can appear inside a pattern. A line
-// that is blank after trimming space is skipped. Other lines are used as
-// written, apart from a trailing carriage return. A pattern that does not
-// compile is an error that names its line. The second is a boolean in
-// strconv.ParseBool syntax. An unparsable value is an error, so a typo
-// cannot leave redaction off.
 func resolveRedaction(blockedRaw, allLiteralsRaw string) (processor.RedactionConfig, error) {
 	var cfg processor.RedactionConfig
 	for i, line := range strings.Split(blockedRaw, "\n") {
@@ -656,8 +541,6 @@ func resolveRedaction(blockedRaw, allLiteralsRaw string) (processor.RedactionCon
 	return cfg, nil
 }
 
-// allOf returns a check that runs checks in order and returns the first
-// error.
 func allOf(checks ...func([]string) error) func([]string) error {
 	return func(tokens []string) error {
 		for _, check := range checks {
@@ -669,9 +552,6 @@ func allOf(checks ...func([]string) error) func([]string) error {
 	}
 }
 
-// notSecret returns a check that fails with message when a token equals
-// secret. A nil secret, which means redaction is off, accepts every token.
-// The comparison takes the same time for any token.
 func notSecret(secret []byte, message string) func([]string) error {
 	if secret == nil {
 		return func([]string) error { return nil }
@@ -690,18 +570,6 @@ func notSecret(secret []byte, message string) func([]string) error {
 	}
 }
 
-// readRedactionSecret returns the secret that keys the HMAC over branch
-// and site keys while redaction is on (ADR 0007).
-// OTHERLODE_COLLECTOR_REDACT_SECRET holds the secret, with spaces around it
-// trimmed. OTHERLODE_COLLECTOR_REDACT_SECRET_FILE names a file that holds
-// exactly one secret, read with the token file rules. Setting both is an
-// error. The file is read once: a secret that changed during a run would
-// change every key from then on.
-//
-// It fails closed. With redacting true, a missing secret is an error, and
-// so is a secret that fails processor.CheckSecret. With redacting false, a set
-// variable is an error: the operator meant to protect the keys, and
-// redaction is off. No error quotes the secret.
 func readRedactionSecret(getenv func(string) string, redacting bool) ([]byte, error) {
 	const (
 		valueVar = "OTHERLODE_COLLECTOR_REDACT_SECRET"

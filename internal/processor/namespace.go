@@ -12,8 +12,7 @@ import (
 )
 
 // NamespaceConfig configures a Namespace processor. Value is the service
-// namespace to stamp onto payloads. An empty Value turns the processor
-// off.
+// namespace to stamp. An empty Value means the processor is off.
 type NamespaceConfig struct {
 	Value  string
 	Action Action
@@ -21,17 +20,9 @@ type NamespaceConfig struct {
 
 // Namespace is an ingest.Sink that writes a configured service namespace
 // onto the resource of each delta batch, manifest, static baseline and
-// class listing. It then passes the payload to next. A service is known
-// by its namespace and its name. One collector often serves one team, so an
-// operator can set the team's namespace once here instead of on every
-// agent.
-//
-// Namespace compares values after it trims surrounding spaces. It keeps
-// case, since a namespace is part of a service's identity.
-//
-// It changes the resource of the decoded message in place. This is safe
-// because ingest.Handler decodes a fresh message for each request and
-// nothing else holds a reference to it.
+// class listing, then passes the payload to next. It compares values after
+// it trims the spaces around them, and keeps case. It changes the decoded
+// message in place.
 type Namespace struct {
 	next       ingest.Sink
 	cfg        NamespaceConfig
@@ -41,9 +32,8 @@ type Namespace struct {
 
 var _ ingest.Sink = (*Namespace)(nil)
 
-// NewNamespace returns a Namespace that applies cfg before it passes
-// payloads to next. It logs to logger, or to slog.Default() when logger
-// is nil.
+// NewNamespace returns a Namespace that applies cfg and passes payloads to
+// next. A nil logger means slog.Default().
 func NewNamespace(next ingest.Sink, cfg NamespaceConfig, logger *slog.Logger) *Namespace {
 	if logger == nil {
 		logger = slog.Default()
@@ -51,41 +41,30 @@ func NewNamespace(next ingest.Sink, cfg NamespaceConfig, logger *slog.Logger) *N
 	return &Namespace{next: next, cfg: cfg, logger: logger}
 }
 
-// AcceptDeltaBatch stamps the batch's resource with the configured
-// namespace, then passes the batch to next.
+// AcceptDeltaBatch stamps the batch's resource, then passes it to next.
 func (n *Namespace) AcceptDeltaBatch(ctx context.Context, batch *otherlodepb.DeltaBatch) ([]ingest.Notice, error) {
 	n.stamp(batch.GetResource(), "deltas")
 	return n.next.AcceptDeltaBatch(ctx, batch)
 }
 
-// AcceptManifest stamps the manifest's resource with the configured
-// namespace, then passes the manifest to next.
+// AcceptManifest stamps the manifest's resource, then passes it to next.
 func (n *Namespace) AcceptManifest(ctx context.Context, manifest *otherlodepb.ProbeManifest) ([]ingest.Notice, error) {
 	n.stamp(manifest.GetResource(), "manifest")
 	return n.next.AcceptManifest(ctx, manifest)
 }
 
-// AcceptStaticBaseline stamps the baseline's resource with the
-// configured namespace, then passes the baseline to next.
+// AcceptStaticBaseline stamps the baseline's resource, then passes it to next.
 func (n *Namespace) AcceptStaticBaseline(ctx context.Context, baseline *otherlodepb.StaticBaseline) ([]ingest.Notice, error) {
 	n.stamp(baseline.GetResource(), "static_baseline")
 	return n.next.AcceptStaticBaseline(ctx, baseline)
 }
 
-// AcceptClassListing stamps the listing's resource with the configured
-// namespace, then passes the listing to next.
+// AcceptClassListing stamps the listing's resource, then passes it to next.
 func (n *Namespace) AcceptClassListing(ctx context.Context, listing *otherlodepb.ClassListing) ([]ingest.Notice, error) {
 	n.stamp(listing.GetResource(), "class_listing")
 	return n.next.AcceptClassListing(ctx, listing)
 }
 
-// stamp applies the configured namespace to res. Under both actions it
-// fills in a namespace that is empty or only spaces. When the agent
-// named a different namespace, stamp counts and logs the mismatch, at
-// warn level the first time a service sends that namespace and at debug
-// after that. It overwrites the agent's value only under Upsert. A nil res is left
-// alone: ingest.Handler rejects such a payload before any sink sees it,
-// but a Namespace used without the handler must not panic on one.
 func (n *Namespace) stamp(res *otherlodepb.ResourceAttributes, payload string) {
 	if res == nil {
 		return

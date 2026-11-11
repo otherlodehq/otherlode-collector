@@ -13,10 +13,6 @@ import (
 	"github.com/otherlodehq/otherlode-collector/metrics"
 )
 
-// agentKey derives a key the way the agent's BranchKeys.digest does: hex
-// of the first 16 bytes of SHA-256 over the tag, class name, method name,
-// method descriptor, origin class, condition fingerprint and outcome
-// token, joined by NUL. A site key has no outcome token.
 func agentKey(tag, class, method, descriptor, origin, fingerprint string, outcome *string) string {
 	parts := []string{tag, class, method, descriptor, origin, fingerprint}
 	if outcome != nil {
@@ -26,8 +22,6 @@ func agentKey(tag, class, method, descriptor, origin, fingerprint string, outcom
 	return hex.EncodeToString(sum[:16])
 }
 
-// pricingKey is the branch key the agent sends for one outcome of a
-// condition that compares an environment variable with literal.
 func pricingKey(literal, outcome string) string {
 	fingerprint := `INVOKESTATIC java/lang/System.getenv(Ljava/lang/String;)Ljava/lang/String; LDC "` + literal + `"`
 	return agentKey("v1", "com.example.Pricing", "price", "()J", "", fingerprint, &outcome)
@@ -156,10 +150,6 @@ func TestRedaction_EmptyAndUnsetKeys_StayAsSent(t *testing.T) {
 	}
 }
 
-// hashSwitchMethod is one method's sites from a string switch the agent
-// could not read back: a switch on the subject's hash code whose case keys
-// are the literals' hash codes, an equals check for each literal, and a
-// plain switch on an int whose case key 7 matches no literal.
 func hashSwitchMethod() []*otherlodepb.BranchSite {
 	caseOutcome := func(key int32) *otherlodepb.BranchOutcome {
 		return &otherlodepb.BranchOutcome{Role: otherlodepb.BranchRole_CASE, CaseKey: int32Ptr(key)}
@@ -264,10 +254,6 @@ func TestRedaction_HashCodeCaseKeys_OnlyClearedInTheLiteralsMethod(t *testing.T)
 	}
 }
 
-// markedHashSwitchMethod is one method's sites from a newer agent: a
-// switch it marks string_hash_code_switch, whose literals are not in the
-// payload because the agent could not write the equals checks'
-// conditions, and an unmarked switch on an int.
 func markedHashSwitchMethod() []*otherlodepb.BranchSite {
 	return []*otherlodepb.BranchSite{
 		{
@@ -329,9 +315,6 @@ func TestRedaction_MarkedHashCodeSwitch_CaseKeysClearedWithoutLiterals(t *testin
 	}
 }
 
-// A blocked pattern that matches no literal still clears a marked
-// switch's case keys: the collector cannot tell which literal a key
-// hashes, so it cannot tell whether the pattern would have blocked it.
 func TestRedaction_MarkedHashCodeSwitch_ClearedWhenNoLiteralIsBlocked(t *testing.T) {
 	next := &recordingSink{}
 	r := NewRedaction(next, blocked(t, "^NO_SUCH_LITERAL$"), nil)
@@ -350,8 +333,6 @@ func TestRedaction_MarkedHashCodeSwitch_ClearedWhenNoLiteralIsBlocked(t *testing
 	}
 }
 
-// An agent that does not send the mark still gets the hash-code rule, and
-// a marked switch in one method leaves another method's int switch alone.
 func TestRedaction_MarkedAndUnmarkedMethods_EachRuleApplies(t *testing.T) {
 	next := &recordingSink{}
 	r := NewRedaction(next, allLiterals(), nil)
@@ -382,7 +363,6 @@ func TestRedaction_MarkedAndUnmarkedMethods_EachRuleApplies(t *testing.T) {
 }
 
 func TestJavaStringHash_MatchesJava(t *testing.T) {
-	// Values printed by Java's String.hashCode().
 	for s, want := range map[string]int32{
 		"":                       0,
 		"hello":                  99162322,

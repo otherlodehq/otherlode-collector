@@ -161,9 +161,6 @@ func TestRunHealthcheck_NonOK_ErrorsNamingStatus(t *testing.T) {
 	}
 }
 
-// TestRunHealthcheck_Hung_FailsAtDeadline covers a collector that accepts
-// the connection and never answers: the probe must fail on its own
-// deadline, which healthcheckTimeout keeps under the Dockerfile's 3s.
 func TestRunHealthcheck_Hung_FailsAtDeadline(t *testing.T) {
 	if healthcheckTimeout >= 3*time.Second {
 		t.Fatalf("healthcheckTimeout = %v, must stay under the Dockerfile's HEALTHCHECK --timeout=3s", healthcheckTimeout)
@@ -202,8 +199,6 @@ func TestRunHealthcheck_Unreachable_Errors(t *testing.T) {
 	}
 }
 
-// TestRunHealthcheck_AgainstRegisteredRoutes probes the real mux, so the
-// subcommand and the /healthz route cannot drift apart.
 func TestRunHealthcheck_AgainstRegisteredRoutes(t *testing.T) {
 	mux := http.NewServeMux()
 	if _, err := registerRoutes(mux, routeConfig{AuthTokens: auth.NewTokenSet([]string{"token"})}); err != nil {

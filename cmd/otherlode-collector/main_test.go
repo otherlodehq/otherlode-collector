@@ -23,8 +23,6 @@ import (
 	"github.com/otherlodehq/otherlode-collector/metrics"
 )
 
-// writeTokenFile writes content to a file in a fresh temp directory, so
-// each test owns its token file.
 func writeTokenFile(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "tokens")
@@ -34,8 +32,6 @@ func writeTokenFile(t *testing.T, content string) string {
 	return path
 }
 
-// replaceTokenFile swaps path's content through a rename, so a re-read
-// never sees a half-written file.
 func replaceTokenFile(t *testing.T, path, content string) {
 	t.Helper()
 	tmp := path + ".tmp"
@@ -234,10 +230,6 @@ func TestListen_FreePort_LogsListening(t *testing.T) {
 	}
 }
 
-// TestShutdown_SlowHTTPDrain_ForwarderStillGetsItsTime pins that the
-// forwarder drains while the HTTP server stops, not after it. A request
-// that outlasts the deadline must not leave the forwarder an expired
-// context.
 func TestShutdown_SlowHTTPDrain_ForwarderStillGetsItsTime(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
@@ -261,7 +253,6 @@ func TestShutdown_SlowHTTPDrain_ForwarderStillGetsItsTime(t *testing.T) {
 
 	var drainErr error
 	drain := func(ctx context.Context) {
-		// Stands in for one final delivery attempt that needs some time.
 		select {
 		case <-time.After(100 * time.Millisecond):
 		case <-ctx.Done():
@@ -292,9 +283,6 @@ func TestShutdown_NoForwarder_StopsServer(t *testing.T) {
 	}
 }
 
-// TestResolveAuthTokens_UnparsableOptOut_ErrorNamesVariableAndValue pins
-// that a typo in the opt-out stops startup with a message that points at
-// it, instead of the generic "no token set" error.
 func TestResolveAuthTokens_UnparsableOptOut_ErrorNamesVariableAndValue(t *testing.T) {
 	_, _, err := resolveAuthTokens(envFrom(map[string]string{"OTHERLODE_COLLECTOR_INSECURE_NO_AUTH": "ture"}), nil)
 	if err == nil {
@@ -818,9 +806,6 @@ func TestResolveForwardConfig_BadMaxConcurrentForwards_Error(t *testing.T) {
 	}
 }
 
-// TestResolveForwardConfig_RequestTimeoutNotBelowTheBudget_Error pins that
-// the collector refuses to start with a forward timeout that could outlast
-// the time one request has.
 func TestResolveForwardConfig_RequestTimeoutNotBelowTheBudget_Error(t *testing.T) {
 	for _, value := range []string{requestBudget.String(), (requestBudget + time.Second).String(), "15s", "1h"} {
 		_, _, err := resolveForwardConfig(envFrom(map[string]string{"OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT": value}), nil)
@@ -834,10 +819,6 @@ func TestResolveForwardConfig_RequestTimeoutNotBelowTheBudget_Error(t *testing.T
 	}
 }
 
-// TestResolveForwardConfig_RemovedQueueSettings_AreIgnored pins that the
-// settings of the removed forward queue are not read, as with any
-// OTHERLODE_COLLECTOR_ variable the collector does not know, so an
-// existing deployment that still sets them starts.
 func TestResolveForwardConfig_RemovedQueueSettings_AreIgnored(t *testing.T) {
 	cfg, _, err := resolveForwardConfig(envFrom(map[string]string{
 		"OTHERLODE_COLLECTOR_FORWARD_URL":                    "https://backend.example.com",
@@ -952,8 +933,6 @@ func TestResolveRedaction_AllLiteralsGarbage_Errors(t *testing.T) {
 	}
 }
 
-// testRedactSecret is a redaction secret long enough to pass
-// processor.CheckSecret.
 const testRedactSecret = "redact-secret-0123456789abcdef-0123456789"
 
 func TestReadRedactionSecret(t *testing.T) {

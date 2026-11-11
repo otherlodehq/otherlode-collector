@@ -26,9 +26,6 @@ import (
 	"github.com/otherlodehq/otherlode-collector/metrics"
 )
 
-// deltaRequest builds a POST to the deltas route carrying the smallest
-// batch the handler accepts: a resource with a service name, instance ID
-// and run ID, and no deltas.
 func deltaRequest(t *testing.T, serverURL string) *http.Request {
 	t.Helper()
 	body, err := proto.Marshal(&otherlodepb.DeltaBatch{
@@ -45,9 +42,6 @@ func deltaRequest(t *testing.T, serverURL string) *http.Request {
 	return req
 }
 
-// staticBaselineRequest builds a POST to the static-baseline route
-// carrying the smallest baseline the handler accepts: identity, a
-// scanned_at, and a single chunk.
 func staticBaselineRequest(t *testing.T, serverURL string) *http.Request {
 	t.Helper()
 	body, err := proto.Marshal(&otherlodepb.StaticBaseline{
@@ -66,9 +60,6 @@ func staticBaselineRequest(t *testing.T, serverURL string) *http.Request {
 	return req
 }
 
-// classListingRequest builds a POST to the class-listing route carrying
-// the smallest listing the handler accepts: identity, a listed_at, and a
-// single chunk.
 func classListingRequest(t *testing.T, serverURL string) *http.Request {
 	t.Helper()
 	body, err := proto.Marshal(&otherlodepb.ClassListing{
@@ -333,8 +324,6 @@ func TestRegisterRoutes_Metrics_CountsAcceptedIngest(t *testing.T) {
 	}
 }
 
-// forwardDelta posts a delta batch carrying res to a collector wired
-// with envCfg and nsCfg, and returns the batch its backend received.
 func forwardDelta(t *testing.T, envCfg processor.EnvironmentConfig, nsCfg processor.NamespaceConfig, res *otherlodepb.ResourceAttributes) *otherlodepb.DeltaBatch {
 	t.Helper()
 	received := make(chan *otherlodepb.DeltaBatch, 1)
@@ -385,8 +374,6 @@ func forwardDelta(t *testing.T, envCfg processor.EnvironmentConfig, nsCfg proces
 	}
 }
 
-// demoResource is the smallest resource the handler accepts. It names a
-// namespace only when ns is non-empty.
 func demoResource(ns string) *otherlodepb.ResourceAttributes {
 	res := &otherlodepb.ResourceAttributes{ServiceName: "demo-service", ServiceInstanceId: "instance-1", RunId: "run-1"}
 	if ns != "" {
@@ -439,11 +426,6 @@ func TestRegisterRoutes_BothProcessorsSet_StampBothFields(t *testing.T) {
 	}
 }
 
-// manifestWithLiteral is the smallest manifest the handler accepts, with
-// one probe whose branch site tests a string literal. Its top-level
-// message and its branch site each carry a field no schema version
-// declares. It comes from a test run, so a test can check that the flag
-// survives redaction.
 func manifestWithLiteral() *otherlodepb.ProbeManifest {
 	unknown := protowire.AppendString(protowire.AppendTag(nil, 9999, protowire.BytesType), "a newer literal")
 	site := &otherlodepb.BranchSite{
@@ -455,14 +437,10 @@ func manifestWithLiteral() *otherlodepb.ProbeManifest {
 		},
 	}
 	site.ProtoReflect().SetUnknown(unknown)
-	// A switch on the literal's String.hashCode(), as the agent sends one
-	// it could not read back.
 	hashSwitch := &otherlodepb.BranchSite{Outcomes: []*otherlodepb.BranchOutcome{
 		{Role: otherlodepb.BranchRole_CASE, CaseKey: proto.Int32(testLiteralHash)},
 		{Role: otherlodepb.BranchRole_DEFAULT},
 	}}
-	// A switch the agent marks as a switch on String.hashCode(), whose
-	// literal is not in the payload.
 	markedSwitch := &otherlodepb.BranchSite{StringHashCodeSwitch: true, Outcomes: []*otherlodepb.BranchOutcome{
 		{Role: otherlodepb.BranchRole_CASE, CaseKey: proto.Int32(testUnsentLiteralHash)},
 		{Role: otherlodepb.BranchRole_DEFAULT},
@@ -479,25 +457,17 @@ func manifestWithLiteral() *otherlodepb.ProbeManifest {
 }
 
 const (
-	// testBranchKey and testSiteKey have the shape of the agent's keys.
-	testBranchKey = "0123456789abcdef0123456789abcdef"
-	testSiteKey   = "fedcba9876543210fedcba9876543210"
-	// testLiteralHash is Java's "ENABLE_LEGACY_DISCOUNT".hashCode().
-	testLiteralHash = -1896388037
-	// testUnsentLiteralHash is Java's "legacy".hashCode(), a literal the
-	// manifest does not carry.
+	testBranchKey         = "0123456789abcdef0123456789abcdef"
+	testSiteKey           = "fedcba9876543210fedcba9876543210"
+	testLiteralHash       = -1896388037
 	testUnsentLiteralHash = -1106578487
 )
 
-// forwardManifest posts manifestWithLiteral to a collector wired with
-// redactCfg and returns the manifest its backend received.
 func forwardManifest(t *testing.T, redactCfg processor.RedactionConfig) *otherlodepb.ProbeManifest {
 	t.Helper()
 	return forwardManifestLogging(t, redactCfg, nil)
 }
 
-// forwardManifestLogging is forwardManifest with the collector logging to
-// logger, or to slog.Default() when logger is nil.
 func forwardManifestLogging(t *testing.T, redactCfg processor.RedactionConfig, logger *slog.Logger) *otherlodepb.ProbeManifest {
 	t.Helper()
 	received := make(chan *otherlodepb.ProbeManifest, 1)
@@ -662,9 +632,6 @@ func waitUntil(t *testing.T, timeout time.Duration, cond func() bool) {
 	}
 }
 
-// watchFile re-reads file every few milliseconds until the test ends.
-// Cleanup waits for the watcher to stop, so no late re-read reaches the
-// reload counter while another test reads it.
 func watchFile(t *testing.T, file *tokenfile.File) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -679,8 +646,6 @@ func watchFile(t *testing.T, file *tokenfile.File) {
 	})
 }
 
-// deltaStatus posts a delta batch with the given bearer token, or with
-// no Authorization header when token is empty, and returns the status.
 func deltaStatus(t *testing.T, serverURL, token string) int {
 	t.Helper()
 	req := deltaRequest(t, serverURL)
@@ -816,16 +781,11 @@ func TestRegisterRoutes_ForwardTokenFile_NextRequestSendsReloadedKey(t *testing.
 	}
 }
 
-// forwardedRequest is what the backend received for one forwarded
-// payload.
 type forwardedRequest struct {
 	header http.Header
 	body   []byte
 }
 
-// forwardEveryKind posts a delta batch, a manifest, a static baseline and
-// a class listing to a collector wired with redactCfg and logging to
-// logger. It returns what the backend received, by path.
 func forwardEveryKind(t *testing.T, redactCfg processor.RedactionConfig, logger *slog.Logger) map[string]forwardedRequest {
 	t.Helper()
 	received := make(chan struct {
@@ -947,8 +907,6 @@ func TestRouteTimings_AreTheDocumentedValues(t *testing.T) {
 	}
 }
 
-// blockingForwardBackend starts a backend that holds every request until
-// the test ends.
 func blockingForwardBackend(t *testing.T) (url string, entered chan struct{}) {
 	t.Helper()
 	entered = make(chan struct{}, 16)
@@ -972,10 +930,6 @@ func setRouteTimings(t *testing.T, budget, slotWait time.Duration) {
 	t.Cleanup(func() { requestBudget, decodeSlotWait = oldBudget, oldWait })
 }
 
-// TestRegisterRoutes_RequestBudget_BlockedSinkGets503AtTheBudget pins that
-// registerRoutes gives the handler its request budget: a request whose
-// backend never answers is answered 503 when the budget ends, far before
-// the forward's own 8 second timeout.
 func TestRegisterRoutes_RequestBudget_BlockedSinkGets503AtTheBudget(t *testing.T) {
 	setRouteTimings(t, 300*time.Millisecond, time.Second)
 	backendURL, entered := blockingForwardBackend(t)
@@ -1002,11 +956,6 @@ func TestRegisterRoutes_RequestBudget_BlockedSinkGets503AtTheBudget(t *testing.T
 	}
 }
 
-// TestRegisterRoutes_SlotWait_BusyRequestGets503AfterTheSlotWait pins that
-// registerRoutes gives the handler its decode slot wait. With one forward
-// slot and one decode slot, a first request holds the forward slot, a
-// second holds the decode slot while it waits for the forward slot, and a
-// third finds no decode slot.
 func TestRegisterRoutes_SlotWait_BusyRequestGets503AfterTheSlotWait(t *testing.T) {
 	setRouteTimings(t, time.Hour, 300*time.Millisecond)
 	backendURL, entered := blockingForwardBackend(t)

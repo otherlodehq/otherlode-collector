@@ -51,8 +51,6 @@ func (f *fakeSink) AcceptClassListing(_ context.Context, listing *otherlodepb.Cl
 	return nil, nil
 }
 
-// failingSink refuses every payload, standing in for a backend that could
-// not take the write (a database outage, for example).
 type failingSink struct{}
 
 func (failingSink) AcceptDeltaBatch(context.Context, *otherlodepb.DeltaBatch) ([]Notice, error) {
@@ -71,13 +69,8 @@ func (failingSink) AcceptClassListing(context.Context, *otherlodepb.ClassListing
 	return nil, errors.New("sink unavailable")
 }
 
-// ctxKey avoids collisions with any key another package might set on the
-// same context.
 type ctxKey string
 
-// ctxCheckSink asserts that the context it receives carries the value set
-// under key, proving the handler passes the request's own context through
-// rather than a detached one. calls counts the payloads it received.
 type ctxCheckSink struct {
 	t     *testing.T
 	key   ctxKey
@@ -1144,7 +1137,6 @@ func TestHandler_RejectedRequests_CountedByReason(t *testing.T) {
 		{"static baseline", StaticBaselinePath, "static_baseline"},
 		{"class listing", ClassListingPath, "class_listing"},
 	}
-	// An empty message has no resource, so it fails validation on every route.
 	empty, err := proto.Marshal(&otherlodepb.DeltaBatch{})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -1239,8 +1231,6 @@ func TestPayloadLabel(t *testing.T) {
 	}
 }
 
-// gateSink holds every manifest in AcceptManifest until the test lets it
-// go. It records how many calls started and the most that ran at once.
 type gateSink struct {
 	fakeSink
 	entered chan struct{}
@@ -1282,8 +1272,6 @@ func manifestRequest(ctx context.Context, t *testing.T) *http.Request {
 	return req
 }
 
-// serveWithin runs mux.ServeHTTP in a goroutine and fails the test if it
-// does not return within five seconds.
 func serveWithin(t *testing.T, mux *http.ServeMux, rec *httptest.ResponseRecorder, req *http.Request) {
 	t.Helper()
 	done := make(chan struct{})
@@ -1371,10 +1359,6 @@ func TestHandler_MaxConcurrentDecodes_CanceledWaiterCountedAndSkipsSink(t *testi
 	<-first
 }
 
-// TestHandler_SlotWait_RequestContextEnds_AnswersNever2xx pins that a
-// request whose context ends during the slot wait gets an explicit 503.
-// With no write, net/http would send an implicit 200 and the agent would
-// count the payload as stored.
 func TestHandler_SlotWait_RequestContextEnds_AnswersNever2xx(t *testing.T) {
 	sink := newGateSink()
 	mux := http.NewServeMux()
@@ -1411,8 +1395,6 @@ func TestHandler_SlotWait_RequestContextEnds_AnswersNever2xx(t *testing.T) {
 	<-first
 }
 
-// TestHandler_SlotWait_RequestContextEnds_RealServerNever2xx runs the same
-// case through net/http, where the missing write turns into a 200.
 func TestHandler_SlotWait_RequestContextEnds_RealServerNever2xx(t *testing.T) {
 	sink := newGateSink()
 	mux := http.NewServeMux()
@@ -1509,9 +1491,6 @@ func TestHandler_MaxConcurrentDecodes_BusyWaiterAnswers503AfterSlotWait(t *testi
 	<-first
 }
 
-// TestHandler_MaxConcurrentDecodes_BusyRefusalsLogAtMostOncePerInterval
-// pins that busy refusals are logged, and that a burst of them writes one
-// line, not one per request.
 func TestHandler_MaxConcurrentDecodes_BusyRefusalsLogAtMostOncePerInterval(t *testing.T) {
 	sink := newGateSink()
 	mux := http.NewServeMux()
@@ -1550,8 +1529,6 @@ func TestHandler_MaxConcurrentDecodes_BusyRefusalsLogAtMostOncePerInterval(t *te
 		t.Errorf("first busy line = %s, want a WARN with unlogged_busy_refusals 0", lines[0])
 	}
 
-	// Once the interval has passed, the next refusal logs again and counts
-	// the two that wrote no line.
 	now = now.Add(busyLogInterval)
 	serveWithin(t, mux, httptest.NewRecorder(), manifestRequest(context.Background(), t))
 	lines = busyLines()
@@ -1593,7 +1570,6 @@ func TestHandler_WithSlotWait_SetsTheSlotWait(t *testing.T) {
 	<-first
 }
 
-// ctxSink runs fn for every manifest.
 type ctxSink struct {
 	fakeSink
 	fn func(ctx context.Context) ([]Notice, error)
@@ -1630,9 +1606,6 @@ func TestHandler_WithRequestBudget_CapsTheSlotWait(t *testing.T) {
 	<-first
 }
 
-// TestHandler_WithRequestBudget_SlotWaitAndSinkShareIt pins that time spent
-// waiting for a slot comes off the time the sink has, and that a sink
-// that runs to the end of the budget gets 503 with Retry-After.
 func TestHandler_WithRequestBudget_SlotWaitAndSinkShareIt(t *testing.T) {
 	const budget = 400 * time.Millisecond
 	holder := newGateSink()
@@ -1705,9 +1678,6 @@ func TestHandler_NoRequestBudget_SinkContextHasNoDeadline(t *testing.T) {
 	}
 }
 
-// TestReleaseDecodeSlot_FreesTheSlotBeforeTheSinkReturns pins that a sink
-// can give its slot back, that a second call does nothing, and that the
-// slot is not freed twice when the sink returns.
 func TestReleaseDecodeSlot_FreesTheSlotBeforeTheSinkReturns(t *testing.T) {
 	entered := make(chan struct{}, 4)
 	gate := make(chan struct{})
@@ -1746,9 +1716,6 @@ func TestReleaseDecodeSlot_FreesTheSlotBeforeTheSinkReturns(t *testing.T) {
 	}
 }
 
-// TestReleaseDecodeSlot_SecondCallDoesNotFreeAnotherRequestsSlot pins that
-// a repeated release by one request never gives away the slot a later
-// request took.
 func TestReleaseDecodeSlot_SecondCallDoesNotFreeAnotherRequestsSlot(t *testing.T) {
 	releasedOnce := make(chan context.Context, 1)
 	gate := make(chan struct{})
@@ -1806,7 +1773,6 @@ func waitFor(t *testing.T, cond func() bool) {
 	t.Fatal("condition not met before timeout")
 }
 
-// refusingSink answers every manifest with err.
 type refusingSink struct {
 	fakeSink
 	err error
@@ -1826,8 +1792,6 @@ func logLines(logs *bytes.Buffer, contains string) []string {
 	return lines
 }
 
-// TestHandler_SinkFailureLogs_FirstOfEachKindOnly pins that a burst of sink
-// failures writes one line per kind, while the metric counts every one.
 func TestHandler_SinkFailureLogs_FirstOfEachKindOnly(t *testing.T) {
 	now := time.Unix(1000, 0)
 	var logs bytes.Buffer
@@ -1869,9 +1833,6 @@ func TestHandler_SinkFailureLogs_FirstOfEachKindOnly(t *testing.T) {
 	}
 }
 
-// TestHandler_SinkFailureLogs_OneLinePerCauseClass pins that a failure of
-// one cause class does not hold back the first line of another class, and
-// that the same class is still limited.
 func TestHandler_SinkFailureLogs_OneLinePerCauseClass(t *testing.T) {
 	var logs bytes.Buffer
 	var sink refusingSink
@@ -1895,7 +1856,6 @@ func TestHandler_SinkFailureLogs_OneLinePerCauseClass(t *testing.T) {
 	}
 }
 
-// slowBody delivers its data after a delay.
 type slowBody struct {
 	delay time.Duration
 	r     io.Reader
@@ -1907,9 +1867,6 @@ func (b *slowBody) Read(p []byte) (int, error) {
 	return b.r.Read(p)
 }
 
-// TestHandler_ExpiredBudget_NeverDecodesEvenWithAFreeSlot pins that a
-// request whose budget ended while it read its body is answered 503 and
-// never reaches the sink, although a slot is free.
 func TestHandler_ExpiredBudget_NeverDecodesEvenWithAFreeSlot(t *testing.T) {
 	var calls atomic.Int32
 	mux := http.NewServeMux()
@@ -1931,9 +1888,6 @@ func TestHandler_ExpiredBudget_NeverDecodesEvenWithAFreeSlot(t *testing.T) {
 	}
 }
 
-// TestHandler_BusyLog_NamesTheWaitUsed pins that the busy log line holds the
-// time the request waited, which is the time left in the budget when the
-// budget is shorter than the slot wait.
 func TestHandler_BusyLog_NamesTheWaitUsed(t *testing.T) {
 	sink := newGateSink()
 	mux := http.NewServeMux()
@@ -1982,9 +1936,6 @@ func TestHandler_MaxConcurrentDecodes_SlotFreedAfterRejection(t *testing.T) {
 	}
 }
 
-// TestHandler_ExpiredBudget_CountsTimeoutNotBusy pins that a request whose
-// budget ended while the body arrived, with decode slots free, is counted
-// "timeout" and logged as such, and that no busy line is written.
 func TestHandler_ExpiredBudget_CountsTimeoutNotBusy(t *testing.T) {
 	mux := http.NewServeMux()
 	var logs bytes.Buffer
@@ -2035,8 +1986,6 @@ func TestHandler_ExpiredBudget_CountsTimeoutNotBusy(t *testing.T) {
 	}
 }
 
-// TestHandler_SlotsFull_BudgetRemaining_CountsBusy pins that a request that
-// finds every slot taken and waits for one is counted "busy", not "timeout".
 func TestHandler_SlotsFull_BudgetRemaining_CountsBusy(t *testing.T) {
 	sink := newGateSink()
 	mux := http.NewServeMux()
@@ -2068,8 +2017,6 @@ func TestHandler_SlotsFull_BudgetRemaining_CountsBusy(t *testing.T) {
 	<-first
 }
 
-// TestHandler_ClientCanceled_CountsCanceled pins that a request whose own
-// context ended is counted "canceled" while slots are free.
 func TestHandler_ClientCanceled_CountsCanceled(t *testing.T) {
 	mux := http.NewServeMux()
 	NewHandler(&ctxSink{fn: func(context.Context) ([]Notice, error) { return nil, nil }}, nil,
@@ -2109,15 +2056,10 @@ func (b *cancelBody) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// pastDeadlineCtx reports a deadline that has passed while Err is still
-// nil, as a context.WithDeadline does until its timer fires.
 type pastDeadlineCtx struct{ context.Context }
 
 func (pastDeadlineCtx) Deadline() (time.Time, bool) { return time.Now().Add(-time.Millisecond), true }
 
-// TestHandler_DeadlinePassedBeforeErr_CountsTimeout pins that a request
-// whose budget deadline has passed is refused as "timeout" with free
-// slots, even before its context reports the deadline.
 func TestHandler_DeadlinePassedBeforeErr_CountsTimeout(t *testing.T) {
 	h := NewHandler(&ctxSink{fn: func(context.Context) ([]Notice, error) { return nil, nil }},
 		slog.New(slog.NewJSONHandler(io.Discard, nil)), WithMaxConcurrentDecodes(4))

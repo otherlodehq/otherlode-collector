@@ -33,12 +33,10 @@ func (e *StatusError) Error() string {
 // Unwrap returns the cause.
 func (e *StatusError) Unwrap() error { return e.Err }
 
-// relayed reports whether the handler answers with e's own status.
 func (e *StatusError) relayed() bool {
 	return e.Status >= 400 && e.Status <= 499
 }
 
-// reasonError carries the reason a sink failure is counted under.
 type reasonError struct {
 	reason string
 	err    error
@@ -48,10 +46,9 @@ func (e *reasonError) Error() string { return e.err.Error() }
 
 func (e *reasonError) Unwrap() error { return e.err }
 
-// WithReason returns err marked with reason, a short word naming the cause
-// class of the failure, such as "timeout" or "server_error". The handler
-// keeps its log lines for sink failures apart by reason. It returns nil
-// for a nil err.
+// WithReason returns err marked with reason, a short word such as "timeout"
+// or "server_error". An empty reason becomes "error". It returns nil for a nil
+// err.
 func WithReason(err error, reason string) error {
 	if err == nil {
 		return nil
@@ -62,8 +59,6 @@ func WithReason(err error, reason string) error {
 	return &reasonError{reason: reason, err: err}
 }
 
-// reasonOf returns the reason err was marked with, or "error" when it has
-// none.
 func reasonOf(err error) string {
 	var r *reasonError
 	if errors.As(err, &r) {

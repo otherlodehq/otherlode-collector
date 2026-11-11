@@ -16,8 +16,6 @@ import (
 	"github.com/otherlodehq/otherlode-collector/metrics"
 )
 
-// writeFile replaces path's content through a rename, so a reader sees
-// the old content or the new, never a half-written file.
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	tmp := path + ".tmp"
@@ -36,8 +34,6 @@ func tokenPath(t *testing.T, content string) string {
 	return path
 }
 
-// holder records what a File applies, safe for a Watch goroutine and a
-// test goroutine to share.
 type holder struct {
 	mu     sync.Mutex
 	tokens []string
@@ -55,8 +51,6 @@ func (h *holder) get() []string {
 	return h.tokens
 }
 
-// lockedBuffer is a log sink a Watch goroutine can write while the test
-// reads it.
 type lockedBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -163,7 +157,6 @@ func TestRead_SymlinkToFile_Reads(t *testing.T) {
 }
 
 func TestWatch_ShowsZeroFailureSeries(t *testing.T) {
-	// Series outlive a test, so each run under -count takes its own label.
 	label := fmt.Sprintf("watch-zero-series-%d", time.Now().UnixNano())
 	f, err := Open(tokenPath(t, "a\n"), label, AtLeastOne, func([]string) {})
 	if err != nil {

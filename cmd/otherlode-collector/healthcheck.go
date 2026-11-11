@@ -13,25 +13,14 @@ import (
 )
 
 const (
-	// healthzPath is the liveness route registerRoutes serves and the
-	// healthcheck subcommand probes.
 	healthzPath = "/healthz"
 
-	// healthcheckTimeout stays under the image's HEALTHCHECK --timeout of
-	// 3s, so a hung collector fails with the probe's own error rather than
-	// Docker killing the process first.
+	// healthcheckTimeout must stay under the image HEALTHCHECK --timeout of 3s.
 	healthcheckTimeout = 2 * time.Second
 )
 
-// healthcheckClient never uses a proxy. The probe targets only the
-// collector in its own container. A proxy set for forwarding could
-// otherwise capture a probe addressed by hostname or pod IP.
 var healthcheckClient = &http.Client{Transport: &http.Transport{Proxy: nil}}
 
-// runSubcommand handles a non-empty argument list and returns the process
-// exit code. "healthcheck" probes the collector's own /healthz and returns
-// 0 or 1; anything else writes a usage line to stderr and returns 2, so a
-// typo never starts a second collector.
 func runSubcommand(ctx context.Context, args []string, getenv func(string) string, stderr io.Writer) int {
 	if len(args) != 1 || args[0] != "healthcheck" {
 		fmt.Fprintln(stderr, "usage: otherlode-collector [healthcheck]")
@@ -44,8 +33,6 @@ func runSubcommand(ctx context.Context, args []string, getenv func(string) strin
 	return 0
 }
 
-// healthcheckCommand probes /healthz on the address
-// OTHERLODE_COLLECTOR_ADDR names, the address the collector listens on.
 func healthcheckCommand(ctx context.Context, getenv func(string) string) error {
 	ctx, cancel := context.WithTimeout(ctx, healthcheckTimeout)
 	defer cancel()
@@ -56,9 +43,6 @@ func healthcheckCommand(ctx context.Context, getenv func(string) string) error {
 	return runHealthcheck(ctx, target)
 }
 
-// resolveAddr returns the address the collector listens on: raw, the value
-// of OTHERLODE_COLLECTOR_ADDR, or defaultAddr when it is empty. The server
-// and the healthcheck both call it, so the probe targets the listener.
 func resolveAddr(raw string) string {
 	if raw == "" {
 		return defaultAddr
@@ -66,11 +50,6 @@ func resolveAddr(raw string) string {
 	return raw
 }
 
-// healthzURL returns the URL the healthcheck subcommand probes for the
-// collector listening on addr. An empty or unspecified host, zoned or not,
-// is probed on the loopback address, since the probe runs inside the same
-// container as the collector. A named port is resolved the way the
-// listener resolves it.
 func healthzURL(ctx context.Context, addr string) (string, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -87,8 +66,6 @@ func healthzURL(ctx context.Context, addr string) (string, error) {
 	return u.String(), nil
 }
 
-// runHealthcheck does one GET of the health route at target and returns
-// nil for a 200, or an error naming the status or the transport failure.
 func runHealthcheck(ctx context.Context, target string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {

@@ -12,9 +12,6 @@ import (
 	"github.com/otherlodehq/otherlode-collector/ingest"
 )
 
-// TestLogSink_LogsTheTestRunFlagAndAgentVersion covers the test_run
-// attribute (agent ADR 0050) and the agent_version attribute (agent ADR 0054)
-// on each of the four payloads' log lines.
 func TestLogSink_LogsTheTestRunFlagAndAgentVersion(t *testing.T) {
 	var buf bytes.Buffer
 	sink := ingest.NewLogSink(slog.New(slog.NewJSONHandler(&buf, nil)))
@@ -53,8 +50,6 @@ func TestLogSink_LogsTheTestRunFlagAndAgentVersion(t *testing.T) {
 	}
 }
 
-// The number of framework markers a manifest carries goes on its log line
-// (agent ADR 0072).
 func TestLogSink_LogsTheFrameworkMarkerCount(t *testing.T) {
 	var buf bytes.Buffer
 	sink := ingest.NewLogSink(slog.New(slog.NewJSONHandler(&buf, nil)))
@@ -76,8 +71,6 @@ func TestLogSink_LogsTheFrameworkMarkerCount(t *testing.T) {
 	}
 }
 
-// TestLogSink_LogsTheFailedClassCount covers the failed_classes attribute
-// on a manifest's log line (agent ADR 0065).
 func TestLogSink_LogsTheFailedClassCount(t *testing.T) {
 	var buf bytes.Buffer
 	sink := ingest.NewLogSink(slog.New(slog.NewJSONHandler(&buf, nil)))
@@ -99,9 +92,6 @@ func TestLogSink_LogsTheFailedClassCount(t *testing.T) {
 	}
 }
 
-// TestLogSink_LogsCountsPendingSinceOnlyWhenSet covers the
-// counts_pending_since attribute on a delta batch's and a manifest's log
-// line (agent ADR 0068). A zero value leaves the attribute out.
 func TestLogSink_LogsCountsPendingSinceOnlyWhenSet(t *testing.T) {
 	resource := &otherlodepb.ResourceAttributes{ServiceName: "svc", ServiceInstanceId: "i1", RunId: "run-1"}
 	ctx := context.Background()
@@ -148,8 +138,6 @@ func TestLogSink_LogsCountsPendingSinceOnlyWhenSet(t *testing.T) {
 	}
 }
 
-// TestLogSink_ClassListing_LogsIdentityChunkAndNameCount covers the log
-// line of a class listing chunk.
 func TestLogSink_ClassListing_LogsIdentityChunkAndNameCount(t *testing.T) {
 	var buf bytes.Buffer
 	sink := ingest.NewLogSink(slog.New(slog.NewJSONHandler(&buf, nil)))

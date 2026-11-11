@@ -11,8 +11,6 @@ import (
 	"github.com/otherlodehq/otherlode-collector/metrics"
 )
 
-// resourceWithNamespace returns a valid resource. It sets the namespace
-// only when ns is non-nil, so a test can send an absent one.
 func resourceWithNamespace(ns *string) *otherlodepb.ResourceAttributes {
 	res := &otherlodepb.ResourceAttributes{ServiceName: "svc", ServiceInstanceId: "i1", RunId: "run-1"}
 	if ns != nil {
@@ -23,9 +21,6 @@ func resourceWithNamespace(ns *string) *otherlodepb.ResourceAttributes {
 
 func ptr(s string) *string { return &s }
 
-// sendEach passes one payload of each kind through ns. Each payload
-// carries a resource built by newRes. sendEach returns each payload's
-// resource under its payload label.
 func sendEach(t *testing.T, ns *Namespace, newRes func() *otherlodepb.ResourceAttributes) map[string]*otherlodepb.ResourceAttributes {
 	t.Helper()
 	batch := &otherlodepb.DeltaBatch{Resource: newRes()}

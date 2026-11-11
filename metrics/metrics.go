@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 )
 
-// Counter is a monotonically increasing count split by one or more
-// labels. Each distinct set of label values is its own series.
+// Counter is a monotonically increasing count split by labels. Each distinct
+// set of label values is its own series.
 type Counter struct {
 	name   string
 	help   string
@@ -27,10 +27,9 @@ var (
 	registry   []*Counter
 )
 
-// NewCounter registers a counter under name, with labels naming its
-// label dimensions in the order Add expects them. A counter with no labels
-// shows in the output at 0 from creation, so an increase() alert sees its
-// first event. Names must be unique within the process. A repeat panics.
+// NewCounter registers a counter under name, with labels naming its label
+// dimensions in the order Add expects them. A counter with no labels shows at
+// 0 from creation. A repeated name panics.
 func NewCounter(name, help string, labels ...string) *Counter {
 	c := newCounter(name, help, labels...)
 	registryMu.Lock()
@@ -44,8 +43,6 @@ func NewCounter(name, help string, labels ...string) *Counter {
 	return c
 }
 
-// newCounter builds a counter without registering it, so tests can
-// exercise one in isolation.
 func newCounter(name, help string, labels ...string) *Counter {
 	c := &Counter{name: name, help: help, labels: labels, series: make(map[string]*atomic.Int64)}
 	if len(labels) == 0 {
@@ -54,7 +51,7 @@ func newCounter(name, help string, labels ...string) *Counter {
 	return c
 }
 
-// Inc adds one, as Add does.
+// Inc adds one to the series identified by values, as Add does.
 func (c *Counter) Inc(values ...string) {
 	c.Add(1, values...)
 }
@@ -95,8 +92,8 @@ func (c *Counter) get(values []string) *atomic.Int64 {
 	return v
 }
 
-// Handler serves every registered counter as text/plain in the
-// Prometheus exposition format.
+// Handler serves every registered counter in the Prometheus text exposition
+// format.
 func Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
@@ -104,9 +101,8 @@ func Handler() http.Handler {
 	})
 }
 
-// Render returns every registered counter in the Prometheus exposition
-// format, counters sorted by name and series by label values, so the
-// output is stable between calls.
+// Render returns every registered counter in the Prometheus text exposition
+// format, sorted by name and then by label values.
 func Render() string {
 	registryMu.Lock()
 	counters := append([]*Counter(nil), registry...)

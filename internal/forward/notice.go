@@ -10,30 +10,19 @@ import (
 )
 
 const (
-	// noticeLogInterval is the least time between two log lines for one
-	// notice of one service.
 	noticeLogInterval = time.Hour
 
-	// maxNoticeKeys bounds how many (notice, service) pairs a noticeLog
-	// remembers.
 	maxNoticeKeys = 10000
 
-	// maxNoticeValueBytes is the longest backend notice value a log line
-	// shows.
 	maxNoticeValueBytes = 64
 )
 
-// noticeKey names one notice of one service. notice is the value the log
-// line shows: a known notice, the backend's value when it is well formed,
-// or "unknown".
 type noticeKey struct {
 	notice    string
 	namespace string
 	service   string
 }
 
-// noticeLog decides when a notice gets a log line. It remembers when each
-// key last logged and allows one line per key in each noticeLogInterval.
 type noticeLog struct {
 	now     func() time.Time
 	maxKeys int
@@ -46,10 +35,6 @@ func newNoticeLog(now func() time.Time, maxKeys int) *noticeLog {
 	return &noticeLog{now: now, maxKeys: maxKeys, last: make(map[noticeKey]time.Time)}
 }
 
-// allow reports whether key may log now, and starts its interval when it
-// may. When the set is full, allow first drops the keys whose interval
-// has passed. If it is still full, allow does not remember key and
-// reports true, so a flood of distinct services logs more, never less.
 func (l *noticeLog) allow(key noticeKey) bool {
 	now := l.now()
 	l.mu.Lock()
@@ -71,14 +56,12 @@ func (l *noticeLog) allow(key noticeKey) bool {
 	return true
 }
 
-// size returns how many keys the log remembers.
 func (l *noticeLog) size() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return len(l.last)
 }
 
-// noticeMessages maps a known notice to the sentence logged for it.
 var noticeMessages = map[ingest.Notice]string{
 	ingest.NoticeServiceOverCap:        "backend stores the service's payloads but does not track the service, because the tenant's plan tracks no more services",
 	ingest.NoticeEnvironmentNotTracked: "backend stores the environment's payloads but does not track the environment, because the service already watches as many environments as its cap allows",
@@ -86,14 +69,8 @@ var noticeMessages = map[ingest.Notice]string{
 
 const unknownNoticeMessage = "backend sent a notice this collector does not know"
 
-// unknownNotice is the label and log value for a notice outside the
-// closed set.
 const unknownNotice = "unknown"
 
-// noticeValues splits the NoticeHeader lines of a response into values.
-// A proxy may join the lines of a list header into one line separated by
-// commas, so each line is split on commas and each part trimmed. An empty
-// part is dropped.
 func noticeValues(lines []string) []string {
 	var values []string
 	for _, line := range lines {
@@ -106,8 +83,6 @@ func noticeValues(lines []string) []string {
 	return values
 }
 
-// wellFormedNotice reports whether value is 1 to maxNoticeValueBytes
-// bytes of lowercase letters and hyphens.
 func wellFormedNotice(value string) bool {
 	if value == "" || len(value) > maxNoticeValueBytes {
 		return false
@@ -120,10 +95,6 @@ func wellFormedNotice(value string) bool {
 	return true
 }
 
-// noticed counts each notice value the backend sent with a 2xx response
-// for item, and logs a Warn for it unless the same notice of the same
-// service logged within the last hour. A value outside the closed set
-// counts as "unknown", and the log shows it only when it is well formed.
 func (s *ForwardingSink) noticed(item outbound, lines []string) {
 	for _, value := range noticeValues(lines) {
 		notice := ingest.Notice(value)

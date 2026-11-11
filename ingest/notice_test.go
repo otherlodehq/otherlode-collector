@@ -11,7 +11,6 @@ import (
 	otherlodepb "buf.build/gen/go/otherlode/otherlode/protocolbuffers/go/otherlode/v1"
 )
 
-// noticeSink answers every payload with the notices and error it holds.
 type noticeSink struct {
 	notices []Notice
 	err     error

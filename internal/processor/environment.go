@@ -1,6 +1,5 @@
 // Package processor holds sinks that wrap another ingest.Sink. Each one
-// changes or inspects a decoded payload, then passes it on, as an OTel
-// Collector processor does.
+// changes or inspects a decoded payload, then passes it on.
 package processor
 
 import (
@@ -20,17 +19,16 @@ import (
 type Action int
 
 const (
-	// Insert keeps an agent-set value and only fills in an absent one. It
-	// is the zero value and the default.
+	// Insert keeps an agent-set value and fills in an absent one. It is the
+	// default.
 	Insert Action = iota
-	// Upsert always writes the collector's configured value, even over one
-	// the agent already set.
+	// Upsert also writes the collector's configured value over a different
+	// value the agent set.
 	Upsert
 )
 
-// ParseAction parses raw as an Action. "" and "insert" mean Insert,
-// "upsert" means Upsert, matched case-insensitively. Any other value is
-// an error listing the valid options.
+// ParseAction parses raw as an Action, ignoring case. "" and "insert" mean
+// Insert. "upsert" means Upsert. Any other value is an error.
 func ParseAction(raw string) (Action, error) {
 	switch strings.ToLower(raw) {
 	case "", "insert":
@@ -51,22 +49,16 @@ func (a Action) String() string {
 }
 
 // EnvironmentConfig configures an Environment processor. Value is the
-// environment name to stamp onto payloads; an empty Value means the
-// processor is off.
+// environment name to stamp. An empty Value means the processor is off.
 type EnvironmentConfig struct {
 	Value  string
 	Action Action
 }
 
-// Environment is an ingest.Sink that writes a configured environment
-// name onto the resource of each delta batch, manifest, static baseline
-// and class listing, then passes the payload to next. A backend can then expect
-// an environment on every payload, even from an agent whose own config
-// names none.
-//
-// It changes the resource of the decoded message in place. This is safe
-// because ingest.Handler decodes a fresh message for each request and
-// nothing else holds a reference to it.
+// Environment is an ingest.Sink that writes a configured environment name
+// onto the resource of each delta batch, manifest, static baseline and
+// class listing, then passes the payload to next. It changes the decoded
+// message in place.
 type Environment struct {
 	next       ingest.Sink
 	cfg        EnvironmentConfig
@@ -76,9 +68,8 @@ type Environment struct {
 
 var _ ingest.Sink = (*Environment)(nil)
 
-// NewEnvironment returns an Environment that applies cfg before passing
-// payloads to next, logging to logger, or slog.Default() when logger is
-// nil.
+// NewEnvironment returns an Environment that applies cfg and passes
+// payloads to next. A nil logger means slog.Default().
 func NewEnvironment(next ingest.Sink, cfg EnvironmentConfig, logger *slog.Logger) *Environment {
 	if logger == nil {
 		logger = slog.Default()
@@ -86,43 +77,30 @@ func NewEnvironment(next ingest.Sink, cfg EnvironmentConfig, logger *slog.Logger
 	return &Environment{next: next, cfg: cfg, logger: logger}
 }
 
-// AcceptDeltaBatch stamps the batch's resource with the configured
-// environment, then passes the batch to next.
+// AcceptDeltaBatch stamps the batch's resource, then passes it to next.
 func (e *Environment) AcceptDeltaBatch(ctx context.Context, batch *otherlodepb.DeltaBatch) ([]ingest.Notice, error) {
 	e.stamp(batch.GetResource(), "deltas")
 	return e.next.AcceptDeltaBatch(ctx, batch)
 }
 
-// AcceptStaticBaseline stamps the baseline's resource with the
-// configured environment, then passes the baseline to next.
+// AcceptStaticBaseline stamps the baseline's resource, then passes it to next.
 func (e *Environment) AcceptStaticBaseline(ctx context.Context, baseline *otherlodepb.StaticBaseline) ([]ingest.Notice, error) {
 	e.stamp(baseline.GetResource(), "static_baseline")
 	return e.next.AcceptStaticBaseline(ctx, baseline)
 }
 
-// AcceptClassListing stamps the listing's resource with the configured
-// environment, then passes the listing to next.
+// AcceptClassListing stamps the listing's resource, then passes it to next.
 func (e *Environment) AcceptClassListing(ctx context.Context, listing *otherlodepb.ClassListing) ([]ingest.Notice, error) {
 	e.stamp(listing.GetResource(), "class_listing")
 	return e.next.AcceptClassListing(ctx, listing)
 }
 
-// AcceptManifest stamps the manifest's resource with the configured
-// environment, then passes the manifest to next.
+// AcceptManifest stamps the manifest's resource, then passes it to next.
 func (e *Environment) AcceptManifest(ctx context.Context, manifest *otherlodepb.ProbeManifest) ([]ingest.Notice, error) {
 	e.stamp(manifest.GetResource(), "manifest")
 	return e.next.AcceptManifest(ctx, manifest)
 }
 
-// stamp applies the configured environment to res. Under both actions it
-// fills in an environment that is empty or only spaces. It compares the
-// agent's environment with the configured one as the server does (see
-// sameEnvironment). When the agent named a different environment, stamp
-// counts and logs the mismatch, at warn level the first time a service
-// sends that environment and at debug after that. Under Upsert it writes the configured
-// value over the agent's, matching or not. A nil res is left alone:
-// ingest.Handler rejects such a payload before any sink sees it, but an
-// Environment used without the handler must not panic on one.
 func (e *Environment) stamp(res *otherlodepb.ResourceAttributes, payload string) {
 	if res == nil {
 		return
@@ -160,17 +138,12 @@ func (e *Environment) stamp(res *otherlodepb.ResourceAttributes, payload string)
 	}
 }
 
-// sameEnvironment reports whether a and b name one environment, as
-// normaliseEnvironment reads them.
 func sameEnvironment(a, b string) bool {
 	return normaliseEnvironment(a) == normaliseEnvironment(b)
 }
 
-// normaliseEnvironment returns name as the server stores it: trimmed and
-// lowercased. " Prod" and "prod" are one environment there, so they must
-// not count as a mismatch here. It lowercases instead of using
-// strings.EqualFold, because case folding matches some pairs that
-// lowercasing keeps apart, and the server lowercases.
+// normaliseEnvironment matches how the server stores an environment: trimmed
+// and lowercased.
 func normaliseEnvironment(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
 }

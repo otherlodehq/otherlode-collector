@@ -33,8 +33,6 @@ func (c *testClock) Advance(d time.Duration) {
 	c.now = c.now.Add(d)
 }
 
-// noticeHarness is a sink that posts to a backend answering 202 with the
-// notice header values and status it holds.
 type noticeHarness struct {
 	t      *testing.T
 	sink   *ForwardingSink
@@ -78,7 +76,6 @@ func (h *noticeHarness) respondWith(status int, values ...string) {
 	h.status, h.values = status, values
 }
 
-// send posts a manifest for the service and returns the sink's error.
 func (h *noticeHarness) send(namespace, service string) error {
 	h.t.Helper()
 	res := &otherlodepb.ResourceAttributes{ServiceName: service, ServiceInstanceId: "instance-1", RunId: "run-1"}
