@@ -118,7 +118,7 @@ If an agent gets a `401` or cannot connect, see [troubleshooting](troubleshootin
 
 ## Forward to Otherlode
 
-To send what the collector receives on to Otherlode, set `OTHERLODE_COLLECTOR_FORWARD_URL` and `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN` as [Send data from your collector](/docs/server/connect) describes. Restart the collector. The startup warning above no longer appears. [Forwarding](forwarding) describes what happens to each push after the collector accepts it, and [set and rotate tokens](tokens) covers changing the forward key.
+To send what the collector receives on to Otherlode, set `OTHERLODE_COLLECTOR_FORWARD_URL` and `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN` as [Send data to Otherlode](/docs/server/connect) describes. Restart the collector. The startup warning above no longer appears. [Forwarding](forwarding) describes what happens to each push after the collector accepts it, and [set and rotate tokens](tokens) covers changing the forward key.
 
 ## Run the latest release
 

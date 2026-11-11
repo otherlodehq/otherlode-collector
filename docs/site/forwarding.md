@@ -172,7 +172,7 @@ The `healthcheck` subcommand never uses a proxy.
 
 ## Related pages
 
-- [Send data from your collector](/docs/server/connect) has Otherlode's URL and the ingest key.
+- [Send data to Otherlode](/docs/server/connect) has Otherlode's URL and the ingest key.
 - [Set and rotate tokens](tokens) covers the forward key and its file.
 - [Health checks, metrics and logs](monitoring) lists every counter.
 - [Rate and memory limits](limits) covers the decode cap and the memory bound.

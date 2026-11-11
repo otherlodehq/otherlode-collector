@@ -108,7 +108,7 @@ A forward URL that starts with `http://` and comes with a key gets a `WARN` at s
 {"time":"...","level":"WARN","msg":"forward URL uses plain http; the backend auth token is sent unencrypted","url":"http://..."}
 ```
 
-For the Otherlode URL and key to use, see [Send data from your collector](/docs/server/connect). The collector sends the key as `Authorization: Bearer <key>`. A forward URL with no key sends no `Authorization` header.
+For the Otherlode URL and key to use, see [Send data to Otherlode](/docs/server/connect). The collector sends the key as `Authorization: Bearer <key>`. A forward URL with no key sends no `Authorization` header.
 
 ## Environment and namespace
 

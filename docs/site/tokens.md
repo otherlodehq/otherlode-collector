@@ -110,7 +110,7 @@ Check that a rotation took effect by looking for the `token file changed` log li
 
 ## Set the forward key
 
-The forward key applies only when you set `OTHERLODE_COLLECTOR_FORWARD_URL`. The collector sends it as `Authorization: Bearer <key>` on each forwarded request. Create the key in Otherlode, as [Send data from your collector](/docs/server/connect) describes.
+The forward key applies only when you set `OTHERLODE_COLLECTOR_FORWARD_URL`. The collector sends it as `Authorization: Bearer <key>` on each forwarded request. Create the key in Otherlode, as [Send data to Otherlode](/docs/server/connect) describes.
 
 | Variable | Holds |
 |---|---|
