@@ -78,6 +78,8 @@ A change that breaks one of these needs an ADR first.
   complete: the code and its tests hold the full rules. A code comment
   may still name a value another component requires, as a hard
   constraint.
+- **No comment or doc comment cites an ADR.** It says what the code
+  does or must do. The reasons stay in the ADR.
 - Write in simplified technical English: short sentences, one main clause
   each, plain words, no idioms. Prefer the concrete verb ("this rejects bad
   input") to the nominalization ("this handles rejection of invalid input").
