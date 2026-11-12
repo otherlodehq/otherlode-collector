@@ -29,7 +29,7 @@ var (
 
 // NewCounter registers a counter under name, with labels naming its label
 // dimensions in the order Add expects them. A counter with no labels shows at
-// 0 from creation. A repeated name panics.
+// 0 from creation. NewCounter panics on a repeated name.
 func NewCounter(name, help string, labels ...string) *Counter {
 	c := newCounter(name, help, labels...)
 	registryMu.Lock()

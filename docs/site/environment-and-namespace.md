@@ -37,7 +37,7 @@ The counter goes up under both actions. It counts payloads, not agents, so an ag
 
 ### How the two settings compare values
 
-The environment and the namespace do not compare quite the same way.
+The environment and the namespace compare values in different ways.
 
 | | Environment | Namespace |
 |---|---|---|
@@ -67,11 +67,11 @@ OTHERLODE_COLLECTOR_ENVIRONMENT_ACTION=upsert
 
 Use `upsert` when the collector's value must win for every agent behind it, for example when a shared agent configuration sets the same `environment` for every deployment. Use `insert` when some agents should name their own.
 
-Otherlode fixes a run's environment from the first payload it receives for that run. Restart the agents after you change the collector's environment, so new runs start in the new one. [Scope and environments](/docs/server/scope#how-a-run-gets-its-environment) has the detail.
+Otherlode sets a run's environment from the first payload it receives for that run, and never changes it for that run. Restart the agents after you change the collector's environment, so new runs start in the new one. [Scope and environments](/docs/server/scope#how-a-run-gets-its-environment) has the detail.
 
 ## Give one team's agents a namespace
 
-A service is known by its namespace and its name together. If one collector serves one team, set the team's namespace there instead of on every agent.
+Otherlode identifies a service by its namespace and its name together. If one collector serves one team, set the team's namespace there instead of on every agent.
 
 ```bash
 OTHERLODE_COLLECTOR_SERVICE_NAMESPACE=payments
@@ -81,7 +81,7 @@ Add `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE_ACTION=upsert` to overwrite a namespa
 
 Restart the agents after you change the collector's namespace. A run that keeps reporting arrives under the new service without the class data it sent before, and Otherlode holds that service's findings back until the run expires. [Scope and environments](/docs/server/scope#runs-that-are-not-settled) has the detail.
 
-A namespace of `.` or `..` is refused. The ingest endpoints reject it from an agent for the same reason, because a service is read at a URL path and browsers drop those segments.
+The collector refuses a namespace of `.` or `..` at startup. The ingest endpoints reject it from an agent for the same reason, because a URL path names each service and browsers drop those segments.
 
 ## Serve every namespace from one collector
 
@@ -96,9 +96,9 @@ Two counters on `/metrics` count the payloads where the agent named a different 
 | `otherlode_collector_environment_mismatch_total` | Payloads whose environment differs from the collector's |
 | `otherlode_collector_namespace_mismatch_total` | Payloads whose namespace differs from the collector's |
 
-A count that keeps rising means some agent disagrees with its collector. Under `insert` that agent's service sits in the environment or namespace it chose. Under `upsert` the collector has moved it. Either way, find the agent and decide which value is right.
+A count that keeps rising means some agent disagrees with its collector. Under `insert` that agent's service stays in the environment or namespace it chose. Under `upsert` the collector has moved it. Either way, find the agent and decide which value is right.
 
-The first time a service sends a given value that differs from the collector's, the collector logs a `WARN` line that names the service, instance and run. Every later payload of that service with that value logs the same line at `DEBUG`, so the default `info` level shows each disagreement once.
+The first time a service sends a given value that differs from the collector's, the collector logs a `WARN` line that names the service, instance and run. For every later payload of that service with that value, the collector logs the same line at `DEBUG`, so the default `info` level shows each disagreement once.
 
 ```text
 {"time":"...","level":"WARN","msg":"agent environment does not match the collector's configured environment","namespace":"payments","service":"demo","instance":"i1","run":"r1","payload":"deltas","agent_environment":"Staging","collector_environment":"prod","action":"insert"}
@@ -113,9 +113,9 @@ An agent with `testRun` on and no environment of its own reports the environment
 - Under `insert`, the run keeps `test`. The collector counts each of its payloads as an environment mismatch.
 - Under `upsert`, the collector overwrites `test` with its own value, and counts each payload as a mismatch.
 
-Under `upsert`, the run no longer reports `test` as its environment, so the environment does not mark it as a test run. The `test_run` flag still does. It travels with every payload, and the collector never changes it. Otherlode reads that flag to keep the run out of every finding about production.
+Under `upsert`, the run no longer reports `test` as its environment, so the environment does not mark it as a test run. The `test_run` flag still does. Every payload carries it, and the collector never changes it. Otherlode reads that flag to keep the run out of every finding about production.
 
-To avoid the mismatch counts, point the test JVM at a collector with no environment set. If you use one collector for both, expect the counter to rise with every test-run payload and read it with that in mind.
+To avoid the mismatch counts, point the test JVM at a collector with no environment set. If you use one collector for both, the counter rises with every test-run payload.
 
 ## Startup errors
 

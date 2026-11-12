@@ -4,7 +4,7 @@ description: The /healthz endpoint and the healthcheck subcommand, every counter
 order: 80
 ---
 
-The collector gives you three ways to see what it is doing. `/healthz` says whether it is up, `/metrics` counts what it did with each payload, and the log says what went wrong. `/healthz` and `/metrics` need no token and are never rate limited. Both are outside the agent token check and the per-client limit, so a probe or a scraper inside your network works with the defaults.
+The collector gives you three ways to see what it is doing. `/healthz` says whether it is up, `/metrics` counts what it did with each payload, and the log says what went wrong. `/healthz` and `/metrics` need no agent token and have no per-client rate limit, so a probe or a scraper inside your network works with the defaults.
 
 ## Check health
 
@@ -48,7 +48,7 @@ Docker marks the container unhealthy after three failed probes in a row. If the 
 
 `GET /metrics` serves the counters in the Prometheus text format, with the content type `text/plain; version=0.0.4; charset=utf-8`. The output holds only counts. It carries no service names, instance IDs, literals or payload content.
 
-Every metric is a counter. The counters live in memory and start again at 0 when the collector restarts, so use `increase()` or `rate()` rather than the raw value. A counter without labels shows at 0 from startup. A counter with labels adds a series the first time that label combination happens, so a series you have never seen is a series that has not happened. The one exception is the token reload counter, which shows each token file you configured at 0.
+Every metric is a counter. The counters live in memory and start again at 0 when the collector restarts, so use `increase()` or `rate()` rather than the raw value. A counter without labels shows at 0 from startup. A counter with labels adds a series the first time that label combination happens, so a missing series means that label combination has not happened. The one exception is the token reload counter, which shows each token file you configured at 0.
 
 The `payload` label takes one of four values, named for the path the agent posted to:
 
@@ -76,16 +76,16 @@ The `reason` label on `ingest_rejected_total` takes these values:
 |---|---|---|
 | `content_type` | `415` | The `Content-Type` is not `application/x-protobuf`, or a `Content-Encoding` other than `identity` is set |
 | `too_large` | `413` | The body is over 16 MiB |
-| `read` | `400` | The body could not be read |
+| `read` | `400` | The collector could not read the body |
 | `too_many_elements` | `413` | The payload holds more elements than the limit for its kind |
 | `malformed` | `400` | The body is not valid protobuf |
 | `invalid` | `400` | The body decoded but failed validation |
-| `sink` | `503`, `429` or another `4xx` | Otherlode did not store the payload, so the collector did not answer `202`. It answers `429` or another `4xx` when Otherlode did, and `503` with `Retry-After: 5` for every other failure. `forward_failed_total` has the cause |
+| `sink` | `503`, `429` or another `4xx` | Otherlode did not store the payload, so the collector did not answer `202`. It answers `429` or another `4xx` when Otherlode answered with one, and `503` with `Retry-After: 5` for every other failure. `forward_failed_total` has the cause |
 | `busy` | `503` | No decode slot came free within 1 second. The response carries `Retry-After: 1` |
 | `canceled` | `503` | The client disconnected while it waited for a decode slot |
 | `timeout` | `503` | The request used its 9-second budget before decoding started, usually because the body arrived slowly. The response carries `Retry-After: 1` |
 
-A `401` or `429` never reaches the ingest counters. They count in `auth_rejected_total` and `rate_limited_total` only. For the limits behind `too_large`, `too_many_elements`, `busy` and `rate_limited_total`, see [rate and memory limits](limits).
+A `401` from the agent token check or a `429` from the rate limit never reaches the ingest counters. They count in `auth_rejected_total` and `rate_limited_total` only. For the limits behind `too_large`, `too_many_elements`, `busy` and `rate_limited_total`, see [rate and memory limits](limits).
 
 ### Forwarding counters
 
@@ -117,13 +117,13 @@ The `reason` label on `forward_failed_total` takes these values:
 
 A `503` carries `Retry-After: 5`. The `notice` label on `forward_notices_total` is `service-over-cap`, `environment-not-tracked` or `unknown`. `unknown` stands for every other value, so a backend cannot add series. A notice does not mean a payload was lost, since Otherlode stored it. `service-over-cap` and `environment-not-tracked` mean Otherlode does not track the service or the environment. The collector does not know what an `unknown` notice means. See [Otherlode stores a payload but does not track it](troubleshooting#otherlode-stores-a-payload-but-does-not-track-it).
 
-A failed payload is still in the agent's hands. The agent keeps its counts and sends them again on its next flush. [Forwarding](forwarding) covers the attempt, the time limits and shutdown.
+The agent still holds a failed payload. It keeps its counts and sends them again on its next flush. [Forwarding](forwarding) covers the attempt, the time limits and shutdown.
 
 ### Token counter
 
 | Counter | Labels | Goes up when |
 |---|---|---|
-| `otherlode_collector_token_reload_failures_total` | `file` | The collector re-read a token file every 30 seconds and the read failed or found no usable token. It keeps the last good value |
+| `otherlode_collector_token_reload_failures_total` | `file` | A re-read of a token file failed or found no usable token. The collector re-reads each token file every 30 seconds and keeps the last good value |
 
 `file` is `auth` for `OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE` and `forward` for `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE`. The `forward` series exists only when `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE` is set. See [set and rotate tokens](tokens).
 
@@ -133,18 +133,18 @@ A failed payload is still in the agent's hands. The agent keeps its counts and s
 |---|---|---|
 | `otherlode_collector_environment_mismatch_total` | `payload` | The agent set an environment that differs from `OTHERLODE_COLLECTOR_ENVIRONMENT` |
 | `otherlode_collector_namespace_mismatch_total` | `payload` | The agent set a service namespace that differs from `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE` |
-| `otherlode_collector_redacted_literals_total` | `payload` | Redaction replaced string literal parts. It adds the number replaced, so one payload can add many. `payload` is `manifest` or `static_baseline` |
-| `otherlode_collector_redacted_case_keys_total` | `payload` | Redaction cleared case keys that are a string's hash code. It adds the number cleared. `payload` is `manifest` or `static_baseline` |
-| `otherlode_collector_fields_stripped_total` | `payload` | Redaction dropped a field it does not know and marked the payload `fields_stripped` |
+| `otherlode_collector_redacted_literals_total` | `payload` | Blanking replaced string literal parts. It adds the number replaced, so one payload can add many. `payload` is `manifest` or `static_baseline` |
+| `otherlode_collector_redacted_case_keys_total` | `payload` | Blanking cleared case keys that are a string's hash code. It adds the number cleared. `payload` is `manifest` or `static_baseline` |
+| `otherlode_collector_fields_stripped_total` | `payload` | Blanking dropped a field it does not know and marked the payload `fields_stripped` |
 
 The mismatch counters go up whether the action is `insert` or `upsert`. An agent value that is empty or only spaces is not a mismatch. See [set the environment and namespace](environment-and-namespace) and [blank out string literals](redaction).
 
 ## Choose what to alert on
 
-- **`forward_failed_total`.** A rise means Otherlode is not storing payloads, and the `reason` says why. `server_error`, `timeout` and `transport` mean Otherlode is down, slow or unreachable. `rejected` and `unexpected_status` mean the forward URL, the forward key or the redaction setting is wrong, and no retry fixes them. `busy` means forwards queue behind the forward limit. Nothing is lost while the agents keep running and keep sending, but a service reads as behind until its payloads arrive. Alert on a rate that stays above zero for several minutes, since one failure during a deploy of Otherlode is normal.
+- **`forward_failed_total`.** A rise means Otherlode is not storing payloads, and the `reason` says why. `server_error`, `timeout` and `transport` mean Otherlode is down, slow or unreachable. `rejected` and `unexpected_status` mean the forward URL, the forward key, the blanking settings or the redaction secret are wrong, and no retry fixes them. `busy` means forwards queue behind the forward limit. Nothing is lost while the agents keep running and keep sending, but a service reads as behind until its payloads arrive. Alert on a rate that stays above zero for several minutes, since one failure during a deploy of Otherlode is normal.
 - **`forward_delivered_total`.** A rate of zero while agents are running means no payload reaches Otherlode.
-- **`forward_notices_total`.** A rise in `service-over-cap` or `environment-not-tracked` means the backend stores payloads it does not track. Nothing is lost, but the service or environment gets no findings. Alert on it if you want to hear before a team asks why a service shows none.
-- **`token_reload_failures_total`.** Alert on any increase. A token file is broken and the collector is still on the tokens it last read.
+- **`forward_notices_total`.** A rise in `service-over-cap` or `environment-not-tracked` means Otherlode stores payloads it does not track. Nothing is lost, but the service or environment gets no findings. Alert on it if you want to hear before a team asks why a service shows none.
+- **`token_reload_failures_total`.** Alert on any increase. A token file is broken and the collector still uses the tokens it last read.
 - **`fields_stripped_total`.** Alert on any increase. Your collector is older than your agents. Run the latest collector, as [troubleshooting](troubleshooting) describes.
 
 A rise in `auth_rejected_total` or `rate_limited_total` means a client is sending the wrong token or too many requests. Whether that matters depends on your fleet, so the collector gives no fixed threshold.
@@ -187,8 +187,8 @@ Without `OTHERLODE_COLLECTOR_FORWARD_URL`, the collector logs every payload it r
 | `WARN` | `rejecting malformed delta batch`, `rejecting malformed manifest`, `rejecting malformed static baseline` or `rejecting malformed class listing` | A body was not valid protobuf |
 | `WARN` | `token file re-read failed; keeping the last good value` | A token file re-read failed, with `file` and `error` |
 | `WARN` | `sink refused delta batch`, or the same with `manifest`, `static baseline` or `class listing` | Otherlode answered a `4xx`, and the collector answered the agent with that status. The line has the `error`, the `status`, `unlogged_sink_refusals` and, when Otherlode's response names an error code, `backend_error`. At most one line a minute for each payload type, status and cause |
-| `WARN` | `backend stores the service's payloads but does not track the service, ...`, `backend stores the environment's payloads but does not track the environment, ...` or `backend sent a notice this collector does not know` | The backend accepted a payload and sent a notice with it. The line has the `notice`, `namespace` and `service`. At most one line an hour for each notice, namespace and service, while the collector remembers fewer than 10,000 of them |
-| `WARN` | `dropped fields this collector does not know; ...` | Redaction dropped unknown fields. It logs once per run |
+| `WARN` | `backend stores the service's payloads but does not track the service, ...`, `backend stores the environment's payloads but does not track the environment, ...` or `backend sent a notice this collector does not know` | Otherlode accepted a payload and sent a notice with it. The line has the `notice`, `namespace` and `service`. At most one line an hour for each notice, namespace and service, while the collector remembers fewer than 10,000 of them |
+| `WARN` | `dropped fields this collector does not know; ...` | Blanking dropped unknown fields. The collector logs this line once per run |
 | `WARN` | `refusing delta batch with too many elements`, or the same with `manifest`, `static baseline` or `class listing` | A payload held more elements than the limit for its kind and got `413`. The line has the `limit` and the body size in `bytes` |
 | `WARN` | `refusing delta batch: no decode slot came free`, or the same with `manifest`, `static baseline` or `class listing` | A request waited 1 second for a decode slot and got `503`. At most one line a minute. `unlogged_busy_refusals` counts the refusals since the previous line that got no line of their own |
 | `WARN` | `refusing delta batch: the request used its time budget before decoding started`, or the same with `manifest`, `static baseline` or `class listing` | The body took the whole request budget to arrive and the request got `503`. The line has the `budget`. At most one line a minute. `unlogged_timeout_refusals` counts the refusals since the previous line |

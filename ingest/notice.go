@@ -1,13 +1,13 @@
 package ingest
 
 // NoticeHeader is the response header that carries a notice on a 202. The
-// handler writes one value for each notice and the forwarder reads them.
+// handler writes one value for each notice.
 const NoticeHeader = "Otherlode-Notice"
 
 // Notice is a short lowercase name a backend gives an accepted payload to
 // say that it stored the payload but judges it differently from the rest.
 // This package names a closed set. A newer backend may send another name,
-// and the forwarder counts it as unknown.
+// for which Known reports false.
 type Notice string
 
 const (
@@ -18,7 +18,7 @@ const (
 
 	// NoticeEnvironmentNotTracked says the backend stores the environment's
 	// payloads but does not track the environment, because the service
-	// already watches as many environments as its cap allows.
+	// already tracks as many environments as its cap allows.
 	NoticeEnvironmentNotTracked Notice = "environment-not-tracked"
 )
 

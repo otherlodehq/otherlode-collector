@@ -16,9 +16,9 @@ import (
 // RedactedText is the text a redacted literal part carries.
 const RedactedText = "…"
 
-// RedactionConfig configures a Redaction processor. A literal part is
-// redacted when AllLiterals is true or any pattern in BlockedValues matches
-// some of its text. Secret keys the HMAC that replaces branch and site keys.
+// RedactionConfig configures a Redaction processor. The processor redacts a
+// literal part when AllLiterals is true or any pattern in BlockedValues
+// matches some of its text. Secret keys the HMAC that replaces branch and site keys.
 // A zero RedactionConfig means the processor is off.
 type RedactionConfig struct {
 	BlockedValues []*regexp.Regexp
@@ -53,8 +53,8 @@ func (c RedactionConfig) Validate() error {
 // each non-empty branch key and site key with a keyed HMAC-SHA256 digest. It
 // clears every case key of a site marked string_hash_code_switch, and each
 // case key that equals the Java hash code of a literal it redacted in the
-// same method. It drops unknown fields. When a payload loses a field, the processor sets
-// fields_stripped on the payload's resource and never clears it.
+// same method. It drops unknown fields. When a payload loses a field, it
+// sets fields_stripped on the payload's resource and never clears it.
 type Redaction struct {
 	next   ingest.Sink
 	cfg    RedactionConfig

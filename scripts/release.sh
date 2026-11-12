@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cuts a collector release from Luke's machine (ADR 0006):
+# Cuts a collector release from Luke's machine:
 #
 #   scripts/release.sh X.Y.Z [--dry-run]
 #
@@ -16,7 +16,6 @@ die() {
   exit 1
 }
 
-# Rewrites the version constant in version.go and checks that the module still builds.
 set_version() { # version
   sed -i.bak -E "s/^const version = \".*\"\$/const version = \"$1\"/" "$VERSION_FILE" && rm "$VERSION_FILE.bak"
   [ "$(sed -n 's/^const version = "\(.*\)"$/\1/p' "$VERSION_FILE")" = "$1" ] || die "could not set $VERSION_FILE to $1"

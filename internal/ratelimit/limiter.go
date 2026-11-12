@@ -60,9 +60,9 @@ type visitor struct {
 type Option func(*Limiter)
 
 // WithClientIPHeader makes the Limiter key requests on the named header
-// instead of the connection's remote address. The header is trusted as is,
-// so set it only when the collector is reachable solely through a proxy that
-// writes it. For a comma-separated list such as X-Forwarded-For, the Limiter
+// instead of the connection's remote address. The Limiter trusts the header
+// as is, so set it only when the collector is reachable solely through a proxy
+// that writes it. For a comma-separated list such as X-Forwarded-For, the Limiter
 // uses the last entry.
 func WithClientIPHeader(name string) Option {
 	return func(l *Limiter) { l.clientIPHeader = name }
@@ -70,7 +70,7 @@ func WithClientIPHeader(name string) Option {
 
 // WithIPv6Prefix sets how many leading bits of an IPv6 address form its key.
 // Every address with the same prefix shares one bucket. The default is 128.
-// Values outside 1 to 128 are ignored. IPv4 and IPv4-mapped addresses always
+// It ignores a value outside 1 to 128. IPv4 and IPv4-mapped addresses always
 // key on the IPv4 address.
 func WithIPv6Prefix(bits int) Option {
 	return func(l *Limiter) {

@@ -7,9 +7,10 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-// The limits on elements per payload kind. An element is every embedded
-// message and every element of a repeated field, at every depth. The resource
-// counts as one. The handler refuses a payload over its limit with 413.
+// These constants limit the elements in each payload kind. An element is
+// every embedded message and every element of a repeated field, at every
+// depth. The resource counts as one. The handler refuses a payload over its
+// limit with 413.
 const (
 	// MaxDeltaBatchElements is the most elements a delta batch may hold.
 	MaxDeltaBatchElements = 500_000

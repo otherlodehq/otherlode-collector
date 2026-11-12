@@ -34,8 +34,7 @@ import (
 //
 // A non-nil error means the sink did not take the payload, and the handler
 // ignores the notices. A *StatusError with a status from 400 to 499 gets that
-// status and its Retry-After. Any other error gets 503 with "Retry-After: 5",
-// and the sender retries.
+// status and its Retry-After. Any other error gets 503 with "Retry-After: 5".
 type Sink interface {
 	AcceptDeltaBatch(ctx context.Context, batch *otherlodepb.DeltaBatch) ([]Notice, error)
 	AcceptManifest(ctx context.Context, manifest *otherlodepb.ProbeManifest) ([]Notice, error)
@@ -50,8 +49,7 @@ const maxBodyBytes = 16 << 20
 const contentType = "application/x-protobuf"
 
 // DeltaBatchPath, ManifestPath, StaticBaselinePath and ClassListingPath are
-// the agent-facing ingest routes. A Sink that relays payloads posts to the
-// same paths on the backend.
+// the agent-facing ingest routes.
 const (
 	DeltaBatchPath     = "/v1/otherlode/deltas"
 	ManifestPath       = "/v1/otherlode/manifest"
@@ -340,8 +338,8 @@ func validateDeltaBatch(batch *otherlodepb.DeltaBatch) error {
 }
 
 // MaxTimestampMillis is the latest time, in milliseconds since the epoch,
-// that a payload's timestamp may hold: the end of the year 9999. The earliest
-// is 0.
+// that a payload's timestamp may hold, which is the end of the year 9999. The
+// earliest is 0.
 const MaxTimestampMillis = 253402300799999
 
 func timestampInRange(ms int64) bool {

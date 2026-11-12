@@ -1,6 +1,6 @@
 ---
 title: Forwarding
-description: How the collector forwards each payload to Otherlode while the agent's request waits, including the forward URL rules, the headers it sends, the answer the agent gets for each answer from Otherlode, the time limits, the forward limit, the log lines and counters for a failed forward, shutdown, the two tuning variables and the proxy variables.
+description: How the collector forwards each payload to Otherlode while the agent's request waits, what the agent gets back, and the limits, logs, counters and settings that apply.
 order: 40
 ---
 
@@ -14,7 +14,7 @@ To forward to Otherlode, see [send data from your collector](/docs/server/connec
 
 ## The forward URL
 
-The collector reads the URL once, at startup. Any invalid value stops startup with an ERROR line that names the variable and the problem. The line quotes the value, unless the value holds an `@`, since that part can be a password.
+The collector reads the URL once, at startup. Any invalid value stops startup with an `ERROR` line that names the variable and the problem. The line quotes the value, unless the value holds an `@`, since that part can be a password.
 
 | Rule | If the URL breaks it |
 |---|---|
@@ -24,7 +24,7 @@ The collector reads the URL once, at startup. Any invalid value stops startup wi
 | The URL has no query | Startup stops with `OTHERLODE_COLLECTOR_FORWARD_URL: forward URL must not contain a query` |
 | The URL has no fragment | Startup stops with `OTHERLODE_COLLECTOR_FORWARD_URL: forward URL must not contain a fragment` |
 
-The collector removes trailing slashes. A path is allowed and the collector keeps it. It appends the four ingest paths to the URL. With `https://gateway.example.com/otherlode`, the collector posts to `https://gateway.example.com/otherlode/v1/otherlode/deltas`.
+The collector removes trailing slashes, keeps any path and appends the ingest path for each payload type to the URL. With `https://gateway.example.com/otherlode`, the collector posts to `https://gateway.example.com/otherlode/v1/otherlode/deltas`.
 
 | Payload | Path appended to the URL |
 |---|---|
@@ -37,17 +37,17 @@ Each request is a `POST`. The body is the same protobuf message the agent sent, 
 
 ### The key header
 
-If you set a forward key, the collector sends `Authorization: Bearer <key>` on every request. It takes the current key for each request and re-reads a key file every 30 seconds, so a rotated key file applies without a restart. The agent token is a separate secret and is never sent to the backend. See [set and rotate tokens](tokens) for the key and its file.
+If you set a forward key, the collector sends `Authorization: Bearer <key>` on every request. It takes the current key for each request and re-reads a key file every 30 seconds, so a rotated key file applies without a restart. The agent token is a separate secret, and the collector never sends it to Otherlode. See [set and rotate tokens](tokens) for the key and its file.
 
 Setting a key without `OTHERLODE_COLLECTOR_FORWARD_URL` stops startup. So does a key that holds a control character.
 
 ### The redaction header
 
-While redaction is on, the collector sends `Otherlode-Redaction: <fingerprint>` on every request. The fingerprint is the `secret_fingerprint` value from the startup log, 16 lowercase hex characters that name the redaction secret without giving it away. With redaction off, the collector sends no such header. A tenant can have Otherlode refuse payloads without the header, or with another fingerprint. See [let Otherlode refuse payloads that were not blanked](redaction#let-otherlode-refuse-payloads-that-were-not-blanked).
+While blanking is on, the collector sends `Otherlode-Redaction: <fingerprint>` on every request. The fingerprint is the `secret_fingerprint` value from the startup log, 16 lowercase hex characters that name the redaction secret without revealing it. With blanking off, the collector sends no such header. A tenant can have Otherlode refuse payloads without the header, or with another fingerprint. See [let Otherlode refuse payloads that were not blanked](redaction#let-otherlode-refuse-payloads-that-were-not-blanked).
 
 ### Use https
 
-The hop to the backend carries the key. Use `https` for any backend you reach across a network you do not control. If the URL uses plain `http` and a key is set, the collector logs this warning at startup:
+The request to Otherlode carries the key. Use `https` whenever the collector reaches Otherlode across a network you do not control. If the URL uses plain `http` and a key is set, the collector logs this warning at startup:
 
 ```text
 {"time":"...","level":"WARN","msg":"forward URL uses plain http; the backend auth token is sent unencrypted","url":"http://gateway.internal:8080"}
@@ -55,7 +55,7 @@ The hop to the backend carries the key. Use `https` for any backend you reach ac
 
 ## Forward while the agent waits
 
-The collector forwards a payload while the agent's request is open, makes one attempt, and answers the agent from Otherlode's answer. It answers `202` only when Otherlode answered `202`. So every payload that an agent sees accepted is stored, and every other payload stays with the agent, which keeps its counts and sends them again on its next flush.
+The collector forwards a payload while the agent's request is open, makes one attempt, and answers the agent from Otherlode's answer. It answers `202` only when Otherlode answered `202`. So Otherlode has stored every payload that an agent sees accepted. Every other payload stays with the agent, which keeps its counts and sends them again on its next flush.
 
 The collector keeps no queue, retries nothing and drops nothing. It holds a payload in memory only for the length of its request.
 
@@ -72,7 +72,7 @@ Two more cases get a `503` with `Retry-After: 5` and never reach Otherlode: the 
 
 Every answer has an empty body. The collector passes on a `Retry-After` from Otherlode only for a `429`, and only when the value is up to 64 printable ASCII characters. It does not follow redirects, so a `3xx` is a failure. A `2xx` other than `202` comes from a wrong forward URL or from a proxy, not from Otherlode, so the collector does not count the payload as stored.
 
-The agent resends a failed payload by itself. It ends a send at once when `Retry-After` is over 2 seconds, and sends the payload again on its next flush. It keeps its counts in memory, so nothing is lost while Otherlode is down unless the agent's process stops. A process that stops during an outage reads in Otherlode as one that went silent. See [when the collector is down or refuses a payload](/docs/agent/data-sent#when-the-receiver-is-down-or-refuses-a-payload).
+The agent resends a failed payload by itself. It keeps its counts in memory, so it loses nothing while Otherlode is down unless its process stops. See [when the collector is down or refuses a payload](/docs/agent/data-sent#when-the-receiver-is-down-or-refuses-a-payload).
 
 ### Order
 
@@ -98,13 +98,13 @@ When Otherlode does not answer in time, the agent gets its `503` after the timeo
 
 `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS` bounds how many forwards are in flight to Otherlode at one time. It defaults to 32. The collector keeps that many idle connections to Otherlode.
 
-A request takes a forward slot before it frees its decode slot. When Otherlode is slow and every forward slot is taken, a waiting request keeps its decode slot, so decoding stops taking new requests instead of holding more decoded payloads. A request that waits for a forward slot for the length of the forward request timeout, or until its budget ends, gets `503` with `Retry-After: 5`. The collector counts it under reason `busy` in `forward_failed_total`.
+A request takes a forward slot before it frees its decode slot. When Otherlode is slow and every forward slot is taken, a waiting request keeps its decode slot, so decoding stops taking new requests instead of holding more decoded payloads. A request that waits for a forward slot for the length of the forward request timeout, or until its budget ends, gets `503` with `Retry-After: 5`. The collector counts it under reason `busy` in `otherlode_collector_forward_failed_total`.
 
-Raising `OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES` does not help here, because it limits decoding and not forwarding. Each forward in flight holds its marshaled payload, which counts toward the [worst-case memory](limits#worst-case-memory).
+Raising `OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES` does not help here, because it limits decoding and not forwarding. Each forward in flight holds its marshalled payload, which counts toward the [worst-case memory](limits#worst-case-memory).
 
 ## Failed forwards in the log and the counters
 
-When Otherlode does not store a payload, the collector logs one line and counts the failure in `otherlode_collector_forward_failed_total` with a `reason`. The counter counts every failure. The log writes at most one line a minute for each payload type and cause, and the field `unlogged_sink_failures` or `unlogged_sink_refusals` counts the failures since the previous line that got no line of their own.
+When Otherlode does not store a payload, the collector logs one line and counts the failure in `otherlode_collector_forward_failed_total` with a `reason`. The counter counts every failure. The collector writes at most one log line a minute for each payload type and cause, and the field `unlogged_sink_failures` or `unlogged_sink_refusals` counts the failures since the previous line that got no line of their own.
 
 A `4xx` from Otherlode logs a `WARN` line, and the collector answers the agent with that status.
 
@@ -134,11 +134,11 @@ Each failure also adds one to `otherlode_collector_ingest_rejected_total` with `
 
 ## Shutdown
 
-On `SIGTERM` or `SIGINT`, the collector logs `shutting down` and closes its listener at once, so a new connection is refused. It stops the HTTP server and the forwarder at the same time, and both share one 10-second deadline. Give the container a stop timeout longer than 10 seconds, or the runtime may kill the collector first.
+On `SIGTERM` or `SIGINT`, the collector logs `shutting down` and closes its listener at once, so it refuses new connections. It stops the HTTP server and the forwarder at the same time, and both share one 10-second deadline. Give the container a stop timeout longer than 10 seconds, or the runtime may kill the collector first.
 
 A request already in flight finishes with Otherlode's answer. If the deadline passes first, the collector cancels the forward, and the agent gets `503` with `Retry-After: 5` when its connection is still open. A request that reaches the forwarder after shutdown starts, on a connection that was already open, also gets that `503`. The collector exits as soon as the last request ends, or at the deadline.
 
-Nothing sits in a queue at shutdown, so the stop loses no payload. A payload whose request the stop cut short stays with the agent, which sends it again.
+The collector keeps no queue, so shutdown loses no payload. When shutdown cuts a request short, its payload stays with the agent, which sends it again.
 
 ## Counters
 
@@ -152,7 +152,7 @@ Each forward ends in one of these counters on `/metrics`. The `payload` label is
 
 ## Tuning
 
-The defaults suit most deployments. Set a variable only when you have a reason. The collector reads all values once at startup. A value that is not a number, not a duration or not above zero stops startup with an ERROR line that names the variable, such as `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS must be positive`. An empty value uses the default. Durations use Go syntax, such as `5s` or `8s`.
+The collector reads all values once at startup. A value that is not a number, not a duration or not above zero stops startup with an `ERROR` line that names the variable, such as `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS must be positive`. An empty value uses the default. Durations use Go syntax, such as `5s` or `8s`.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -162,7 +162,7 @@ The defaults suit most deployments. Set a variable only when you have a reason. 
 | `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT` | `8s` | Time limit for the one attempt to Otherlode. It must be below `9s` |
 | `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS` | `32` | Forwards in flight to Otherlode at one time |
 
-Lower the request timeout if you want a slow Otherlode to hand the agent a `503` sooner. Raise the forward limit if `busy` appears in `forward_failed_total` while Otherlode answers quickly.
+To give the agent a `503` sooner when Otherlode is slow, lower the request timeout. If `busy` appears in `otherlode_collector_forward_failed_total` while Otherlode answers quickly, raise the forward limit.
 
 ## Proxies
 

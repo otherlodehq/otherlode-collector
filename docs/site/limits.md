@@ -17,15 +17,15 @@ The collector keeps a token bucket for each client address. A request takes one 
 | `OTHERLODE_COLLECTOR_RATE_LIMIT_IPV6_PREFIX` | `128` | An integer from 1 to 128. |
 | `OTHERLODE_COLLECTOR_CLIENT_IP_HEADER` | unset | A header name. |
 
-A value that is not a number, a negative or non-finite rate, a burst below 1 while the rate is above 0, or a prefix outside 1 to 128 stops the collector at startup. The error names the variable. A burst must parse as an integer, and a prefix must be from 1 to 128, even when the rate is `0`. With the limit off, the collector logs this warning at startup and ignores the other three variables:
+Each of these stops the collector at startup with an error that names the variable: a value that is not a number, a negative or non-finite rate, a burst below 1 while the rate is above 0, or a prefix outside 1 to 128. A burst must parse as an integer, and a prefix must be from 1 to 128, even when the rate is `0`. With the limit off, the collector logs this warning at startup and ignores the other three variables:
 
 ```text
 {"time":"...","level":"WARN","msg":"rate limiting disabled; ingest endpoints accept requests unthrottled"}
 ```
 
-The limit covers every path under `/v1/otherlode/`. That includes the four ingest paths, wrong methods, and unknown paths. `/healthz` and `/metrics` are never limited.
+The limit covers every path under `/v1/otherlode/`. That includes the four ingest paths, wrong methods, and unknown paths. The limit never covers `/healthz` or `/metrics`.
 
-The limit runs before the token check. A request over the limit gets a 429 and never reaches authentication, so a flood is capped whether or not it carries a valid token. A request with a wrong agent token still counts against its address's bucket.
+The limit runs before the token check. A request over the limit gets a 429 and never reaches authentication, so the limit caps a flood whether or not it carries a valid token. A request with a wrong agent token still counts against its address's bucket.
 
 ### What a limited request gets
 
@@ -49,13 +49,13 @@ OTHERLODE_COLLECTOR_CLIENT_IP_HEADER=X-Forwarded-For
 
 The collector reads the header like this.
 
-- It joins all lines of the header, so a proxy that adds its own line instead of appending is handled.
-- It takes the last non-empty comma-separated entry, which is the one written by the proxy directly in front of the collector.
+- It joins all lines of the header, so it also reads the address from a proxy that adds its own line instead of appending.
+- It takes the last non-empty comma-separated entry, which is the one the proxy directly in front of the collector wrote.
 - It removes a port from that entry.
 - If the header is absent or empty, it uses the remote address.
 - If the entry is not an IP address, it uses the entry text as the key.
 
-The collector trusts the header as written. Set it only when the collector cannot be reached except through that proxy, and the proxy overwrites or appends to the header. A client that reaches the collector directly can send any value and pick its own bucket.
+The collector trusts the header as written. Set it only when clients can reach the collector through that proxy alone, and the proxy overwrites or appends to the header. A client that reaches the collector directly can send any value and pick its own bucket.
 
 ### Address forms
 
@@ -77,7 +77,7 @@ The collector reads the whole body and counts its elements before it decodes any
 |---|---|---|
 | `Content-Type` is not `application/x-protobuf`. Parameters such as `charset` are allowed. | 415 | `content_type` |
 | `Content-Encoding` names anything but `identity`. The collector does not decompress. | 415 | `content_type` |
-| Body is larger than 16 MiB. | 413 | `too_large` |
+| The body is larger than 16 MiB. | 413 | `too_large` |
 | The body cannot be read to the end. | 400 | `read` |
 | The body holds more elements than the limit for its payload. | 413 | `too_many_elements` |
 
@@ -85,7 +85,7 @@ The 16 MiB limit is fixed. It protects the collector's memory from a bad or host
 
 ### Element limit
 
-An element is an embedded message or one entry of a repeated field. The collector counts them at every depth. A call edge inside a branch site inside a probe location counts three times. The resource counts as one. A repeated number counts once for each value. A field the collector does not know is not counted.
+An element is an embedded message or one entry of a repeated field. The collector counts them at every depth. A call edge inside a branch site inside a probe location counts three times. The resource counts as one. A repeated number counts once for each value. The collector does not count a field it does not know.
 
 | Payload | Most elements |
 |---|---|
@@ -98,7 +98,7 @@ A payload over its limit gets status 413 and the body `payload has too many elem
 
 The count reads the wire format and allocates nothing for the elements. It runs before the request asks for a decode slot. A body that is not valid protobuf gets a 400 from the decode, unless the count passes the limit first.
 
-At these limits, Otherlode's ingest used at most about 230 MiB for one payload, with the decode and its own write included. The agent's chunks stay far below these limits. A single class with more elements than a limit cannot be sent.
+At these limits, Otherlode's ingest used at most about 230 MiB for one payload, with the decode and its own write included. The agent's chunks stay far below these limits. The agent cannot send a single class with more elements than a limit.
 
 The metric is `otherlode_collector_ingest_rejected_total` with the labels `payload` and `reason`.
 
@@ -117,7 +117,7 @@ A 16 MiB body has to arrive within the 10-second read timeout. A client on a slo
 
 ## Decode cap
 
-Decoding a payload can take far more memory than the body. The [element limit](#element-limit) bounds one decode. Otherlode's ingest used about 230 MiB at the limits. The decoded message also stays in memory until the collector has marshaled it and holds a forward slot.
+Decoding a payload can take far more memory than the body. The [element limit](#element-limit) bounds one decode. Otherlode's ingest used about 230 MiB at the limits. The decoded message also stays in memory until the collector has marshalled it and holds a forward slot.
 
 `OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES` caps how many requests the collector decodes at one time. It defaults to the number of CPUs the Go runtime uses, because decoding is CPU-bound and more parallel decodes add memory but no speed. The value must be an integer above 0. Anything else stops the collector at startup. You cannot turn the cap off.
 
@@ -137,15 +137,15 @@ A request keeps its decode slot until it holds a forward slot. When `OTHERLODE_C
 
 `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS` caps the forwards in flight to Otherlode. It defaults to 32, and the value must be an integer above 0.
 
-A request has 9 seconds from the moment the collector starts on it. The wait for a decode slot and the forward share that time. `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT` defaults to 8 seconds, and startup refuses a value of 9 seconds or more. When the time runs out, the agent gets a 503 with `Retry-After: 5`. [Forwarding](forwarding#time-limits) covers the limits.
+A request has 9 seconds from the moment the collector starts on it. The wait for a decode slot and the forward share that time. `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT` defaults to 8 seconds, and the collector refuses a value of 9 seconds or more at startup. When the time runs out, the agent gets a 503 with `Retry-After: 5`. [Forwarding](forwarding#time-limits) covers the limits.
 
 ## Worst-case memory
 
-Three parts add up.
+The worst-case memory is the sum of three parts.
 
-- **Decoding.** The decode cap times the memory of the largest decode. Otherlode's ingest used about 230 MiB for the largest payload at the element limits.
-- **Waiting bodies.** The number of requests waiting for a decode slot, times 16 MiB each. A request waits at most 1 second.
-- **Forwards in flight.** `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS` times the largest marshaled payload. A forward holds its marshaled payload until Otherlode answers or the request time runs out. The collector marshals a payload after it processes it, so blanking and re-keying change its size from the body the agent sent.
+- **Decoding.** This part is the decode cap times the memory of the largest decode. Otherlode's ingest used about 230 MiB for the largest payload at the element limits.
+- **Waiting bodies.** This part is the number of requests waiting for a decode slot, times 16 MiB each. A request waits at most 1 second.
+- **Forwards in flight.** This part is `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS` times the largest marshalled payload. A forward holds its marshalled payload until Otherlode answers or the request time runs out. The collector marshals a payload after it processes it, so blanking and re-keying change its size from the body the agent sent.
 
 The collector keeps no queue, so no term grows with the time Otherlode is slow. A slow Otherlode fills the forward slots and then the decode slots. Requests past that wait at most 1 second and get a 503, so the three terms stay at their caps.
 
@@ -156,7 +156,7 @@ The decode and waiting-body terms depend on traffic and payload content. Two ste
 
 The rate limit also caps how fast one address can send, so keep it on unless a proxy in front already limits requests.
 
-The code gives no rule for how many collectors to run or what values to use. Start from the defaults and watch `otherlode_collector_ingest_rejected_total` for the `busy` reason and `otherlode_collector_rate_limited_total`. See [health checks, metrics and logs](monitoring).
+No fixed rule says how many collectors to run or which values to use. Start from the defaults and watch `otherlode_collector_ingest_rejected_total` for the `busy` reason and `otherlode_collector_rate_limited_total`. See [health checks, metrics and logs](monitoring).
 
 ## Related pages
 

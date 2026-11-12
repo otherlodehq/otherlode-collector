@@ -3,7 +3,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-# Declared here, not at the top, so the module download above is cached once for every platform.
+# Keep TARGETOS and TARGETARCH below the module download, so every platform shares its layer.
 ARG TARGETOS
 ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags='-s -w' -o /out/otherlode-collector ./cmd/otherlode-collector

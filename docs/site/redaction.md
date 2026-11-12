@@ -1,6 +1,6 @@
 ---
 title: Blank out string literals
-description: What the collector blanks in branch conditions and case labels, the two settings that turn blanking on with pattern examples, the secret that re-keys branch and site keys, the case keys it clears, the header it sends upstream, the unknown fields it drops while blanking is on, and the counters and logs that show it working.
+description: What the collector blanks in branch conditions and case labels, the two settings that turn blanking on, with pattern examples, the secret that re-keys branch and site keys, the case keys it clears, the header it sends upstream, the unknown fields it drops while blanking is on, and the counters and logs that show it working.
 order: 60
 ---
 
@@ -17,7 +17,7 @@ The collector looks at the condition parts in two places, in every branch site o
 - The condition of the branch site.
 - The case label of each outcome of the site.
 
-A part is blanked when its kind is neither code nor placeholder, and the settings select it. A part of a kind the collector does not recognise counts as a literal, so the same settings blank it. The part keeps its kind, and its text becomes `…`.
+The collector blanks a part when its kind is neither code nor placeholder and the settings select it. A part of a kind the collector does not recognise counts as a literal, so the same settings blank it. The part keeps its kind, and its text becomes `…`.
 
 The class listing holds class names and the include and exclude rules. The collector keeps both as they arrive, as it keeps class names everywhere else.
 
@@ -43,7 +43,7 @@ Use this when you do not want to judge which literals are safe to send.
 
 ### Blank literals that match a pattern
 
-Put one pattern on each line. Patterns use [Go regular expression syntax](https://pkg.go.dev/regexp/syntax). A pattern matches anywhere in the literal's text unless you anchor it with `^` or `$`. The collector tests each pattern against one literal at a time, and the text is the string without quotes. Blank lines are skipped. Any other line is used as written, so spaces at its start or end belong to the pattern.
+Put one pattern on each line. Patterns use [Go regular expression syntax](https://pkg.go.dev/regexp/syntax). A pattern matches anywhere in the literal's text unless you anchor it with `^` or `$`. The collector tests each pattern against one literal at a time, and the text is the string without quotes. The collector skips blank lines and uses any other line as written, so spaces at its start or end belong to the pattern.
 
 ```bash
 OTHERLODE_COLLECTOR_REDACT_BLOCKED_VALUES='^sk_live_
@@ -51,13 +51,13 @@ OTHERLODE_COLLECTOR_REDACT_BLOCKED_VALUES='^sk_live_
 ^[0-9]{4}$'
 ```
 
-These three patterns blank a literal that starts with `sk_live_`, a literal that contains `password` in any case, and a literal of exactly four digits. A literal that matches no pattern is sent as it is.
+These three patterns blank a literal that starts with `sk_live_`, a literal that contains `password` in any case, and a literal of exactly four digits. The collector sends a literal that matches no pattern as it is.
 
 ### Startup errors
 
 A value the collector cannot use stops startup with exit code 1. A typo cannot leave blanking off. The error is one JSON log line, and its `msg` field holds the text.
 
-A pattern that does not compile names its line number, counted from 1 with blank lines included:
+The error for a pattern that does not compile names its line number, counted from 1 with blank lines included:
 
 ```text
 OTHERLODE_COLLECTOR_REDACT_BLOCKED_VALUES line 3: error parsing regexp: missing closing ): `(oops`
@@ -71,7 +71,7 @@ OTHERLODE_COLLECTOR_REDACT_ALL_LITERALS: strconv.ParseBool: parsing "yes": inval
 
 The secret has its own startup errors. See [secret errors at startup](#secret-errors-at-startup).
 
-When blanking is on, the collector logs this line at startup. `secret_fingerprint` names the secret without giving it away. See [compare the fingerprints](#compare-the-fingerprints).
+When blanking is on, the collector logs this line at startup. `secret_fingerprint` names the secret without revealing it. See [compare the fingerprints](#compare-the-fingerprints).
 
 ```text
 {"time":"...","level":"INFO","msg":"redacting string literals and re-keying branch and site keys in ingested payloads","blocked_values":3,"all_literals":false,"secret_fingerprint":"765616210e4aabd4"}
@@ -83,7 +83,7 @@ The counter `otherlode_collector_redacted_literals_total` on `/metrics` counts t
 
 No counter and no log line holds a literal's text, a key or the secret.
 
-## Unknown fields are dropped while blanking is on
+## The collector drops unknown fields while blanking is on
 
 The collector cannot see a literal inside a field it does not know. So while either setting is on, it drops every protobuf field it does not know from every payload, delta batches and class listings included. If a payload lost at least one field, the collector sets `fields_stripped` on the payload's resource attributes and counts the payload in `otherlode_collector_fields_stripped_total`. Its `payload` label is `deltas`, `manifest`, `static_baseline` or `class_listing`.
 
@@ -93,13 +93,13 @@ The collector logs one warning for each run, with the first payload that loses a
 {"time":"...","level":"WARN","msg":"dropped fields this collector does not know; its bindings are older than the agent's, so the server withholds findings from this run; upgrade to the latest collector","namespace":"...","service":"...","instance":"...","run":"...","agent_version":"...","payload":"..."}
 ```
 
-A dropped field can be one that Otherlode judges by. It stores a marked run and shows it, but counts it in no finding. See [a run from an older collector makes no claim](/docs/server/how-it-works#a-run-with-dropped-or-unknown-fields-makes-no-claim).
+A dropped field can be one that Otherlode judges by. Otherlode stores a marked run and shows it, but counts it in no finding. See [a run with dropped or unknown fields makes no claim](/docs/server/how-it-works#a-run-with-dropped-or-unknown-fields-makes-no-claim).
 
 To fix it, run the latest collector. With both settings off, the collector drops nothing and marks nothing.
 
 ## Replace branch and site keys
 
-The agent names each branch outcome with a `branch_key` and each branch site with a `site_key`. Each key is a digest of the site's bytecode, and that bytecode includes the site's string literals. See [branch and site keys](/docs/agent/data-sent#branch-and-site-keys) in the agent's docs. Every other input to a key is in the payload. So anyone who holds a blanked payload and a plain key can hash a guess at the blanked literal and compare the result with the key. A short literal, such as a flag name or a host name, falls to a few guesses.
+The agent names each branch outcome with a `branch_key` and each branch site with a `site_key`. Each key is a digest of the site's bytecode, and that bytecode includes the site's string literals. See [branch and site keys](/docs/agent/data-sent#branch-and-site-keys) in the agent's docs. Every other input to a key is in the payload. So anyone who holds a blanked payload and a plain key can hash a guess at the blanked literal and compare the result with the key. A few guesses are enough to find a short literal, such as a flag name or a host name.
 
 So while blanking is on, the collector replaces every `branch_key` and `site_key` in manifests and static baselines with HMAC-SHA256 of the key under a secret. It keeps the first 16 bytes, written as 32 lowercase hex characters, the same shape the agent sends. Equal keys stay equal, so Otherlode still joins one branch across builds and instances. Without the secret, a reader of your data in Otherlode who holds no agent token cannot test a guess against a key. An empty key stays empty.
 
@@ -112,14 +112,14 @@ Set one of two variables. Setting both stops startup.
 | Variable | Holds |
 |---|---|
 | `OTHERLODE_COLLECTOR_REDACT_SECRET` | The secret. The collector trims spaces around it. |
-| `OTHERLODE_COLLECTOR_REDACT_SECRET_FILE` | The path of a file that holds the secret on one line. The file follows the rules of a [token file](tokens#keep-a-token-out-of-the-environment). Blank lines and lines that start with `#` are skipped, and spaces around the line are trimmed. |
+| `OTHERLODE_COLLECTOR_REDACT_SECRET_FILE` | The path of a file that holds the secret on one line. The file follows the rules of a [token file](tokens#keep-a-token-out-of-the-environment). The collector skips blank lines and lines that start with `#`, and trims spaces around the line. |
 
 The secret must follow these rules, or the collector does not start:
 
 - It is at least 32 bytes long.
 - It holds no control character, such as a tab or a newline inside the value.
-- It differs from every agent token and from the forward key. Every agent holds an agent token, and Otherlode holds the forward key, so neither can keep the keys secret. The collector also checks this each time it re-reads a token file. A file that holds the secret is refused like any other bad re-read: the collector keeps the last good tokens and counts the failure in `otherlode_collector_token_reload_failures_total`.
-- It is set only while blanking is on. A secret with both blanking settings off stops startup, because you meant to protect the keys and nothing would.
+- It differs from every agent token and from the forward key. Every agent holds an agent token, and Otherlode holds the forward key, so neither can keep the keys secret. The collector also checks this each time it re-reads a token file. The collector refuses a token file that holds the secret like any other bad re-read. It keeps the last good tokens and counts the failure in `otherlode_collector_token_reload_failures_total`.
+- It is set only while blanking is on. A secret with both blanking settings off stops startup.
 
 Make a secret with `openssl`. It prints 64 hex characters, which is 64 bytes.
 
@@ -133,11 +133,11 @@ The collector reads the secret once, at startup. Unlike the token files, it neve
 
 Give the same secret to every collector that sends to one Otherlode tenant. That includes the collector in each environment and the collector that your test runs report through. Two collectors with different secrets give one branch two different keys, so Otherlode keeps two histories for that branch.
 
-A JVM that reaches Otherlode without a redacting collector sends plain keys. A test JVM that posts straight to Otherlode, or through a collector with blanking off, sends the plain keys of every production class it loads. Those keys undo the HMAC for the literals in those classes. Point the test JVM at a collector with the same blanking settings and the same secret as production's. [Test runs](/docs/agent/test-runs) covers the agent's side.
+A JVM that reaches Otherlode without a redacting collector sends plain keys. A test JVM that posts straight to Otherlode, or through a collector with blanking off, sends the plain keys of every production class it loads. With those plain keys, anyone who reads your data in Otherlode can test guesses at the literals in those classes. Point the test JVM at a collector with the same blanking settings and the same secret as production's. [Test runs](/docs/agent/test-runs) covers the agent's side.
 
 ### Compare the fingerprints
 
-A collector cannot see another collector's secret. It logs a fingerprint of its own instead, as `secret_fingerprint` in the startup line above. The fingerprint is 16 lowercase hex characters, taken from an HMAC of a fixed text under the secret. Two collectors with the same secret log the same fingerprint. Compare the fingerprints of all the collectors of a tenant to check that they share one secret.
+A collector cannot see another collector's secret. It logs a fingerprint of its own secret instead, as `secret_fingerprint` in the startup line above. The fingerprint is 16 lowercase hex characters, taken from an HMAC of a fixed text under the secret. Two collectors with the same secret log the same fingerprint. Compare the fingerprints of all the collectors of a tenant to check that they share one secret.
 
 ### Changing the secret starts new history
 
@@ -154,7 +154,7 @@ While blanking is on, the collector clears two kinds of case key.
 - Every case key of a site the agent marks `string_hash_code_switch`. The collector cannot tell which literal a key hashes, so it clears every key of the site, even when the blanking settings would let that literal through.
 - A case key that equals the Java hash code of a literal that the collector blanked in the same method. This rule covers an agent that does not send the mark.
 
-A cleared case has no key, so Otherlode shows it unnamed and cannot match it across builds. A case of an integer switch whose key equals the hash code of a literal blanked in the same method loses its key too. From an agent that does not send the mark, a hash code whose literal is not in the payload is not cleared. That happens when the agent could not write the condition of the `equals` check that holds the literal.
+A cleared case has no key, so Otherlode shows it unnamed and cannot match it across builds. A case of an integer switch whose key equals the hash code of a literal blanked in the same method loses its key too. From an agent that does not send the mark, the collector does not clear a hash code whose literal is not in the payload. That happens when the agent could not write the condition of the `equals` check that holds the literal.
 
 `otherlode_collector_redacted_case_keys_total` counts the cleared case keys of both kinds.
 

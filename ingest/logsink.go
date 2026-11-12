@@ -7,8 +7,7 @@ import (
 	otherlodepb "buf.build/gen/go/otherlode/otherlode/protocolbuffers/go/otherlode/v1"
 )
 
-// LogSink logs each payload's identity and size and stores nothing. The
-// collector uses it when no forward URL is set.
+// LogSink logs each payload's identity and size and stores nothing.
 type LogSink struct {
 	logger *slog.Logger
 }

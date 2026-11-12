@@ -1,9 +1,9 @@
 name: release
 
-# Started by a v*.*.* tag that scripts/release.sh pushed (ADR 0006). Refuses a tag that does not
+# A v*.*.* tag that scripts/release.sh pushed starts this workflow. It refuses a tag that does not
 # match the declared version, runs the whole suite, pushes a multi-arch image to GHCR, then creates
-# the GitHub release. The jobs that can write use actions pinned to a commit and keep no git
-# credentials on disk.
+# the GitHub release. The workflow pins every action to a commit. Every checkout but the
+# otherlode.dev one in the docs job leaves no git credentials on disk.
 on:
   push:
     tags: ['v*.*.*']
@@ -11,7 +11,7 @@ on:
 permissions:
   contents: read
 
-# One release at a time: the image job moves `latest`, so two runs must not race for it.
+# The image job moves `latest`, so two release runs must not run at once.
 concurrency:
   group: release
   cancel-in-progress: false
@@ -58,8 +58,8 @@ jobs:
     needs: guard
     uses: ./.github/workflows/ci.yml
 
-  # A rerun of this job pushes the same tags again, to a new digest: a container tag is mutable,
-  # and the release notes name the digest of the run that created the release.
+  # A rerun of this job pushes the same tags again, to a new digest, since a container tag is
+  # mutable. The release notes name the digest of the run that created the release.
   image:
     name: image
     needs: [guard, test]
@@ -83,8 +83,9 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # The 0.x line promises no compatibility, so it gets no X tag; from 1.0.0 it does.
-      # Annotations on the index too, which is where GHCR reads a multi-arch image's description.
+      # The 0.x line promises no compatibility, so it gets no major-version tag. A release from
+      # 1.0.0 on gets one. The annotations go on the index too, since GHCR reads a multi-arch
+      # image's description there.
       - name: Image tags and labels
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
@@ -121,9 +122,9 @@ jobs:
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
-  # Its own job, with write access to contents and nothing else. Rerunning it alone after a failure
-  # never pushes the image again. It creates no draft itself; one made by hand for the tag is
-  # replaced, and a published release is left alone.
+  # This job is separate from the image job and has write access to contents and nothing else.
+  # Rerunning it alone after a failure never pushes the image again. It creates no draft itself.
+  # It replaces a draft made by hand for the tag and leaves a published release alone.
   github-release:
     name: github release
     needs: [guard, image]
@@ -165,9 +166,9 @@ jobs:
           gh release create "$TAG" --verify-tag --title "otherlode-collector $version" --notes-file release-notes.md
 
   # Opens a pull request on otherlode.dev that copies docs/site/ into its
-  # /docs (otherlode.dev ADR 0001). It does nothing until the release
-  # environment's secret OTHERLODE_DEV_DOCS_TOKEN exists. Scope the token
-  # to otherlode.dev alone, and keep it out of the repository secrets.
+  # /docs. It does nothing until the release environment's secret
+  # OTHERLODE_DEV_DOCS_TOKEN exists. Scope the token to otherlode.dev alone,
+  # and keep it out of the repository secrets.
   docs:
     name: sync docs to otherlode.dev
     needs: github-release

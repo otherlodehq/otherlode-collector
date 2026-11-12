@@ -6,7 +6,7 @@ order: 90
 
 The collector receives the agent's four payloads, checks them, changes a few fields if you ask it to, and forwards each one to the forward URL you set. It stores nothing on disk. With no forward URL set, it sends nothing anywhere and only writes a log line for each payload.
 
-This page lists what leaves the collector and what stays in its log. What each payload contains belongs to the agent. See [what the agent sends](/docs/agent/data-sent).
+This page lists what leaves the collector and what stays in its log. See [what the agent sends](/docs/agent/data-sent) for what each payload contains.
 
 ## What the collector receives
 
@@ -35,7 +35,7 @@ The listing holds names only. It holds no counts, no conditions and no string li
 
 ## What the collector checks
 
-The collector checks each request in this order. A request that fails a check gets the status below and nothing is forwarded. Only a payload that passes every check is forwarded, and the collector answers `202` only when Otherlode has answered `202`.
+The collector checks each request in this order. A request that fails a check gets the status below, and the collector forwards nothing. The collector forwards only a payload that passes every check, and it answers `202` only when Otherlode has answered `202`.
 
 | Check | Fails with |
 |---|---|
@@ -43,7 +43,7 @@ The collector checks each request in this order. A request that fails a check ge
 | The `Authorization` header holds no accepted token, when token checking is on. See [tokens](tokens) | `401` |
 | The `Content-Type` is not `application/x-protobuf`, with or without parameters, or a `Content-Encoding` other than `identity` is present | `415` |
 | The body is larger than 16 MiB | `413` |
-| The body cannot be read | `400` |
+| The collector cannot read the body | `400` |
 | The body holds more elements than the limit for its payload. See [rate and memory limits](limits#element-limit) | `413` |
 | No decode slot comes free within 1 second. See [rate and memory limits](limits) | `503` |
 | The body is not valid protobuf | `400` |
@@ -55,11 +55,11 @@ The collector checks each request in this order. A request that fails a check ge
 | A static baseline chunk has no `scanned_at`, a `chunk_count` below 1, or a `chunk_index` that is negative or not below `chunk_count` | `400` |
 | A class listing chunk has no `listed_at`, a `chunk_count` below 1, or a `chunk_index` that is negative or not below `chunk_count` | `400` |
 | A delta batch or manifest holds a time field outside 0 to 253402300799999 milliseconds since the epoch, which is the start of 1970 to the end of the year 9999. The fields are `first_seen_at` and `first_loaded_at` in a delta batch, and `first_seen_unreported_at`, `withheld_at`, `observed_at`, `skipped_at`, `disabled_at` and `seen_at` in a manifest. A time of 0 means not set and passes | `400` |
-| A manifest lists a class that failed to initialize with no `reason` | `400` |
+| A manifest lists a class that failed to initialise with no `reason` | `400` |
 | A manifest lists a dependency with no `identities` | `400` |
 | Otherlode does not store the payload. Its `429` or other `4xx` status comes back as it is. A `5xx`, a timeout, no connection, a full forward limit or a shutdown gives `503`. See [forwarding](forwarding) | `429`, another `4xx` or `503` |
 
-The checks read only identity fields, time fields, chunk numbers, the reason a class failed to initialize and whether a dependency has an identity, and count elements. They do not read the code names, counts or conditions in a payload.
+The checks read only identity fields, time fields, chunk numbers, the reason a class failed to initialise and whether a dependency has an identity. They also count elements. They do not read the code names, counts or conditions in a payload.
 
 ## What the collector changes
 
@@ -67,7 +67,7 @@ The collector changes a payload only when you set a matching option. It changes 
 
 ### Environment and namespace
 
-If you set `OTHERLODE_COLLECTOR_ENVIRONMENT`, the collector writes that value into `environment` on every delta batch, manifest, static baseline chunk and class listing chunk. If you set `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE`, it does the same for `service_namespace`. A value the agent already set is kept by default. It is replaced only when `OTHERLODE_COLLECTOR_ENVIRONMENT_ACTION` or `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE_ACTION` is `upsert`. See [set the environment and namespace](environment-and-namespace).
+If you set `OTHERLODE_COLLECTOR_ENVIRONMENT`, the collector writes that value into `environment` on every delta batch, manifest, static baseline chunk and class listing chunk. If you set `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE`, it does the same for `service_namespace`. By default the collector keeps a value the agent already set. It replaces that value only when `OTHERLODE_COLLECTOR_ENVIRONMENT_ACTION` or `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE_ACTION` is `upsert`. See [set the environment and namespace](environment-and-namespace).
 
 ### Blanked string literals
 
@@ -81,7 +81,7 @@ With both blanking settings off, the collector drops no field and sets `fields_s
 
 ### Delta counts
 
-The collector never changes a count in a delta batch. What the counts mean belongs to the agent. See [delta batch](/docs/agent/data-sent#delta-batch).
+The collector never changes a count in a delta batch. See [delta batch](/docs/agent/data-sent#delta-batch) for what the counts mean.
 
 ### Re-keyed branch and site keys
 
@@ -128,7 +128,7 @@ The collector adds no client IP, no host name and no other data about the machin
 
 ## What the collector stores
 
-The collector writes no file. It holds a payload in memory only for the length of its request, which is at most 9 seconds, and it keeps no queue. A crash or a stop signal loses no payload that an agent saw accepted, because the agent gets `202` only after Otherlode has stored the payload. A request that is cut short stays with the agent, which sends it again. It reads only the token files you point it at. See [forwarding](forwarding) for the forward and shutdown.
+The collector writes no file. It holds a payload in memory only for the length of its request, which is at most 9 seconds, and it keeps no queue. With a forward URL set, a crash or a stop signal loses no payload that an agent got `202` for, because the agent gets `202` only after Otherlode has stored the payload. A request that is cut short stays with the agent, which sends it again. The collector reads only the token files and the redaction secret file you point it at. See [forwarding](forwarding) for the forward and shutdown.
 
 ## What the collector logs
 
@@ -149,7 +149,7 @@ The collector writes JSON lines to standard output. At the default `info` level,
 | `dropped fields this collector does not know; its bindings are older than the agent's, so the server withholds findings from this run; upgrade to the latest collector` | `namespace`, `service`, `instance`, `run`, `agent_version`, `payload` | A blanking setting is on and a payload lost an unknown field. One line for each run |
 | `forward URL uses plain http; the backend auth token is sent unencrypted` | `url` | At startup, when the forward URL starts with `http://` and a forward key is set |
 
-When Otherlode does not store a payload and answers anything but a `4xx`, the collector logs a line at `error` level. Its `msg` is `sink rejected delta batch`, `sink rejected manifest`, `sink rejected static baseline` or `sink rejected class listing`. Its `error` field names the service and instance, and it has a `reason`. The error is Otherlode's status or the HTTP client's error, which can include the forward URL. At most one line a minute for each payload type and reason. See [health checks, metrics and logs](monitoring) for every level.
+When Otherlode does not store a payload and answers anything but a `4xx`, the collector logs a line at `error` level. Its `msg` is `sink rejected delta batch`, `sink rejected manifest`, `sink rejected static baseline` or `sink rejected class listing`. Its `error` field names the service and instance, and it has a `reason`. The error is Otherlode's status or the HTTP client's error, which can include the forward URL. The collector logs at most one line a minute for each payload type and reason. See [health checks, metrics and logs](monitoring) for every level.
 
 ### When no forward URL is set
 
@@ -159,7 +159,7 @@ With no `OTHERLODE_COLLECTOR_FORWARD_URL`, nothing leaves the collector. The col
 {"time":"...","level":"WARN","msg":"OTHERLODE_COLLECTOR_FORWARD_URL not set; ingest payloads are only logged, not forwarded"}
 ```
 
-It then answers `202` to every payload that passes the checks, and logs one `info` line for it. The agent counts that `202` as delivered, so the data is gone once the line is written.
+It then answers `202` to every payload that passes the checks, and logs one `info` line for it. The agent counts that `202` as delivered, so the data is gone once the collector writes the line.
 
 The line for a delta batch has this shape.
 
@@ -176,7 +176,7 @@ The `msg` is `received delta batch`, `received probe manifest`, `received static
 | `received static baseline` | `scanned_at`, `chunk`, `chunk_count`, `declared_classes`, `declared_call_edges`, `declared_referenced_classes`, `unreadable_classes`, `unprobed_classes` |
 | `received class listing` | `listed_at`, `chunk`, `chunk_count`, `class_names` |
 
-Environment and namespace stamps, blanking and re-keying apply before the line is written, so the line shows the stamped values.
+The collector applies environment and namespace stamps, blanking and re-keying before it writes the line, so the line shows the stamped values.
 
 ## Related pages
 

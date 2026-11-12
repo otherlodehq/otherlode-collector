@@ -13,7 +13,7 @@ An agent can send straight to Otherlode at `https://ingest.otherlode.dev` with a
 - **One host that sends to the internet.** Your applications send only to the collector, inside your network. A JVM with no route to the internet still reports.
 - **One place to name the environment.** The collector can fill in the environment and the service namespace on every payload it forwards. See [Set the environment and namespace](environment-and-namespace).
 
-A collector does not make delivery safer. It keeps no queue and holds a payload only while the agent waits for Otherlode's answer, so an agent resends what Otherlode did not store whether or not a collector sits in between. [How the collector works](how-it-works) explains why.
+A collector does not make delivery safer. It keeps no queue and holds a payload only while the agent waits for Otherlode's answer. An agent resends what Otherlode did not store, with or without a collector. [How the collector works](how-it-works) explains why.
 
 ## Move an agent onto a collector
 

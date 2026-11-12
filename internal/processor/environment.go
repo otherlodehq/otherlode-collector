@@ -142,8 +142,7 @@ func sameEnvironment(a, b string) bool {
 	return normaliseEnvironment(a) == normaliseEnvironment(b)
 }
 
-// normaliseEnvironment matches how the server stores an environment: trimmed
-// and lowercased.
+// This must match how the server stores an environment, trimmed and lowercased.
 func normaliseEnvironment(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
 }

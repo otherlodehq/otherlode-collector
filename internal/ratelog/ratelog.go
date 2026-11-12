@@ -29,7 +29,7 @@ func New(every time.Duration, now func() time.Time) *Limiter {
 
 // Allow reports whether the caller should write a line for key. When it
 // does, unlogged is the number of calls for key held back since the
-// previous line. The first call for a key is always allowed.
+// previous line. It always allows the first call for a key.
 func (l *Limiter) Allow(key string) (unlogged int, ok bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

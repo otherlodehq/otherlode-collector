@@ -58,8 +58,8 @@ type Config struct {
 	// key as "Authorization: Bearer <key>". Nil sends no header.
 	AuthToken TokenSource
 
-	// RedactionFingerprint, when not empty, is sent in the RedactionHeader
-	// header of every request. It must be a valid header value.
+	// RedactionFingerprint, when not empty, goes in the RedactionHeader header
+	// of every request the sink sends. It must be a valid header value.
 	RedactionFingerprint string
 
 	// HTTPClient sends the requests. The default client keeps idle
@@ -137,7 +137,7 @@ type outbound struct {
 }
 
 // ErrShuttingDown is the error an Accept method returns once Shutdown has
-// started. The ingest handler answers 503 for it.
+// started.
 var ErrShuttingDown = errors.New("forward: sink is shutting down")
 
 // ForwardingSink is an ingest.Sink that posts each decoded payload to a

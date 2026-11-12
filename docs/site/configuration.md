@@ -4,11 +4,11 @@ description: Every collector setting with its default, accepted values and what 
 order: 20
 ---
 
-You configure the collector with environment variables only. It has 23 of them, all starting with `OTHERLODE_COLLECTOR_`. It reads them once, at startup. The two token files are the exception, because the collector re-reads them every 30 seconds. The redaction secret file is not one of them. The collector reads it once. Any other change needs a restart.
+You configure the collector with environment variables only. It has 23 of them, all starting with `OTHERLODE_COLLECTOR_`. It reads them once, at startup. The two token files are the exception, because the collector re-reads them every 30 seconds. The collector reads the redaction secret file once, like the other settings. Any other change needs a restart.
 
-Every invalid value stops startup. The collector writes one `ERROR` line to standard output, then exits with code 1. It never falls back to a default for a value you set wrongly, and this is the opposite of the [agent](/docs/agent/configuration), which warns and keeps running. The collector sits between your agents and Otherlode. A silent fallback could turn off redaction or authentication without anyone noticing.
+Every invalid value stops startup. The collector writes one `ERROR` line to standard output, then exits with code 1. It never falls back to a default for a value you set wrongly.
 
-For a first run, you only need an agent token. See [deploy](deploy).
+For a first run, you need only an agent token. See [deploy](deploy).
 
 ## Rules that apply to every setting
 
@@ -31,7 +31,7 @@ An invalid value logs a line like these. The `msg` field carries the text.
 
 | Variable | Default | Accepted values | If the value is invalid |
 |---|---|---|---|
-| `OTHERLODE_COLLECTOR_ADDR` | `:4319` | A `host:port` the collector can listen on. The host can be empty. It serves plain HTTP, with no TLS | Startup logs the listen error after `OTHERLODE_COLLECTOR_ADDR:` and exits with code 1 |
+| `OTHERLODE_COLLECTOR_ADDR` | `:4319` | A `host:port` the collector can listen on. The host can be empty. The collector serves plain HTTP, with no TLS | Startup logs the listen error after `OTHERLODE_COLLECTOR_ADDR:` and exits with code 1 |
 | `OTHERLODE_COLLECTOR_LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`, in any letter case. A level can take a signed offset, such as `warn+1` or `info-2`, to set a threshold between two named levels, which sit 4 apart | Startup fails. `warning` is invalid |
 
 The collector checks the listen address when it opens the port, after it has checked every other setting. If the port is taken or the address is malformed, it logs the failure and exits. It logs the `otherlode-collector listening` line only after it has opened the port.
@@ -67,7 +67,7 @@ Setting both `OTHERLODE_COLLECTOR_AUTH_TOKEN` and `OTHERLODE_COLLECTOR_AUTH_TOKE
 {"time":"...","level":"ERROR","msg":"OTHERLODE_COLLECTOR_INSECURE_NO_AUTH: strconv.ParseBool: parsing \"yes\": invalid syntax"}
 ```
 
-A token file that cannot be read stops startup even when `OTHERLODE_COLLECTOR_INSECURE_NO_AUTH` is true. With the opt-out, the collector logs this at `WARN` and accepts any caller:
+A token file the collector cannot read stops startup even when `OTHERLODE_COLLECTOR_INSECURE_NO_AUTH` is true. With the opt-out, the collector logs this at `WARN` and accepts any caller:
 
 ```text
 {"time":"...","level":"WARN","msg":"OTHERLODE_COLLECTOR_AUTH_TOKEN and OTHERLODE_COLLECTOR_AUTH_TOKEN_FILE not set; ingest endpoints are unauthenticated"}
@@ -77,23 +77,23 @@ The agent sends its token as `authToken`. See [authToken](/docs/agent/configurat
 
 ## Forwarding
 
-These settings control where the collector sends payloads and how long it waits for Otherlode's answer. See [forwarding](forwarding) for how a payload is forwarded and what the agent gets back.
+These settings control where the collector sends payloads and how long it waits for Otherlode's answer. See [forwarding](forwarding) for how the collector forwards a payload and what the agent gets back.
 
 | Variable | Default | Accepted values | If the value is invalid |
 |---|---|---|---|
 | `OTHERLODE_COLLECTOR_FORWARD_URL` | None, so the collector only logs payloads | An absolute `http` or `https` URL with a host, no user info, no query and no fragment. A path is allowed. The collector removes trailing slashes | Startup fails with an error that names the variable and the problem, such as `OTHERLODE_COLLECTOR_FORWARD_URL: forward URL must not contain a query` |
 | `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN` | None | The key the collector sends to the forward URL. The collector trims spaces around it. It cannot hold a control character | Startup fails for a value of only spaces or a control character |
 | `OTHERLODE_COLLECTOR_FORWARD_AUTH_TOKEN_FILE` | None | The path of a file that holds exactly one key. Blank lines and `#` lines do not count | Startup fails if the file is missing, is not a regular file, is larger than 1 MiB, holds no key or more than one, or holds a control character |
-| `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT` | `8s` | A positive duration below `9s`, the time budget of one request. The limit for the one attempt to Otherlode | Startup fails. A value of `9s` or more fails with `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT is 9s, which is not below the 9s time budget of one request; set it lower` |
+| `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT` | `8s` | A positive duration below `9s`, the time budget of one request. It limits the one attempt to Otherlode | Startup fails. A value of `9s` or more fails with `OTHERLODE_COLLECTOR_FORWARD_REQUEST_TIMEOUT is 9s, which is not below the 9s time budget of one request; set it lower` |
 | `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS` | `32` | A positive integer. The most forwards in flight to Otherlode at one time | Startup fails |
 
-Without `OTHERLODE_COLLECTOR_FORWARD_URL`, the collector starts and logs this at `WARN`. Payloads are decoded and logged, never sent.
+Without `OTHERLODE_COLLECTOR_FORWARD_URL`, the collector starts and logs this at `WARN`. The collector decodes and logs payloads, and never sends them.
 
 ```text
 {"time":"...","level":"WARN","msg":"OTHERLODE_COLLECTOR_FORWARD_URL not set; ingest payloads are only logged, not forwarded"}
 ```
 
-The two tuning variables are read only to build the forwarder. With no forward URL they are still checked, so a bad value stops startup, but they do nothing.
+The collector reads the two tuning variables only to build the forwarder. With no forward URL it still checks them, so a bad value stops startup, but they do nothing.
 
 Two combinations fail startup on purpose.
 
@@ -102,7 +102,7 @@ Two combinations fail startup on purpose.
 
 The collector makes one attempt for each payload. It retries nothing, and it keeps no queue.
 
-A forward URL that starts with `http://` and comes with a key gets a `WARN` at startup, because the key travels unencrypted.
+If the forward URL starts with `http://` and you set a forward key, the collector logs a `WARN` at startup, because it sends the key unencrypted.
 
 ```text
 {"time":"...","level":"WARN","msg":"forward URL uses plain http; the backend auth token is sent unencrypted","url":"http://..."}
@@ -116,14 +116,14 @@ These settings stamp one environment name and one service namespace on every pay
 
 | Variable | Default | Accepted values | If the value is invalid |
 |---|---|---|---|
-| `OTHERLODE_COLLECTOR_ENVIRONMENT` | None, so the collector leaves the agent's environment alone | Any text up to 1024 bytes after trimming. The collector trims spaces. A value that is empty after trimming turns stamping off | Startup fails if the text is not valid UTF-8 or is over 1024 bytes |
+| `OTHERLODE_COLLECTOR_ENVIRONMENT` | None, so the collector keeps the agent's environment | Any text up to 1024 bytes after trimming. The collector trims spaces. A value that is empty after trimming turns stamping off | Startup fails if the text is not valid UTF-8 or is over 1024 bytes |
 | `OTHERLODE_COLLECTOR_ENVIRONMENT_ACTION` | `insert` | `insert` or `upsert`, in any letter case. The collector trims spaces. A value that is empty after trimming counts as not set | Startup fails. A set action with no environment also fails |
 | `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE` | None, so each agent's namespace passes through | Any text up to 1024 bytes after trimming, except `.` and `..`. The collector trims spaces. A value that is empty after trimming turns stamping off | Startup fails for `.`, `..`, text that is not valid UTF-8 or text over 1024 bytes |
 | `OTHERLODE_COLLECTOR_SERVICE_NAMESPACE_ACTION` | `insert` | `insert` or `upsert`, in any letter case. The collector trims spaces. A value that is empty after trimming counts as not set | Startup fails. A set action with no namespace also fails |
 
 `insert` fills in a missing value and keeps the agent's own. `upsert` always writes the collector's value.
 
-An action variable that is set, even to `insert`, with a blank value variable is an error. The collector refuses to guess that you meant to stamp. For the environment, the error reads `OTHERLODE_COLLECTOR_ENVIRONMENT_ACTION is set but OTHERLODE_COLLECTOR_ENVIRONMENT is empty; set OTHERLODE_COLLECTOR_ENVIRONMENT or unset OTHERLODE_COLLECTOR_ENVIRONMENT_ACTION`. The namespace has the same error with its own names. An invalid action reads `invalid action "replace": must be "insert" or "upsert"`.
+An action variable that is set, even to `insert`, with a blank value variable is an error. For the environment, the error reads `OTHERLODE_COLLECTOR_ENVIRONMENT_ACTION is set but OTHERLODE_COLLECTOR_ENVIRONMENT is empty; set OTHERLODE_COLLECTOR_ENVIRONMENT or unset OTHERLODE_COLLECTOR_ENVIRONMENT_ACTION`. The namespace has the same error with its own names. An invalid action reads `invalid action "replace": must be "insert" or "upsert"`.
 
 When stamping is on, the collector logs `stamping environment on ingested payloads` or `stamping service namespace on ingested payloads` at `INFO`, with the value and the action.
 
@@ -138,37 +138,37 @@ These settings blank string literals in branch conditions before payloads leave 
 | `OTHERLODE_COLLECTOR_REDACT_SECRET` | None | The secret that keys the HMAC over branch and site keys. The collector trims spaces around it | Startup fails. See the rules below |
 | `OTHERLODE_COLLECTOR_REDACT_SECRET_FILE` | None | The path of a file that holds exactly one secret. Blank lines and `#` lines do not count | Startup fails if the file is missing, is not a regular file, is larger than 1 MiB, or does not hold exactly one secret, and for the rules below |
 
-For `OTHERLODE_COLLECTOR_REDACT_BLOCKED_VALUES`, the collector skips lines that are empty after trimming spaces, and drops a trailing carriage return. It uses every other line as written, so leading and trailing spaces become part of the pattern. Line numbers count from 1 and include the skipped lines. A comma is part of a pattern, which is why each pattern gets its own line. Patterns are not anchored, so `secret` matches any literal that contains `secret`.
+For `OTHERLODE_COLLECTOR_REDACT_BLOCKED_VALUES`, the collector skips lines that are empty after trimming spaces, and drops a trailing carriage return. It uses every other line as written, so leading and trailing spaces become part of the pattern. Line numbers count from 1 and include the skipped lines. A comma is part of a pattern, so each pattern goes on its own line. Patterns are not anchored, so `secret` matches any literal that contains `secret`.
 
 ```text
 {"time":"...","level":"ERROR","msg":"OTHERLODE_COLLECTOR_REDACT_BLOCKED_VALUES line 2: error parsing regexp: missing closing ]: `[`"}
 ```
 
-You can set both blanking variables. Either one is enough to blank a literal. With neither set, redaction is off.
+You can set both blanking variables. Either one is enough to blank a literal. With neither set, blanking is off.
 
-While redaction is on, the collector needs a secret. It replaces each branch key and site key with an HMAC of the key under that secret, so that a reader of the keys who holds no agent token cannot test a guess at a blanked literal. See [replace branch and site keys](redaction#replace-branch-and-site-keys). Startup fails in each of these cases:
+While blanking is on, the collector needs a secret. It replaces each branch key and site key with an HMAC of the key under that secret, so that a reader of the keys who holds no agent token cannot test a guess at a blanked literal. See [replace branch and site keys](redaction#replace-branch-and-site-keys). Startup fails in each of these cases:
 
-- Redaction is on and neither secret variable is set.
+- Blanking is on and neither secret variable is set.
 - Both secret variables are set.
 - The secret is shorter than 32 bytes, or holds a control character.
 - The secret equals an agent token or the forward key.
-- A secret variable is set while redaction is off.
+- A secret variable is set while blanking is off.
 
-Make a secret with `openssl rand -hex 32`. Give every collector that sends to one Otherlode tenant the same secret, including the collector your test runs report through. The collector reads the secret once, at startup, and logs its fingerprint as `secret_fingerprint`. Changing the secret, or turning redaction on later, makes Otherlode treat every branch as new. [Redaction](redaction#replace-branch-and-site-keys) explains each of these rules and lists the error messages.
+Make a secret with `openssl rand -hex 32`. Give every collector that sends to one Otherlode tenant the same secret, including the collector your test runs report through. The collector reads the secret once, at startup, and logs its fingerprint as `secret_fingerprint`. Changing the secret, or turning blanking on later, makes Otherlode treat every branch as new. [Redaction](redaction#replace-branch-and-site-keys) explains each of these rules and lists the error messages.
 
 ## Limits
 
-These settings protect the collector from a flood of requests and from decode memory. See [limits](limits) for the numbers behind them.
+These settings limit how fast each client can send and how many payloads the collector decodes at once. See [limits](limits) for the numbers behind them.
 
 | Variable | Default | Accepted values | If the value is invalid |
 |---|---|---|---|
 | `OTHERLODE_COLLECTOR_RATE_LIMIT_RPS` | `5` | A number of requests per second per client address. `0` turns the limit off. Decimals such as `0.5` work | Startup fails for text that is not a number, a negative number, `inf` or `NaN` |
-| `OTHERLODE_COLLECTOR_RATE_LIMIT_BURST` | `20` | An integer. The largest spike one client can send | Startup fails for text that is not an integer. It also fails for `0` or a negative number when the rate is above `0`. With the rate at `0`, the burst is ignored |
+| `OTHERLODE_COLLECTOR_RATE_LIMIT_BURST` | `20` | An integer. The largest spike one client can send | Startup fails for text that is not an integer. It also fails for `0` or a negative number when the rate is above `0`. With the rate at `0`, the collector ignores the burst |
 | `OTHERLODE_COLLECTOR_RATE_LIMIT_IPV6_PREFIX` | `128` | An integer from `1` to `128`. IPv6 addresses that share these leading bits share one bucket | Startup fails |
 | `OTHERLODE_COLLECTOR_CLIENT_IP_HEADER` | None, so the limit uses the connection's address | A request header name, such as `X-Forwarded-For`. The collector reads the last entry. A request without the header, or with an empty one, falls back to the connection's address | No check. A name that no request carries has no effect |
 | `OTHERLODE_COLLECTOR_MAX_CONCURRENT_DECODES` | The Go runtime's `GOMAXPROCS`, which is the number of CPUs available | A positive integer. It caps decoding only. `OTHERLODE_COLLECTOR_MAX_CONCURRENT_FORWARDS` caps the forwards | Startup fails |
 
-Only set `OTHERLODE_COLLECTOR_CLIENT_IP_HEADER` when a proxy in front of the collector sets or appends to that header, and nothing else can reach the collector. Otherwise a client can choose its own bucket. See [limits](limits) for the details. The rate limit settings do nothing when the rate is `0`, including `OTHERLODE_COLLECTOR_RATE_LIMIT_IPV6_PREFIX` and `OTHERLODE_COLLECTOR_CLIENT_IP_HEADER`, but their parse rules still apply. A rate of `0` logs this at `WARN`.
+Set `OTHERLODE_COLLECTOR_CLIENT_IP_HEADER` only when a proxy in front of the collector sets or appends to that header, and nothing else can reach the collector. Otherwise a client can choose its own bucket. See [limits](limits) for the details. The rate limit settings do nothing when the rate is `0`, including `OTHERLODE_COLLECTOR_RATE_LIMIT_IPV6_PREFIX` and `OTHERLODE_COLLECTOR_CLIENT_IP_HEADER`, but their parse rules still apply. A rate of `0` logs this at `WARN`.
 
 ```text
 {"time":"...","level":"WARN","msg":"rate limiting disabled; ingest endpoints accept requests unthrottled"}
@@ -204,6 +204,6 @@ The collector reads the proxy variables once, when the forwarder first sends. Re
 
 - [Deploy the collector](deploy) to run the image with the minimum settings.
 - [Set and rotate tokens](tokens) for the token variables and files.
-- [Forwarding](forwarding) for how a payload is forwarded, what the agent gets back and shutdown.
+- [Forwarding](forwarding) for how the collector forwards a payload, what the agent gets back and shutdown.
 - [Monitoring](monitoring) for `/healthz`, `/metrics` and logs.
 - [Troubleshooting](troubleshooting) when the collector will not start.

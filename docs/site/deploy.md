@@ -4,13 +4,13 @@ description: Run the container image with an agent token, put a TLS proxy in fro
 order: 10
 ---
 
-The collector is a single container image that sits between your agents and Otherlode. It's optional: [Add a collector](add) says when you need one. It listens for the agents' pushes on port 4319, and it needs one setting to start: a token the agents send. This page takes you from pulling the image to a collector your agents report to.
+The collector is a single container image that sits between your agents and Otherlode. It's optional, and [Add a collector](add) says when you need one. It listens for the agents' pushes on port 4319, and it needs one setting to start: a token the agents send. This page takes you from pulling the image to a collector your agents report to.
 
 ## Run the image
 
-The image is `ghcr.io/otherlodehq/otherlode-collector`. It is built for `linux/amd64` and `linux/arm64`. It runs as a non-root user from a distroless base with no shell, and it exposes port 4319.
+The image is `ghcr.io/otherlodehq/otherlode-collector`. The release workflow builds it for `linux/amd64` and `linux/arm64`. It runs as a non-root user from a distroless base with no shell, and it exposes port 4319.
 
-Make a secret for the agents to send, then start the collector with it:
+Make a token for the agents to send, then start the collector with it:
 
 ```bash
 TOKEN=$(openssl rand -hex 32)
@@ -78,7 +78,7 @@ Put a Service in front of it on port 4319. Agents in the cluster then use the Se
 
 The collector serves plain HTTP and has no TLS setting. For any network you do not control, terminate TLS in a reverse proxy, ingress or load balancer in front of it, and give agents the `https://` address.
 
-Without that, everything an agent sends crosses the network in clear. That includes the agent token in the `Authorization` header and every payload, which names your service, its classes and methods, and its dependencies. The agent logs a warning at startup when it sends a token over `http://`.
+Without that, everything an agent sends crosses the network unencrypted. That includes the agent token in the `Authorization` header and every payload, which names your service, its classes and methods, and its dependencies. The agent logs a warning at startup when it sends a token over `http://`.
 
 The collector reads the client address for its per-address rate limit. Behind a proxy, every agent can look like one address until you tell the collector which header carries the real one. [Rate and memory limits](limits) explains the header and when to trust it.
 
@@ -122,7 +122,7 @@ To send what the collector receives on to Otherlode, set `OTHERLODE_COLLECTOR_FO
 
 ## Run the latest release
 
-Run the latest collector. [How the collector works](how-it-works) explains why. Each release is tagged `X.Y.Z`, `X.Y` and `latest`. A tag such as `0.1` follows the patch releases of that minor version. `latest` follows every release.
+Run the latest collector. [How the collector works](how-it-works) explains why. The release workflow tags each release image `X.Y.Z`, `X.Y` and `latest`. A tag such as `0.1` follows the patch releases of that minor version. `latest` follows every release.
 
 ### Check where an image was built
 

@@ -10,7 +10,7 @@ The collector is a small, optional HTTP service between your agents and Otherlod
 
 When agents send through the collector, only the collector sends to Otherlode, and your applications never need a route to the internet. Everything that decides what leaves happens in one place that you run and configure.
 
-That place does four things with each payload. It decodes the protobuf body and checks that it names a service, an instance and a run. It processes the payload by stamping the environment and service namespace, and by blanking string literals and replacing branch and site keys, if you turned those on. It forwards the result and waits for Otherlode's answer. Then it forgets it.
+That place does four things with each payload. It decodes the protobuf body and checks that it names a service, an instance and a run. It processes the payload by stamping the environment and service namespace, and by blanking string literals and replacing branch and site keys, if you turned those on. It forwards the result and waits for Otherlode's answer. Then it drops the payload from memory.
 
 ```text
 agent --> collector (decode, check, process) --> Otherlode
@@ -19,7 +19,7 @@ agent --> collector (decode, check, process) --> Otherlode
 
 The collector writes no payload to disk. It holds a payload in memory only for the length of its request. With no forward URL set, it logs each payload's identity and sizes and does nothing else with it.
 
-The consequence is that nothing at rest in the collector can leak, be backed up by mistake or need a retention policy. The cost is that the collector cannot hold a payload for later. The next section says why that costs nothing.
+Nothing at rest in the collector can leak, be backed up by mistake or need a retention policy. The cost is that the collector cannot hold a payload for later. The next section says why that costs nothing.
 
 ## It answers 202 only once Otherlode has stored the payload
 
@@ -30,17 +30,17 @@ The reason is what the agent does with the answer. The agent sends running total
 So the answer decides what the agent does next.
 
 - Any answer but `202` leaves the remembered total where it was. The agent builds the payload again on its next flush, with the live totals.
-- A `202` moves the remembered total forward. The agent will not mention that probe again until its count changes.
+- A `202` moves the remembered total forward. The agent does not send that probe again until its count changes.
 
 A probe that runs once a quarter shows the difference. If the collector answered `202` before Otherlode had the payload, and the payload was then lost, the agent would consider that probe reported. Its count would not change, so nothing would resend it, and Otherlode would see a probe that looks unused. A payload that is refused costs one flush interval. A payload that is acknowledged and lost can cost the finding.
 
-So every payload an agent sees accepted is stored, and every other payload stays with the agent. The collector has no queue, retries nothing and drops nothing. The agent resends what Otherlode did not store, and the agent's memory is the only buffer. While Otherlode is down, every agent reads as behind and makes no zero-count claim, which is what is true. Each catches up from its own totals when Otherlode answers again. The one loss is an agent process that stops during the outage. Its undelivered counts go with it, and it reads in Otherlode as one that went silent.
+So Otherlode has stored every payload an agent sees accepted, and every other payload stays with the agent. The collector has no queue, retries nothing and drops nothing. The agent resends what Otherlode did not store, and the agent's memory is the only buffer. While Otherlode is down, every agent reads as behind and makes no zero-count claim. Each catches up from its own totals when Otherlode answers again. The one loss is an agent process that stops during the outage. Its undelivered counts go with it, and it reads in Otherlode as one that went silent.
 
 The price is time. An agent's send takes as long as Otherlode's ingest of the payload, within 8 seconds by default. A request has 9 seconds in all, so the agent gets the collector's answer before it gives up. A slow Otherlode shows as `503` answers and a rise in `forward_failed_total`, not as a growing queue in the collector.
 
 ## It fails closed
 
-Every setting is read once at startup. If the collector cannot tell what you meant, it stops with an error and exits with code 1. It does not guess, and it does not run in a weaker mode.
+The collector reads every setting once at startup. If the collector cannot tell what you meant, it stops with an error and exits with code 1. It does not guess, and it does not run in a weaker mode.
 
 - With no agent token set, it refuses to start. You opt out with `OTHERLODE_COLLECTOR_INSECURE_NO_AUTH` and accept an open endpoint. See [tokens](tokens).
 - An invalid number, duration, pattern, boolean or URL stops startup. Setting a forward key with no forward URL stops it too, because you meant to forward.
@@ -50,7 +50,7 @@ Every setting is read once at startup. If the collector cannot tell what you mea
 
 A collector that quietly ran without a token, or without the blanking you asked for, would be the more dangerous failure. A container that exits at startup is easy to see and easy to fix.
 
-The agent makes the opposite choice. It runs inside your application, so no invalid option stops your application. It logs a warning and uses the default. See [the agent's configuration](/docs/agent/configuration). The collector is a separate process whose only job is to apply your rules, so stopping is safe there.
+The agent makes the opposite choice. It runs inside your application, so no invalid option stops your application. For most options it logs a warning and uses the default. For an unusable `exportUrl` or `authToken`, or an empty `includePackages`, it logs an ERROR and turns itself off for that JVM. See [the agent's configuration](/docs/agent/configuration). The collector is a separate process whose only job is to apply your rules, so stopping is safe there.
 
 ## Run the latest collector
 

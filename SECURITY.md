@@ -9,22 +9,22 @@ https://github.com/otherlodehq/otherlode-collector/security/advisories/new
 
 Do not open a public issue, pull request or discussion about it.
 
-Please include:
+Include these in your report:
 
-- the affected version, or the commit if you built from source;
-- steps to reproduce, with a minimal setup where you can;
-- the impact: what an attacker can do, and under which conditions.
+- the affected version, or the commit if you built from source
+- steps to reproduce, with a minimal setup where you can
+- the impact: what an attacker can do, and under which conditions
 
 ## Scope
 
 The collector runs inside your network. It receives payloads from Otherlode
-agents over HTTP and can forward them to a backend with an API key. These
-parts are in scope:
+agents over HTTP. It can forward them to a backend, and it can send an API key
+to authenticate to the backend. These parts are in scope:
 
-- how it accepts, decodes, authenticates and forwards payloads;
-- how it reads its tokens and keys;
-- the per-IP rate limiter on the ingest routes;
-- the `/healthz` and `/metrics` routes, which need no token.
+- how it accepts, decodes, authenticates and forwards payloads
+- how it reads its tokens and keys
+- the per-IP rate limiter on the ingest routes
+- the `/healthz` and `/metrics` routes, which need no token
 
 Problems in the agent belong in the
 [otherlode-agent](https://github.com/otherlodehq/otherlode-agent)

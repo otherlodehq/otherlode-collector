@@ -54,7 +54,7 @@ func (s *TokenSet) Matches(presented string) bool {
 
 // RequireBearerToken wraps next. It rejects with 401 a request whose
 // "Authorization: Bearer <token>" header is missing or holds a token that is
-// not in tokens. The scheme name is matched without regard to case. A Store
+// not in tokens. It matches the scheme name without regard to case. A Store
 // on tokens applies from the next request.
 func RequireBearerToken(tokens *TokenSet, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
