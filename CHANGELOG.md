@@ -9,11 +9,7 @@ ends the section that the script and the workflow read.
 
 ## [Unreleased]
 
-### Changed
-
-- The collector knows the agent's `manifest_confirmed` resource attribute. With redaction on, an older collector drops the field and marks the payload `fields_stripped`. The agent sets the field after the run's first confirmed manifest, so every later payload of the run carries the mark. Deploy this collector before you deploy an agent that sends the field.
-
-## [0.1.0] - 2026-11-01
+## [0.1.0] - 2026-11-13
 
 The first release of the Otherlode collector, an optional service that receives what Otherlode agents send. It checks each payload, can redact it, and forwards it to Otherlode. It stores nothing. Docs: https://otherlode.dev/docs.
 
